@@ -15,6 +15,12 @@ enum Role {
   DIRECTOR
 }
 
+enum HealthStatus {
+  SEHAT
+  WASPADA
+  BAHAYA
+}
+
 enum EducationMethod {
   ARITHMETIC // Konvensional
   GEOMETRIC  // Inflasi Progresif
@@ -64,12 +70,12 @@ model User {
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
   // Relasi
-  unitKerja      UnitKerja @relation(fields: [unitKerjaId], references: [id])
+  unitKerja       UnitKerja @relation(fields: [unitKerjaId], references: [id])
   
   // Relasi ke Fitur
-  budgetPlans    BudgetPlan[]
+  budgetPlans     BudgetPlan[]
   financialChecks FinancialCheckup[]
-  eduPlans       EducationPlan[]
+  eduPlans        EducationPlan[]
   
   // Relasi Audit (User bisa melakukan aksi, atau menjadi target aksi direksi)
   actionsPerformed AccessLog[] @relation("ActorRelation")
@@ -89,8 +95,8 @@ model AccessLog {
   accessedAt   DateTime @default(now()) @map("accessed_at")
 
   // Relasi
-  actor        User     @relation("ActorRelation", fields: [actorId], references: [id])
-  targetUser   User?    @relation("TargetRelation", fields: [targetUserId], references: [id])
+  actor        User      @relation("ActorRelation", fields: [actorId], references: [id])
+  targetUser   User?     @relation("TargetRelation", fields: [targetUserId], references: [id])
 
   @@map("access_logs")
 }
@@ -128,23 +134,101 @@ model BudgetPlan {
   @@map("budget_plans")
 }
 
-// --- FINANCIAL ENGINE: GENERAL CHECKUP ---
-
+// --- FINANCIAL ENGINE: GRANULAR CHECKUP (UPDATED) ---
+// Mencerminkan struktur data rinci dari Frontend
 model FinancialCheckup {
-  id             String   @id @default(uuid())
-  userId         String   @map("user_id")
-  checkDate      DateTime @default(now()) @map("check_date")
-  
-  score          Int      // 0-100
-  status         String   // SEHAT, WASPADA, BAHAYA
-  
-  // Snapshot Data (Disimpan agar history tidak berubah jika profil berubah)
-  incomeSnapshot Decimal  @map("income_snapshot") @db.Decimal(15, 2)
-  expenseSnapshot Decimal @map("expense_snapshot") @db.Decimal(15, 2)
-  
-  recommendation String   @db.Text
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  checkDate DateTime @default(now()) @map("check_date")
 
-  user           User     @relation(fields: [userId], references: [id])
+  // 1. Metadata (Snapshot Profil saat checkup)
+  // Menyimpan Nama, Tgl Lahir, Agama, Suku, dll dalam JSON agar fleksibel
+  userProfile   Json @map("user_profile")
+  spouseProfile Json? @map("spouse_profile")
+
+  // 2. NERACA ASET (HARTA)
+  // A. Aset Likuid
+  assetCash          Decimal @default(0) @map("asset_cash") @db.Decimal(15, 2)
+  
+  // B. Aset Personal
+  assetHome          Decimal @default(0) @map("asset_home") @db.Decimal(15, 2)
+  assetVehicle       Decimal @default(0) @map("asset_vehicle") @db.Decimal(15, 2)
+  assetJewelry       Decimal @default(0) @map("asset_jewelry") @db.Decimal(15, 2)
+  assetAntique       Decimal @default(0) @map("asset_antique") @db.Decimal(15, 2)
+  assetPersonalOther Decimal @default(0) @map("asset_personal_other") @db.Decimal(15, 2)
+  
+  // C. Aset Investasi
+  assetInvHome       Decimal @default(0) @map("asset_inv_home") @db.Decimal(15, 2)
+  assetInvVehicle    Decimal @default(0) @map("asset_inv_vehicle") @db.Decimal(15, 2)
+  assetGold          Decimal @default(0) @map("asset_gold") @db.Decimal(15, 2)
+  assetInvAntique    Decimal @default(0) @map("asset_inv_antique") @db.Decimal(15, 2)
+  assetStocks        Decimal @default(0) @map("asset_stocks") @db.Decimal(15, 2)
+  assetMutualFund    Decimal @default(0) @map("asset_mutual_fund") @db.Decimal(15, 2)
+  assetBonds         Decimal @default(0) @map("asset_bonds") @db.Decimal(15, 2)
+  assetDeposit       Decimal @default(0) @map("asset_deposit") @db.Decimal(15, 2)
+  assetInvOther      Decimal @default(0) @map("asset_inv_other") @db.Decimal(15, 2)
+
+  // 3. NERACA UTANG (KEWAJIBAN)
+  // E. Utang Konsumtif
+  debtKPR              Decimal @default(0) @map("debt_kpr") @db.Decimal(15, 2)
+  debtKPM              Decimal @default(0) @map("debt_kpm") @db.Decimal(15, 2)
+  debtCC               Decimal @default(0) @map("debt_cc") @db.Decimal(15, 2)
+  debtCoop             Decimal @default(0) @map("debt_coop") @db.Decimal(15, 2)
+  debtConsumptiveOther Decimal @default(0) @map("debt_consumptive_other") @db.Decimal(15, 2)
+  
+  // F. Utang Usaha
+  debtBusiness         Decimal @default(0) @map("debt_business") @db.Decimal(15, 2)
+
+  // 4. ARUS KAS (CASHFLOW)
+  // I. Pemasukan (Tahunan)
+  incomeFixed    Decimal @default(0) @map("income_fixed") @db.Decimal(15, 2)
+  incomeVariable Decimal @default(0) @map("income_variable") @db.Decimal(15, 2)
+
+  // PENGELUARAN (Menyimpan input RAW dari user, logika tahunan/bulanan diurus Logic)
+  
+  // K. Cicilan Utang
+  installmentKPR              Decimal @default(0) @map("installment_kpr") @db.Decimal(15, 2)
+  installmentKPM              Decimal @default(0) @map("installment_kpm") @db.Decimal(15, 2)
+  installmentCC               Decimal @default(0) @map("installment_cc") @db.Decimal(15, 2)
+  installmentCoop             Decimal @default(0) @map("installment_coop") @db.Decimal(15, 2)
+  installmentConsumptiveOther Decimal @default(0) @map("installment_consumptive_other") @db.Decimal(15, 2)
+  installmentBusiness         Decimal @default(0) @map("installment_business") @db.Decimal(15, 2)
+
+  // L. Premi Asuransi
+  insuranceLife    Decimal @default(0) @map("insurance_life") @db.Decimal(15, 2)
+  insuranceHealth  Decimal @default(0) @map("insurance_health") @db.Decimal(15, 2)
+  insuranceHome    Decimal @default(0) @map("insurance_home") @db.Decimal(15, 2)
+  insuranceVehicle Decimal @default(0) @map("insurance_vehicle") @db.Decimal(15, 2)
+  insuranceBPJS    Decimal @default(0) @map("insurance_bpjs") @db.Decimal(15, 2)
+  insuranceOther   Decimal @default(0) @map("insurance_other") @db.Decimal(15, 2)
+
+  // M. Tabungan/Investasi
+  savingEducation  Decimal @default(0) @map("saving_education") @db.Decimal(15, 2)
+  savingRetirement Decimal @default(0) @map("saving_retirement") @db.Decimal(15, 2)
+  savingPilgrimage Decimal @default(0) @map("saving_pilgrimage") @db.Decimal(15, 2)
+  savingHoliday    Decimal @default(0) @map("saving_holiday") @db.Decimal(15, 2)
+  savingEmergency  Decimal @default(0) @map("saving_emergency") @db.Decimal(15, 2)
+  savingOther      Decimal @default(0) @map("saving_other") @db.Decimal(15, 2)
+
+  // N. Belanja Keluarga
+  expenseFood          Decimal @default(0) @map("expense_food") @db.Decimal(15, 2)
+  expenseSchool        Decimal @default(0) @map("expense_school") @db.Decimal(15, 2)
+  expenseTransport     Decimal @default(0) @map("expense_transport") @db.Decimal(15, 2)
+  expenseCommunication Decimal @default(0) @map("expense_communication") @db.Decimal(15, 2)
+  expenseHelpers       Decimal @default(0) @map("expense_helpers") @db.Decimal(15, 2)
+  expenseTax           Decimal @default(0) @map("expense_tax") @db.Decimal(15, 2)
+  expenseLifestyle     Decimal @default(0) @map("expense_lifestyle") @db.Decimal(15, 2)
+
+  // --- HASIL ANALISA (Computed by Backend Logic) ---
+  totalNetWorth  Decimal      @default(0) @map("total_net_worth") @db.Decimal(15, 2) // H
+  surplusDeficit Decimal      @default(0) @map("surplus_deficit") @db.Decimal(15, 2) // Q
+  healthScore    Int          @default(0) @map("health_score")
+  status         HealthStatus @default(BAHAYA)
+  
+  // Menyimpan detail 8 rasio (value, benchmark, status per rasio) sebagai JSON
+  ratiosDetails  Json         @map("ratios_details") 
+
+  user User @relation(fields: [userId], references: [id])
 
   @@map("financial_checkups")
 }

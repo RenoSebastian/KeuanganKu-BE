@@ -1,32 +1,65 @@
-import { Body, Controller, Get, Post, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Body,
+  UseGuards,
+  Req,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
-import { GetUser } from '../../common/decorators/get-user.decorator';
 import { FinancialService } from './financial.service';
 import { CreateBudgetDto } from './dto/create-budget.dto';
+import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
+import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard';
+// import { RolesGuard } from '../../common/guards/roles.guard'; // Opsional jika ada role
 
 @ApiTags('Financial Engine')
-@UseGuards(AuthGuard('jwt')) // Wajib Login
+@UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 @Controller('financial')
 export class FinancialController {
-  constructor(private financialService: FinancialService) {}
+  constructor(private readonly financialService: FinancialService) {}
 
-  @Post('budget')
-  @ApiOperation({ summary: 'Simpan Anggaran & Jalankan Analisa Otomatis' })
-  createBudget(@GetUser('id') userId: string, @Body() dto: CreateBudgetDto) {
-    return this.financialService.createBudget(userId, dto);
-  }
+  // ===========================================================================
+  // MODULE 1: FINANCIAL CHECKUP (MEDICAL CHECK)
+  // ===========================================================================
 
-  @Get('budget/history')
-  @ApiOperation({ summary: 'Lihat riwayat anggaran user' })
-  getBudgets(@GetUser('id') userId: string) {
-    return this.financialService.getMyBudgets(userId);
+  @Post('checkup')
+  @ApiOperation({ summary: 'Simpan Data Checkup & Jalankan Analisa' })
+  async createCheckup(@Req() req, @Body() dto: CreateFinancialRecordDto) {
+    const userId = req.user.id;
+    return this.financialService.createCheckup(userId, dto);
   }
 
   @Get('checkup/latest')
-  @ApiOperation({ summary: 'Ambil skor kesehatan terakhir untuk Dashboard' })
-  getLatestCheckup(@GetUser('id') userId: string) {
+  @ApiOperation({ summary: 'Ambil data checkup terakhir' })
+  async getLatestCheckup(@Req() req) {
+    const userId = req.user.id;
     return this.financialService.getLatestCheckup(userId);
+  }
+
+  @Get('checkup/history')
+  @ApiOperation({ summary: 'Ambil riwayat checkup user' })
+  async getCheckupHistory(@Req() req) {
+    const userId = req.user.id;
+    return this.financialService.getCheckupHistory(userId);
+  }
+
+  // ===========================================================================
+  // MODULE 2: BUDGET PLAN (MONTHLY BUDGETING)
+  // ===========================================================================
+
+  @Post('budget')
+  @ApiOperation({ summary: 'Simpan Anggaran Bulanan' })
+  async createBudget(@Req() req, @Body() dto: CreateBudgetDto) {
+    const userId = req.user.id;
+    return this.financialService.createBudget(userId, dto);
+  }
+
+  @Get('budget/history') // Endpoint existing, kita pertahankan
+  @ApiOperation({ summary: 'Lihat riwayat anggaran user' })
+  async getBudgets(@Req() req) {
+    const userId = req.user.id;
+    return this.financialService.getMyBudgets(userId);
   }
 }
