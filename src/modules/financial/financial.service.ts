@@ -2,8 +2,18 @@ import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
-import { calculateFinancialHealth } from './utils/financial-math.util'; // Kita buat setelah ini
-import { HealthStatus } from '@prisma/client';
+import { CreatePensionDto } from './dto/create-pension.dto';
+import { CreateInsuranceDto } from './dto/create-insurance.dto';
+import { CreateGoalDto } from './dto/create-goal.dto';
+import { CreateEducationPlanDto } from './dto/create-education.dto';
+import { 
+  calculateFinancialHealth,
+  calculatePensionPlan,
+  calculateInsuranceNeeds,
+  calculateGoalPlan,
+  calculateEducationPlan
+} from './utils/financial-math.util';
+import { HealthStatus, InsuranceType } from '@prisma/client';
 
 @Injectable()
 export class FinancialService {
@@ -14,41 +24,25 @@ export class FinancialService {
   // ===========================================================================
 
   async createCheckup(userId: string, dto: CreateFinancialRecordDto) {
-    // 1. Hitung Ulang (Re-calculate) di Backend
-    // Kita tidak percaya 100% data olahan FE. Raw data dari DTO dihitung ulang
-    // menggunakan logic engine yang sama dengan FE untuk konsistensi.
+    // 1. Hitung Ulang (Re-calculate)
     const analysis = calculateFinancialHealth(dto);
 
-    // 2. Mapping Status String ke Enum Prisma
-    // FE mengirim string "SEHAT" | "WASPADA" | "BAHAYA", kita cast ke Enum Prisma
+    // 2. Mapping Status
     let dbStatus: HealthStatus = HealthStatus.BAHAYA;
     if (analysis.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
     else if (analysis.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
 
     // 3. Simpan ke Database
-    // Kita menyimpan Input Mentah (DTO) + Hasil Analisa (Analysis)
     return this.prisma.financialCheckup.create({
       data: {
         userId,
-        
-        // --- A. SIMPAN DATA INPUT MENTAH (SPREAD DTO) ---
-        // Karena struktur DTO dan Prisma Model sudah dibuat mirroring 1:1,
-        // kita bisa menggunakan spread operator untuk efisiensi code.
-        // Prisma akan otomatis memetakan field seperti assetCash, debtKPR, dll.
         ...dto,
-
-        // Khusus Field JSON (Profil), kita pastikan casting-nya aman
         userProfile: dto.userProfile as any,
         spouseProfile: dto.spouseProfile ? (dto.spouseProfile as any) : undefined,
-
-        // --- B. SIMPAN HASIL PERHITUNGAN BACKEND ---
         totalNetWorth: analysis.netWorth,
         surplusDeficit: analysis.surplusDeficit,
         healthScore: analysis.score,
         status: dbStatus,
-        
-        // Detail 8 Rasio disimpan sebagai JSON agar frontend bisa render ulang
-        // tanpa perlu menghitung ulang jika hanya view history
         ratiosDetails: analysis.ratios as any, 
       },
     });
@@ -70,17 +64,16 @@ export class FinancialService {
         checkDate: true,
         healthScore: true,
         status: true,
-        totalNetWorth: true, // Untuk grafik history kekayaan
+        totalNetWorth: true,
       },
     });
   }
 
   // ===========================================================================
-  // MODULE 2: BUDGET PLAN (The "Monthly" Plan) - KEEP EXISTING LOGIC
+  // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
   // ===========================================================================
   
   async createBudget(userId: string, dto: CreateBudgetDto) {
-    // 1. Hitung Total & Balance
     const totalIncome = dto.fixedIncome + dto.variableIncome;
     const totalExpense =
       dto.productiveDebt +
@@ -91,14 +84,11 @@ export class FinancialService {
     
     const balance = totalIncome - totalExpense;
 
-    // 2. Tentukan Status Cashflow Dasar
     let cashflowStatus = 'BALANCED';
     if (balance < 0) cashflowStatus = 'DEFISIT';
     if (balance > 0) cashflowStatus = 'SURPLUS';
 
-    // 3. Simpan Rincian Anggaran ke DB
     return this.prisma.$transaction(async (tx) => {
-      // A. Simpan Budget Plan
       const budget = await tx.budgetPlan.create({
         data: {
           userId,
@@ -118,13 +108,7 @@ export class FinancialService {
         },
       });
 
-      // B. Jalankan Analisa Kesehatan Sederhana (Khusus Budgeting)
       const analysis = this.analyzeBudgetHealth(dto);
-
-      // Note: Di fitur Budgeting, kita mungkin tidak perlu simpan ke tabel FinancialCheckup
-      // karena FinancialCheckup sekarang strukturnya sangat detail (Medical Check).
-      // Budgeting lebih ke operational bulanan. 
-      
       return { budget, analysis };
     });
   }
@@ -137,35 +121,147 @@ export class FinancialService {
     });
   }
 
-  // --- LOGIKA 5 POS ANGGARAN (Simple Logic for Budgeting) ---
+  // ===========================================================================
+  // MODULE 3: CALCULATOR - PENSION PLAN (NEW)
+  // ===========================================================================
+
+  async calculateAndSavePension(userId: string, dto: CreatePensionDto) {
+    // 1. Hitung Logika Pensiun (Future Value & PMT)
+    const result = calculatePensionPlan(dto);
+
+    // 2. Simpan Rencana ke Database
+    const plan = await this.prisma.pensionPlan.create({
+      data: {
+        userId,
+        currentAge: dto.currentAge,
+        retirementAge: dto.retirementAge,
+        lifeExpectancy: dto.lifeExpectancy,
+        currentExpense: dto.currentExpense,
+        currentSaving: dto.currentSaving,
+        inflationRate: dto.inflationRate,
+        returnRate: dto.returnRate,
+        
+        // Hasil Perhitungan
+        totalFundNeeded: result.totalFundNeeded,
+        monthlySaving: result.monthlySaving,
+      },
+    });
+
+    return { plan, calculation: result };
+  }
+
+  // ===========================================================================
+  // MODULE 4: CALCULATOR - INSURANCE PLAN (NEW)
+  // ===========================================================================
+
+  async calculateAndSaveInsurance(userId: string, dto: CreateInsuranceDto) {
+    // 1. Hitung Kebutuhan UP
+    const result = calculateInsuranceNeeds(dto);
+
+    // 2. Simpan Rencana
+    const plan = await this.prisma.insurancePlan.create({
+      data: {
+        userId,
+        type: dto.type,
+        dependentCount: dto.dependentCount,
+        monthlyExpense: dto.monthlyExpense,
+        existingDebt: dto.existingDebt,
+        existingCoverage: dto.existingCoverage,
+        protectionDuration: dto.protectionDuration,
+
+        // Hasil Perhitungan
+        coverageNeeded: result.totalNeeded,
+        recommendation: result.recommendation,
+      },
+    });
+
+    return { plan, calculation: result };
+  }
+
+  // ===========================================================================
+  // MODULE 5: CALCULATOR - GOAL PLAN (NEW)
+  // ===========================================================================
+
+  async calculateAndSaveGoal(userId: string, dto: CreateGoalDto) {
+    // 1. Hitung PMT Goal
+    const result = calculateGoalPlan(dto);
+
+    // 2. Simpan Rencana
+    const plan = await this.prisma.goalPlan.create({
+      data: {
+        userId,
+        goalName: dto.goalName,
+        targetAmount: dto.targetAmount,
+        targetDate: new Date(dto.targetDate),
+        inflationRate: dto.inflationRate,
+        returnRate: dto.returnRate,
+
+        // Hasil Perhitungan
+        futureValue: result.futureTargetAmount,
+        monthlySaving: result.monthlySaving,
+      },
+    });
+
+    return { plan, calculation: result };
+  }
+
+  // ===========================================================================
+  // MODULE 6: CALCULATOR - EDUCATION PLAN (NEW & COMPLEX)
+  // ===========================================================================
+
+  async calculateAndSaveEducation(userId: string, dto: CreateEducationPlanDto) {
+    // 1. Hitung FV & PMT Pendidikan (Logic Paling Rumit)
+    const result = calculateEducationPlan(dto);
+
+    // 2. Simpan Parent Plan & Child Stages (Transaction)
+    const savedData = await this.prisma.$transaction(async (tx) => {
+      // A. Create Header Plan
+      const plan = await tx.educationPlan.create({
+        data: {
+          userId,
+          childName: dto.childName,
+          childDob: new Date(dto.childDob),
+          inflationRate: dto.inflationRate,
+          returnRate: dto.returnRate,
+          method: dto.method,
+        },
+      });
+
+      // B. Create Detail Stages (TK, SD, SMP...)
+      // Kita map hasil perhitungan utils ke struktur database
+      const stagesData = result.stagesDetail.map((stage) => ({
+        planId: plan.id,
+        level: stage.level,
+        costType: stage.costType,
+        currentCost: stage.currentCost,
+        futureCost: stage.calculatedFutureCost, // Hasil hitungan FV
+        yearsToStart: stage.yearsToStart,
+        monthlySaving: result.monthlySaving, // PMT (disamakan rata-rata atau bisa per stage)
+      }));
+
+      await tx.educationStage.createMany({
+        data: stagesData,
+      });
+
+      return plan;
+    });
+
+    return { plan: savedData, calculation: result };
+  }
+
+
+  // --- PRIVATE HELPERS ---
   private analyzeBudgetHealth(dto: CreateBudgetDto) {
     let score = 100;
     const violations: string[] = [];
     const base = Number(dto.fixedIncome); 
 
-    if (base === 0) {
-      return { score: 0, status: 'BAHAYA', recommendation: 'Wajib input Gaji Tetap untuk analisa.' };
-    }
+    if (base === 0) return { score: 0, status: 'BAHAYA', recommendation: 'Wajib input Gaji Tetap.' };
 
-    if (Number(dto.productiveDebt) > base * 0.2) {
-      score -= 10;
-      violations.push('Hutang Produktif > 20%');
-    }
-
-    if (Number(dto.consumptiveDebt) > base * 0.15) {
-      score -= 20;
-      violations.push('Hutang Konsumtif > 15%');
-    }
-
-    if (Number(dto.insurance) < base * 0.1) {
-      score -= 10;
-      violations.push('Asuransi < 10%');
-    }
-
-    if (Number(dto.saving) < base * 0.1) {
-      score -= 20;
-      violations.push('Tabungan < 10%');
-    }
+    if (Number(dto.productiveDebt) > base * 0.2) { score -= 10; violations.push('Hutang Produktif > 20%'); }
+    if (Number(dto.consumptiveDebt) > base * 0.15) { score -= 20; violations.push('Hutang Konsumtif > 15%'); }
+    if (Number(dto.insurance) < base * 0.1) { score -= 10; violations.push('Asuransi < 10%'); }
+    if (Number(dto.saving) < base * 0.1) { score -= 20; violations.push('Tabungan < 10%'); }
 
     const totalExpense = Number(dto.productiveDebt) + Number(dto.consumptiveDebt) + Number(dto.insurance) + Number(dto.saving) + Number(dto.livingCost);
     if (totalExpense > (Number(dto.fixedIncome) + Number(dto.variableIncome))) {
@@ -180,9 +276,7 @@ export class FinancialService {
     if (score < 60) status = 'BAHAYA';
 
     let recommendation = 'Anggaran Sehat.';
-    if (violations.length > 0) {
-      recommendation = `Perbaiki: ${violations.join(', ')}.`;
-    }
+    if (violations.length > 0) recommendation = `Perbaiki: ${violations.join(', ')}.`;
 
     return { score, status, recommendation };
   }

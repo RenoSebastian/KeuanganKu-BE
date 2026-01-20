@@ -1,4 +1,8 @@
 import { CreateFinancialRecordDto } from '../dto/create-financial-record.dto';
+import { CreatePensionDto } from '../dto/create-pension.dto';
+import { CreateInsuranceDto } from '../dto/create-insurance.dto';
+import { CreateGoalDto } from '../dto/create-goal.dto';
+import { CreateEducationPlanDto } from '../dto/create-education.dto';
 
 // --- INTERFACES (Mirroring FE logic) ---
 export interface RatioDetail {
@@ -21,8 +25,7 @@ export interface HealthAnalysisResult {
 }
 
 // ============================================================================
-// FINANCIAL HEALTH CHECK UP ENGINE (BACKEND VERSION)
-// Logic by: Formula Financial Health Check Up Document (2026)
+// 1. FINANCIAL HEALTH CHECK UP ENGINE (EXISTING)
 // ============================================================================
 
 export const calculateFinancialHealth = (
@@ -143,7 +146,6 @@ export const calculateFinancialHealth = (
   let passedRatios = 0;
 
   // #1. RASIO DANA DARURAT (A / P)
-  // Benchmark: 3 - 6 kali
   const r1 = monthlyExpense > 0 ? totalLiquid / monthlyExpense : 0;
   let s1: any = 'RED';
   let rec1 = 'Dana darurat sangat kurang (< 3 bulan). Risiko tinggi!';
@@ -174,7 +176,6 @@ export const calculateFinancialHealth = (
   });
 
   // #2. RASIO LIKUIDITAS vs KEKAYAAN BERSIH (A / H)
-  // Benchmark: 15% - 20%
   const r2 = netWorth > 0 ? (totalLiquid / netWorth) * 100 : 0;
   let s2: any = 'RED';
   let rec2 = 'Aset likuid terlalu sedikit (< 15%). Susah cairkan uang.';
@@ -204,7 +205,6 @@ export const calculateFinancialHealth = (
   });
 
   // #3. RASIO TABUNGAN (M / I)
-  // Benchmark: Min 10%
   const r3 =
     totalAnnualIncome > 0
       ? (totalAnnualSaving / totalAnnualIncome) * 100
@@ -238,7 +238,6 @@ export const calculateFinancialHealth = (
   });
 
   // #4. RASIO UTANG vs ASET (G / D)
-  // Benchmark: Maks 50%
   const r4 = totalAssets > 0 ? (totalDebt / totalAssets) * 100 : 0;
   let s4: any = 'RED';
   let rec4 = 'Bahaya! Utang > 50% Aset. Risiko kebangkrutan.';
@@ -268,7 +267,6 @@ export const calculateFinancialHealth = (
   });
 
   // #5. RASIO CICILAN UTANG (K / I)
-  // Benchmark: Maks 35%
   const r5 =
     totalAnnualIncome > 0
       ? (totalAnnualInstallment / totalAnnualIncome) * 100
@@ -301,7 +299,6 @@ export const calculateFinancialHealth = (
   });
 
   // #6. RASIO CICILAN KONSUMTIF (J / I)
-  // Benchmark: Maks 15%
   const r6 =
     totalAnnualIncome > 0
       ? (totalConsumptiveInstallment / totalAnnualIncome) * 100
@@ -334,7 +331,6 @@ export const calculateFinancialHealth = (
   });
 
   // #7. RASIO ASET INVESTASI vs KEKAYAAN BERSIH (C / H)
-  // Benchmark: Min 50%
   const r7 = netWorth > 0 ? (totalInvestment / netWorth) * 100 : 0;
   let s7: any = 'RED';
   let rec7 = 'Aset mayoritas konsumtif/mati. Tingkatkan investasi.';
@@ -364,7 +360,6 @@ export const calculateFinancialHealth = (
   });
 
   // #8. RASIO SOLVABILITAS (H / D)
-  // Benchmark: Min 50%
   const r8 = totalAssets > 0 ? (netWorth / totalAssets) * 100 : 0;
   let s8: any = 'RED';
   let rec8 = 'Risiko kebangkrutan tinggi! Modal sendiri < 25%.';
@@ -394,7 +389,6 @@ export const calculateFinancialHealth = (
   });
 
   // --- FINAL SCORE ---
-  // Simple Score: Persentase rasio yang lulus (partial credit bisa ditambahkan jika mau lebih kompleks)
   const score = Math.round((passedRatios / 8) * 100);
 
   let globalStatus: 'SEHAT' | 'WASPADA' | 'BAHAYA' = 'BAHAYA';
@@ -409,4 +403,223 @@ export const calculateFinancialHealth = (
     surplusDeficit,
     generatedAt: new Date().toISOString(),
   };
+};
+
+// ============================================================================
+// 2. TVM (TIME VALUE OF MONEY) CORE HELPERS
+// ============================================================================
+
+/**
+ * Menghitung Future Value (Nilai Masa Depan)
+ * @param rate Rate per periode (bukan persen, misal 10% = 0.1)
+ * @param nper Jumlah periode
+ * @param pmt Pembayaran per periode (negatif jika keluar uang)
+ * @param pv Nilai sekarang (negatif jika keluar uang)
+ * @param type 0 = akhir periode, 1 = awal periode
+ */
+export const calculateFV = (rate: number, nper: number, pmt: number, pv: number, type: 0 | 1 = 0) => {
+    if (rate === 0) return -(pv + pmt * nper);
+    const pow = Math.pow(1 + rate, nper);
+    return -((pv * pow) + (pmt * (1 + rate * type) * (pow - 1) / rate));
+};
+
+/**
+ * Menghitung PMT (Anuitas / Tabungan Rutin)
+ * @param rate Rate per periode (bukan persen, misal 0.08/12)
+ * @param nper Jumlah periode (bulan)
+ * @param pv Nilai sekarang (modal awal)
+ * @param fv Nilai masa depan yang diinginkan
+ * @param type 0 = akhir periode, 1 = awal periode
+ */
+export const calculatePMT = (rate: number, nper: number, pv: number, fv: number = 0, type: 0 | 1 = 0) => {
+    if (rate === 0) return -(pv + fv) / nper;
+    const pvif = Math.pow(1 + rate, nper);
+    return -(rate * (fv + (pv * pvif))) / ((pvif - 1) * (1 + rate * type));
+};
+
+// ============================================================================
+// 3. CALCULATOR MODULES (Logic for Pension, Education, Insurance, Goals)
+// ============================================================================
+
+/**
+ * LOGIKA: DANA PENSIUN
+ * Menggunakan metode "Expense Replacement" yang disesuaikan dengan 4% Rule (Rule of 25)
+ * untuk menentukan target dana (Nest Egg).
+ */
+export const calculatePensionPlan = (data: CreatePensionDto) => {
+    const { currentAge, retirementAge, currentExpense, currentSaving = 0, inflationRate = 5, returnRate = 8 } = data;
+    
+    // 1. Hitung durasi menabung
+    const yearsToRetire = retirementAge - currentAge;
+    const monthsToRetire = yearsToRetire * 12;
+
+    if (yearsToRetire <= 0) {
+        throw new Error("Usia pensiun harus lebih besar dari usia sekarang");
+    }
+
+    // 2. Hitung Biaya Hidup di Masa Depan (Future Value of Expense)
+    // Rumus: Expense * (1 + inflation)^years
+    const futureMonthlyExpense = currentExpense * Math.pow(1 + (inflationRate / 100), yearsToRetire);
+
+    // 3. Hitung Total Dana Pensiun yang Dibutuhkan (Nest Egg)
+    // Menggunakan Rule of 300 (25 tahun x 12 bulan) alias 4% Rule yang lebih konservatif
+    // Artinya: Dana harus cukup untuk ditarik 4% per tahun selamanya (atau 25 tahun masa pensiun)
+    const totalFundNeeded = futureMonthlyExpense * 300; 
+
+    // 4. Hitung Tabungan Bulanan yang Diperlukan (PMT)
+    // Rate investasi bulanan
+    const monthlyRate = (returnRate / 100) / 12;
+    
+    // PMT Calculation
+    // PV = Current Saving (Negatif karena uang sudah ada/ditanam)
+    // FV = Total Fund Needed (Positif karena ini target kita)
+    const monthlySaving = calculatePMT(
+        monthlyRate, 
+        monthsToRetire, 
+        -currentSaving, 
+        totalFundNeeded
+    );
+
+    return {
+        yearsToRetire,
+        futureMonthlyExpense,
+        totalFundNeeded, // FV Target
+        monthlySaving // PMT result
+    };
+};
+
+/**
+ * LOGIKA: ASURANSI JIWA (UP IDEAL)
+ * Menggunakan "Income Replacement Method" + Pelunasan Hutang
+ */
+export const calculateInsuranceNeeds = (data: CreateInsuranceDto) => {
+    const { monthlyExpense, dependentCount, existingDebt = 0, existingCoverage = 0, protectionDuration = 10 } = data;
+
+    // 1. Income Replacement (Penggantian Nafkah)
+    // Berapa uang yang dibutuhkan keluarga untuk bertahan hidup selama X tahun
+    // jika pencari nafkah meninggal dunia.
+    // Rumus: Pengeluaran Bulanan x 12 x Durasi Proteksi
+    const incomeReplacementValue = monthlyExpense * 12 * protectionDuration;
+
+    // 2. Debt Clearance (Pelunasan Hutang)
+    // Hutang harus lunas agar tidak membebani ahli waris
+    const debtClearanceValue = existingDebt;
+
+    // 3. Total Kebutuhan UP (Uang Pertanggungan)
+    const totalNeeded = incomeReplacementValue + debtClearanceValue;
+
+    // 4. Gap (Kekurangan)
+    // Jika sudah punya asuransi dari kantor/pribadi, kurangi dari total kebutuhan
+    const coverageGap = Math.max(0, totalNeeded - existingCoverage);
+
+    let recommendation = "";
+    if (coverageGap <= 0) {
+        recommendation = "Selamat! Anda sudah memiliki perlindungan asuransi yang cukup (Overinsured).";
+    } else {
+        recommendation = `Anda membutuhkan tambahan Uang Pertanggungan sebesar Rp ${coverageGap.toLocaleString('id-ID')}. Disarankan mengambil Asuransi Jiwa Berjangka (Term Life) karena preminya lebih terjangkau.`;
+    }
+
+    return {
+        totalNeeded,
+        coverageGap,
+        recommendation
+    };
+};
+
+/**
+ * LOGIKA: GOALS (TUJUAN KEUANGAN)
+ * Menghitung kebutuhan menabung bulanan untuk mencapai target dana di masa depan.
+ */
+export const calculateGoalPlan = (data: CreateGoalDto) => {
+    const { targetAmount, targetDate, inflationRate = 5, returnRate = 6 } = data;
+
+    const now = new Date();
+    const target = new Date(targetDate);
+    
+    // 1. Hitung durasi bulan (nper)
+    const monthsDuration = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+
+    if (monthsDuration <= 0) {
+        throw new Error("Target waktu harus di masa depan");
+    }
+
+    const yearsDuration = monthsDuration / 12;
+
+    // 2. Hitung Nilai Masa Depan Target (FV akibat Inflasi)
+    // Jika beli rumah 5 tahun lagi, harganya pasti naik kena inflasi
+    const futureTargetAmount = targetAmount * Math.pow(1 + (inflationRate / 100), yearsDuration);
+
+    // 3. Hitung Tabungan Bulanan (PMT)
+    const monthlyRate = (returnRate / 100) / 12;
+    
+    const monthlySaving = calculatePMT(
+        monthlyRate, 
+        monthsDuration, 
+        0, // Mulai dari 0
+        futureTargetAmount
+    );
+
+    return {
+        monthsDuration,
+        futureTargetAmount, // Nilai target setelah inflasi
+        monthlySaving
+    };
+};
+
+/**
+ * LOGIKA: DANA PENDIDIKAN
+ * Kompleksitas tinggi: Menghitung FV setiap jenjang sekolah lalu di-sum.
+ */
+export const calculateEducationPlan = (data: CreateEducationPlanDto) => {
+    const { childDob, inflationRate = 10, returnRate = 12, stages } = data;
+    const dob = new Date(childDob);
+    const now = new Date();
+    
+    // Hitung Usia Anak (dalam tahun float)
+    const ageInMilliseconds = now.getTime() - dob.getTime();
+    const currentAge = ageInMilliseconds / (1000 * 60 * 60 * 24 * 365.25);
+
+    let totalFutureCost = 0;
+    const stagesDetail: Array<typeof stages[0] & { calculatedFutureCost: number }> = [];
+
+    // Loop setiap jenjang sekolah (TK, SD, SMP, SMA, PT)
+    for (const stage of stages) {
+        // 1. Hitung kapan masuk sekolah (Time to Start)
+        // yearsToStart biasanya dikirim dari FE (misal masuk TK umur 4, sekarang umur 1, berarti n=3)
+        // Jika yearsToStart negatif, anggap 0 (sudah lewat/sedang berjalan)
+        const yearsToStart = Math.max(0, stage.yearsToStart);
+        
+        // 2. Hitung FV Biaya Sekolah (Inflasi)
+        // Biaya Nanti = Biaya Sekarang * (1 + inflasi)^tahun
+        const futureCost = stage.currentCost * Math.pow(1 + (inflationRate / 100), yearsToStart);
+        
+        totalFutureCost += futureCost;
+
+        stagesDetail.push({
+            ...stage,
+            calculatedFutureCost: futureCost
+        });
+    }
+
+    // 3. Hitung Tabungan Bulanan (PMT)
+    // Kita asumsikan target menabung adalah sampai anak masuk KULIAH (atau jenjang terakhir).
+    // Tapi untuk simplifikasi yang aman: Kita hitung PMT agar Total Dana terkumpul 
+    // saat anak masuk jenjang PERTAMA yang dipilih? Tidak, itu terlalu berat.
+    // Strategi: Hitung PMT rata-rata untuk mencapai Total Future Cost dalam rentang waktu terpanjang (Kuliah).
+    
+    // Cari stage dengan yearsToStart paling lama (biasanya PT)
+    const maxYears = Math.max(...stages.map(s => s.yearsToStart));
+    const monthsToSave = maxYears * 12;
+    
+    let monthlySaving = 0;
+    if (monthsToSave > 0) {
+        const monthlyRate = (returnRate / 100) / 12;
+        monthlySaving = calculatePMT(monthlyRate, monthsToSave, 0, totalFutureCost);
+    }
+
+    return {
+        totalFutureCost,
+        monthlySaving,
+        stagesDetail
+    };
 };
