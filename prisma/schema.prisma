@@ -1,0 +1,189 @@
+// --- KONFIGURASI ---
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- ENUMS (Standarisasi Data) ---
+enum Role {
+  USER
+  ADMIN
+  DIRECTOR
+}
+
+enum EducationMethod {
+  ARITHMETIC // Konvensional
+  GEOMETRIC  // Inflasi Progresif
+}
+
+enum SchoolLevel {
+  TK
+  SD
+  SMP
+  SMA
+  PT
+}
+
+enum CostType {
+  ENTRY  // Uang Pangkal
+  ANNUAL // SPP Tahunan
+}
+
+// --- MASTER DATA ---
+
+model UnitKerja {
+  id        String   @id @default(uuid())
+  kodeUnit  String   @unique @map("kode_unit") // e.g. "IT-01"
+  namaUnit  String   @map("nama_unit")          // e.g. "Divisi TI"
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relasi
+  users     User[]
+
+  @@map("unit_kerja")
+}
+
+// --- USER MANAGEMENT & SECURITY ---
+
+model User {
+  id             String    @id @default(uuid())
+  unitKerjaId    String    @map("unit_kerja_id")
+  nip            String    @unique
+  email          String    @unique
+  passwordHash   String    @map("password_hash")
+  fullName       String    @map("full_name")
+  dateOfBirth    DateTime  @map("date_of_birth") // Penting untuk pensiun
+  dependentCount Int       @default(0) @map("dependent_count")
+  role           Role      @default(USER)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  // Relasi
+  unitKerja      UnitKerja @relation(fields: [unitKerjaId], references: [id])
+  
+  // Relasi ke Fitur
+  budgetPlans    BudgetPlan[]
+  financialChecks FinancialCheckup[]
+  eduPlans       EducationPlan[]
+  
+  // Relasi Audit (User bisa melakukan aksi, atau menjadi target aksi direksi)
+  actionsPerformed AccessLog[] @relation("ActorRelation")
+  actionsTargeted  AccessLog[] @relation("TargetRelation")
+
+  @@map("users")
+}
+
+// --- AUDIT TRAIL (Untuk Dashboard Direksi) ---
+
+model AccessLog {
+  id           String   @id @default(uuid())
+  actorId      String   @map("actor_id") // Siapa yang melihat? (Direksi)
+  targetUserId String?  @map("target_user_id") // Data siapa? (Karyawan)
+  action       String   // VIEW_DETAIL, DOWNLOAD_PDF, UPDATE_PROFILE
+  metadata     Json?    // Detail tambahan (IP Address, Browser, dll)
+  accessedAt   DateTime @default(now()) @map("accessed_at")
+
+  // Relasi
+  actor        User     @relation("ActorRelation", fields: [actorId], references: [id])
+  targetUser   User?    @relation("TargetRelation", fields: [targetUserId], references: [id])
+
+  @@map("access_logs")
+}
+
+// --- FINANCIAL ENGINE: 5 POS ANGGARAN ---
+
+model BudgetPlan {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  month           Int      // 1-12
+  year            Int      // 2025
+  
+  // Income
+  fixedIncome     Decimal  @map("fixed_income")     @db.Decimal(15, 2)
+  variableIncome  Decimal  @default(0) @map("variable_income") @db.Decimal(15, 2)
+
+  // 5 Pos Pengeluaran (Sesuai Rules yang kita bahas di FE)
+  productiveDebt  Decimal  @default(0) @map("productive_debt") @db.Decimal(15, 2)
+  consumptiveDebt Decimal  @default(0) @map("consumptive_debt") @db.Decimal(15, 2)
+  insurance       Decimal  @default(0) @map("insurance")       @db.Decimal(15, 2)
+  saving          Decimal  @default(0) @map("saving")          @db.Decimal(15, 2)
+  livingCost      Decimal  @default(0) @map("living_cost")     @db.Decimal(15, 2)
+
+  // Summary Logic
+  totalIncome     Decimal  @map("total_income") @db.Decimal(15, 2)
+  totalExpense    Decimal  @map("total_expense") @db.Decimal(15, 2)
+  balance         Decimal  @map("balance") @db.Decimal(15, 2)
+  status          String   // "DEFISIT" | "SURPLUS" | "BALANCED"
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@map("budget_plans")
+}
+
+// --- FINANCIAL ENGINE: GENERAL CHECKUP ---
+
+model FinancialCheckup {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  checkDate      DateTime @default(now()) @map("check_date")
+  
+  score          Int      // 0-100
+  status         String   // SEHAT, WASPADA, BAHAYA
+  
+  // Snapshot Data (Disimpan agar history tidak berubah jika profil berubah)
+  incomeSnapshot Decimal  @map("income_snapshot") @db.Decimal(15, 2)
+  expenseSnapshot Decimal @map("expense_snapshot") @db.Decimal(15, 2)
+  
+  recommendation String   @db.Text
+
+  user           User     @relation(fields: [userId], references: [id])
+
+  @@map("financial_checkups")
+}
+
+// --- FINANCIAL ENGINE: EDUCATION PLANNING ---
+
+model EducationPlan {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  childName      String   @map("child_name")
+  childDob       DateTime @map("child_dob")
+  
+  // Assumptions
+  inflationRate  Decimal  @default(10.0) @map("inflation_rate") @db.Decimal(5, 2) // Default 10%
+  returnRate     Decimal  @default(12.0) @map("return_rate") @db.Decimal(5, 2) // Asumsi Investasi
+  method         EducationMethod @default(GEOMETRIC)
+
+  createdAt      DateTime @default(now()) @map("created_at")
+  
+  // Relasi
+  user           User     @relation(fields: [userId], references: [id])
+  stages         EducationStage[]
+
+  @@map("education_plans")
+}
+
+model EducationStage {
+  id             String   @id @default(uuid())
+  planId         String   @map("plan_id")
+  level          SchoolLevel
+  costType       CostType @map("cost_type") // Uang Pangkal vs Tahunan
+  
+  currentCost    Decimal  @map("current_cost") @db.Decimal(15, 2) // Biaya Sekarang (PV)
+  futureCost     Decimal  @map("future_cost") @db.Decimal(15, 2)  // Biaya Nanti (FV)
+  
+  yearsToStart   Int      @map("years_to_start") // n tahun lagi
+  monthlySaving  Decimal  @map("monthly_saving") @db.Decimal(15, 2) // PMT (Tabungan bulanan)
+
+  plan           EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@map("education_stages")
+}
