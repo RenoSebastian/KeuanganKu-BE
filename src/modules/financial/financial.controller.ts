@@ -111,6 +111,8 @@ export class FinancialController {
   @ApiOperation({ summary: 'Hitung & Simpan Rencana Pendidikan Anak' })
   async calculateEducation(@Req() req, @Body() dto: CreateEducationPlanDto) {
     const userId = req.user.id;
+    // Method ini mengembalikan { plan, calculation: { total, monthly, stagesBreakdown } }
+    // Frontend akan menerima JSON lengkap ini untuk ditampilkan.
     return this.financialService.calculateAndSaveEducation(userId, dto);
   }
 }

@@ -9,7 +9,7 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { 
   calculateFinancialHealth,
   calculatePensionPlan,
-  calculateInsuranceNeeds,
+  calculateInsurancePlan, // Pakai yang updated
   calculateGoalPlan,
   calculateEducationPlan
 } from './utils/financial-math.util';
@@ -122,7 +122,7 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 3: CALCULATOR - PENSION PLAN (NEW)
+  // MODULE 3: CALCULATOR - PENSION PLAN (UPDATED LOGIC)
   // ===========================================================================
 
   async calculateAndSavePension(userId: string, dto: CreatePensionDto) {
@@ -151,12 +151,12 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 4: CALCULATOR - INSURANCE PLAN (NEW)
+  // MODULE 4: CALCULATOR - INSURANCE PLAN (UPDATED LOGIC)
   // ===========================================================================
 
   async calculateAndSaveInsurance(userId: string, dto: CreateInsuranceDto) {
     // 1. Hitung Kebutuhan UP
-    const result = calculateInsuranceNeeds(dto);
+    const result = calculateInsurancePlan(dto);
 
     // 2. Simpan Rencana
     const plan = await this.prisma.insurancePlan.create({
@@ -206,11 +206,11 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 6: CALCULATOR - EDUCATION PLAN (NEW & COMPLEX)
+  // MODULE 6: CALCULATOR - EDUCATION PLAN (GRANULAR UPDATE)
   // ===========================================================================
 
   async calculateAndSaveEducation(userId: string, dto: CreateEducationPlanDto) {
-    // 1. Hitung FV & PMT Pendidikan (Logic Paling Rumit)
+    // 1. Hitung FV & PMT Pendidikan (Granular Sinking Fund)
     const result = calculateEducationPlan(dto);
 
     // 2. Simpan Parent Plan & Child Stages (Transaction)
@@ -229,14 +229,17 @@ export class FinancialService {
 
       // B. Create Detail Stages (TK, SD, SMP...)
       // Kita map hasil perhitungan utils ke struktur database
-      const stagesData = result.stagesDetail.map((stage) => ({
+      // stagesBreakdown sudah berisi futureCost dan monthlySaving per item
+      const stagesData = result.stagesBreakdown.map((stage) => ({
         planId: plan.id,
         level: stage.level,
         costType: stage.costType,
         currentCost: stage.currentCost,
-        futureCost: stage.calculatedFutureCost, // Hasil hitungan FV
         yearsToStart: stage.yearsToStart,
-        monthlySaving: result.monthlySaving, // PMT (disamakan rata-rata atau bisa per stage)
+        
+        // FIELD PENTING: Hasil Hitungan Backend
+        futureCost: stage.futureCost,        // FV Item Ini
+        monthlySaving: stage.monthlySaving,  // Tabungan Item Ini
       }));
 
       await tx.educationStage.createMany({
