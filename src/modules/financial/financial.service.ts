@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
@@ -282,5 +282,57 @@ export class FinancialService {
     if (violations.length > 0) recommendation = `Perbaiki: ${violations.join(', ')}.`;
 
     return { score, status, recommendation };
+  }
+
+  // Tambahkan method ini di dalam class FinancialService
+
+  // --- UPDATE METHOD INI ---
+  async getEducationPlans(userId: string) {
+    // 1. Ambil data mentah dari DB (Header + Detail Stages)
+    const plans = await this.prisma.educationPlan.findMany({
+      where: { userId },
+      include: {
+        stages: true, // Ambil relation stages
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    // 2. Transformasi ke format Response yang diharapkan Frontend
+    // Format: { plan: {...}, calculation: { stagesBreakdown: [...] } }
+    return plans.map((p) => {
+      // Pisahkan property 'stages' dari object plan utama agar rapi
+      const { stages, ...planData } = p;
+
+      // Hitung total untuk kelengkapan data calculation (optional tapi good practice)
+      // Gunakan Number() karena Prisma Decimal mungkin return string/object
+      const totalFutureCost = stages.reduce((acc, s) => acc + Number(s.futureCost), 0);
+      const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
+
+      return {
+        plan: planData, // Data Header (Nama Anak, DOB, Inflasi settings)
+        calculation: {
+          totalFutureCost,
+          monthlySaving: totalMonthlySaving,
+          stagesBreakdown: stages, // Masukkan stages ke sini agar Frontend terbaca
+        },
+      };
+    });
+  }
+
+  // 2. ADD method ini untuk mengatasi "DELETE 404 Not Found"
+  async deleteEducationPlan(userId: string, planId: string) {
+    // Cek dulu apakah plan ini milik user yang sedang login (Security)
+    const plan = await this.prisma.educationPlan.findFirst({
+      where: { id: planId, userId },
+    });
+
+    if (!plan) {
+      throw new NotFoundException('Rencana pendidikan tidak ditemukan');
+    }
+
+    // Hapus Plan (Stages akan terhapus otomatis karena onDelete: Cascade di schema.prisma)
+    return this.prisma.educationPlan.delete({
+      where: { id: planId },
+    });
   }
 }

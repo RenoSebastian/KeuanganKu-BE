@@ -3,6 +3,8 @@ import {
   Get,
   Post,
   Body,
+  Delete, // <--- Tambah ini
+  Param,  // <--- Tambah ini
   UseGuards,
   Req,
 } from '@nestjs/common';
@@ -114,5 +116,20 @@ export class FinancialController {
     // Method ini mengembalikan { plan, calculation: { total, monthly, stagesBreakdown } }
     // Frontend akan menerima JSON lengkap ini untuk ditampilkan.
     return this.financialService.calculateAndSaveEducation(userId, dto);
+  }
+
+  // --- TAMBAHKAN KODE DI BAWAH INI ---
+  @Get('calculator/education')
+  @ApiOperation({ summary: 'Ambil daftar rencana pendidikan user' })
+  async getEducationPlans(@Req() req) {
+    const userId = req.user.id;
+    return this.financialService.getEducationPlans(userId);
+  }
+
+  @Delete('calculator/education/:id')
+  @ApiOperation({ summary: 'Hapus rencana pendidikan' })
+  async deleteEducationPlan(@Req() req, @Param('id') id: string) {
+    const userId = req.user.id;
+    return this.financialService.deleteEducationPlan(userId, id);
   }
 }
