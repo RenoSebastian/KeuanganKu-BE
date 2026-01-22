@@ -333,3 +333,27 @@ model GoalPlan {
 
   @@map("goal_plans")
 }
+
+// --- MARKET DATA (External API Config) ---
+
+model GoldPriceHistory {
+  id        String   @id @default(uuid())
+  
+  // Harga Utama (Dalam Rupiah)
+  buyPrice  Decimal  @map("buy_price") @db.Decimal(10, 2)  // Harga user BELI (Harga Butik)
+  sellPrice Decimal  @map("sell_price") @db.Decimal(10, 2) // Harga user JUAL (Buyback)
+  
+  // Data Tambahan (Valuable untuk UI)
+  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2) // Harga pembukaan hari ini
+  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2) // Perubahan harga (+/-)
+  
+  // Metadata Standar
+  currency  String   @default("IDR") @map("currency")      // IDR
+  unit      String   @default("GRAM") @map("unit")         // GRAM
+  source    String   @map("source")                        // e.g. "Antam", "Logam Mulia"
+  
+  fetchedAt DateTime @default(now()) @map("fetched_at")    // Waktu snapshot (Cron Job)
+
+  @@map("gold_price_histories")
+  @@index([fetchedAt]) // Indexing wajib untuk performa query "Get Today's Price"
+}
