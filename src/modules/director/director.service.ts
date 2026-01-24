@@ -4,11 +4,12 @@ import { AuditService } from '../audit/audit.service';
 import { FinancialService } from '../financial/financial.service';
 import { HealthStatus } from '@prisma/client';
 
-// 1. Import DTO Dashboard
+// 1. Import DTO Dashboard & Summary
 import { 
   DashboardStatsDto, 
   RiskyEmployeeDto, 
-  UnitRankingDto 
+  UnitRankingDto,
+  DashboardSummaryDto // <--- Import DTO Baru (Phase 5)
 } from './dto/director-dashboard.dto';
 
 // 2. Import DTO Detail Employee
@@ -21,6 +22,31 @@ export class DirectorService {
     private auditService: AuditService,
     private financialService: FinancialService 
   ) {}
+
+  // ===========================================================================
+  // PHASE 5: ORCHESTRATOR (PARALLEL EXECUTION)
+  // ===========================================================================
+  async getDashboardSummary(): Promise<DashboardSummaryDto> {
+    // [PARALLEL EXECUTION]
+    // Memicu 3 query berat sekaligus tanpa menunggu satu sama lain.
+    // Ini mengurangi total latency secara signifikan (Non-blocking I/O).
+    const [stats, riskyAll, rankingsAll] = await Promise.all([
+      this.getDashboardStats(),
+      this.getRiskyEmployees(),
+      this.getUnitRankings(),
+    ]);
+
+    // [ASSEMBLY]
+    // Menggabungkan hasil dan membatasi list hanya untuk preview (Top 5).
+    return {
+      stats,
+      topRiskyEmployees: riskyAll.slice(0, 5), // Ambil 5 teratas (paling berisiko)
+      unitRankings: rankingsAll.slice(0, 5),   // Ambil 5 teratas (unit kerja)
+      meta: {
+        generatedAt: new Date(),
+      },
+    };
+  }
 
   // ===========================================================================
   // 1. DASHBOARD STATS (OPTIMIZED)
@@ -150,7 +176,7 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 4. SEARCH EMPLOYEES (ADVANCED FUZZY SEARCH + MAPPING)
+  // 4. SEARCH EMPLOYEES (ADVANCED FUZZY SEARCH)
   // ===========================================================================
   async searchEmployees(keyword: string) {
     if (!keyword) return [];
@@ -158,7 +184,6 @@ export class DirectorService {
     const safeKeyword = keyword.trim();
     const THRESHOLD = 0.1; 
 
-    // [STEP 2] Execute Raw Query
     const results: any[] = await this.prisma.$queryRaw`
       SELECT
         u.id,
@@ -199,19 +224,13 @@ export class DirectorService {
       LIMIT 20;
     `;
 
-    // [STEP 3] Response Mapping (The Adapter)
-    // Mengubah hasil Raw SQL (Flat) menjadi Nested Object sesuai DTO Frontend.
     return results.map((row) => ({
       id: row.id,
       fullName: row.fullName,
       email: row.email,
-      
-      // Mapping ke Nested Object 'unitKerja'
       unitKerja: { 
         namaUnit: row.unitName || 'Tidak Ada Unit' 
       },
-      
-      // Mapping ke Array 'financialChecks' (Simulasi Relation)
       financialChecks: row.status ? [{
         status: row.status as HealthStatus,
         healthScore: row.healthScore

@@ -86,7 +86,35 @@ export class DashboardStatsDto {
   statusCounts: StatusCountDto;
 }
 
+// ========================================================
+// PHASE 5 ADDITIONS: COMPOSITE WRAPPER
+// ========================================================
+
+// --------------------------------------------------------
+// 5. Metadata DTO (Timestamp)
+// --------------------------------------------------------
+export class DashboardMetaDto {
+  @ApiProperty({ example: '2026-01-24T10:00:00Z', description: 'Waktu server saat data digenerate' })
+  generatedAt: Date;
+}
+
+// --------------------------------------------------------
+// 6. COMPOSITE DTO: Dashboard Summary (Orchestrator Payload)
+// --------------------------------------------------------
+export class DashboardSummaryDto {
+  @ApiProperty({ type: DashboardStatsDto, description: 'Statistik Global' })
+  stats: DashboardStatsDto;
+
+  @ApiProperty({ type: [RiskyEmployeeDto], description: 'Top 5 karyawan berisiko (Preview)' })
+  topRiskyEmployees: RiskyEmployeeDto[];
+
+  @ApiProperty({ type: [UnitRankingDto], description: 'Top 5 unit dengan score terendah (Preview)' })
+  unitRankings: UnitRankingDto[];
+
+  @ApiProperty({ type: DashboardMetaDto, description: 'Metadata response' })
+  meta: DashboardMetaDto;
+}
+
 // NOTE: 
-// DTO untuk 'EmployeeAuditDetailDto' telah dipindahkan ke file:
+// DTO untuk 'EmployeeAuditDetailDto' berada di file terpisah:
 // src/modules/director/dto/employee-detail-response.dto.ts
-// untuk menjaga Separation of Concerns.

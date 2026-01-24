@@ -13,6 +13,7 @@ import {
   DashboardStatsDto,
   RiskyEmployeeDto,
   UnitRankingDto,
+  DashboardSummaryDto, // <--- IMPORT DTO SUMMARY (PHASE 5)
 } from './dto/director-dashboard.dto'; 
 import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto'; 
 
@@ -23,6 +24,16 @@ import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 @Controller('director')
 export class DirectorController {
   constructor(private readonly directorService: DirectorService) {}
+
+  // ===========================================================================
+  // 0. DASHBOARD ORCHESTRATOR (PHASE 5 - SINGLE ENTRY POINT)
+  // ===========================================================================
+  @Get('dashboard/summary')
+  @ApiOperation({ summary: 'Mendapatkan seluruh data dashboard (Stats, Risk, Ranking) dalam satu request' })
+  @ApiResponse({ status: 200, type: DashboardSummaryDto })
+  getDashboardSummary() {
+    return this.directorService.getDashboardSummary();
+  }
 
   // ===========================================================================
   // 1. DASHBOARD RESUME (Grafik & Statistik Utama)
