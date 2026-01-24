@@ -82,14 +82,16 @@ model User {
   budgetPlans     BudgetPlan[]
   financialChecks FinancialCheckup[]
   eduPlans        EducationPlan[]
-  pensionPlans    PensionPlan[]    // NEW
-  insurancePlans  InsurancePlan[]  // NEW
-  goalPlans       GoalPlan[]       // NEW
+  pensionPlans    PensionPlan[]    
+  insurancePlans  InsurancePlan[]  
+  goalPlans       GoalPlan[]       
   
   // Relasi Audit
   actionsPerformed AccessLog[] @relation("ActorRelation")
   actionsTargeted  AccessLog[] @relation("TargetRelation")
 
+  // [OPTIMIZATION] Index FK untuk mempercepat JOIN Unit Kerja
+  @@index([unitKerjaId])
   @@map("users")
 }
 
@@ -150,7 +152,7 @@ model FinancialCheckup {
   userProfile   Json @map("user_profile")
   spouseProfile Json? @map("spouse_profile")
 
-  // Aset & Utang (Sama seperti sebelumnya, disingkat untuk brevity di file ini tapi WAJIB ADA di kode asli)
+  // Aset & Utang
   assetCash          Decimal @default(0) @map("asset_cash") @db.Decimal(15, 2)
   assetHome          Decimal @default(0) @map("asset_home") @db.Decimal(15, 2)
   assetVehicle       Decimal @default(0) @map("asset_vehicle") @db.Decimal(15, 2)
@@ -216,6 +218,11 @@ model FinancialCheckup {
 
   user User @relation(fields: [userId], references: [id])
 
+  // [OPTIMIZATION]
+  // 1. Composite Index: Mempercepat query "ORDER BY checkDate DESC" per user
+  // 2. Status Index: Mempercepat filtering statistik global (Count Sehat/Bahaya)
+  @@index([userId, checkDate(sort: Desc)]) 
+  @@index([status])
   @@map("financial_checkups")
 }
 
@@ -227,8 +234,8 @@ model EducationPlan {
   childName      String   @map("child_name")
   childDob       DateTime @map("child_dob")
   
-  inflationRate  Decimal  @default(10.0) @map("inflation_rate") @db.Decimal(5, 2) // Default 10%
-  returnRate     Decimal  @default(12.0) @map("return_rate") @db.Decimal(5, 2) // Asumsi Investasi
+  inflationRate  Decimal  @default(10.0) @map("inflation_rate") @db.Decimal(5, 2) 
+  returnRate     Decimal  @default(12.0) @map("return_rate") @db.Decimal(5, 2) 
   method         EducationMethod @default(GEOMETRIC)
 
   createdAt      DateTime @default(now()) @map("created_at")
@@ -245,11 +252,11 @@ model EducationStage {
   level          SchoolLevel
   costType       CostType @map("cost_type") 
   
-  currentCost    Decimal  @map("current_cost") @db.Decimal(15, 2) // PV
-  futureCost     Decimal  @map("future_cost") @db.Decimal(15, 2)  // FV
+  currentCost    Decimal  @map("current_cost") @db.Decimal(15, 2) 
+  futureCost     Decimal  @map("future_cost") @db.Decimal(15, 2)  
   
   yearsToStart   Int      @map("years_to_start") 
-  monthlySaving  Decimal  @map("monthly_saving") @db.Decimal(15, 2) // PMT
+  monthlySaving  Decimal  @map("monthly_saving") @db.Decimal(15, 2) 
 
   plan           EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
@@ -266,17 +273,17 @@ model PensionPlan {
   // Input Data
   currentAge     Int      @map("current_age")
   retirementAge  Int      @map("retirement_age")
-  lifeExpectancy Int      @default(80) @map("life_expectancy") // Default 80 tahun
+  lifeExpectancy Int      @default(80) @map("life_expectancy") 
   
-  currentExpense Decimal  @map("current_expense") @db.Decimal(15, 2) // Biaya hidup sekarang
-  currentSaving  Decimal  @default(0) @map("current_saving") @db.Decimal(15, 2) // Aset yg sudah ada
+  currentExpense Decimal  @map("current_expense") @db.Decimal(15, 2) 
+  currentSaving  Decimal  @default(0) @map("current_saving") @db.Decimal(15, 2) 
   
   inflationRate  Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate     Decimal  @default(8.0) @map("return_rate") @db.Decimal(5, 2) // Return investasi
+  returnRate     Decimal  @default(8.0) @map("return_rate") @db.Decimal(5, 2) 
 
   // Output Calculation
-  totalFundNeeded Decimal @map("total_fund_needed") @db.Decimal(15, 2) // FV saat pensiun
-  monthlySaving   Decimal @map("monthly_saving") @db.Decimal(15, 2)    // PMT
+  totalFundNeeded Decimal @map("total_fund_needed") @db.Decimal(15, 2) 
+  monthlySaving   Decimal @map("monthly_saving") @db.Decimal(15, 2)    
 
   user           User     @relation(fields: [userId], references: [id])
 
@@ -294,14 +301,14 @@ model InsurancePlan {
 
   // Input Data
   dependentCount    Int      @default(0) @map("dependent_count")
-  monthlyExpense    Decimal  @map("monthly_expense") @db.Decimal(15, 2) // Kebutuhan hidup keluarga
-  existingDebt      Decimal  @default(0) @map("existing_debt") @db.Decimal(15, 2) // Hutang berjalan
-  existingCoverage  Decimal  @default(0) @map("existing_coverage") @db.Decimal(15, 2) // Asuransi yg dimiliki
+  monthlyExpense    Decimal  @map("monthly_expense") @db.Decimal(15, 2) 
+  existingDebt      Decimal  @default(0) @map("existing_debt") @db.Decimal(15, 2) 
+  existingCoverage  Decimal  @default(0) @map("existing_coverage") @db.Decimal(15, 2) 
   
-  protectionDuration Int     @default(10) @map("protection_duration") // Berapa tahun dilindungi
+  protectionDuration Int     @default(10) @map("protection_duration") 
 
   // Output Calculation
-  coverageNeeded    Decimal  @map("coverage_needed") @db.Decimal(15, 2) // Uang Pertanggungan Ideal
+  coverageNeeded    Decimal  @map("coverage_needed") @db.Decimal(15, 2) 
   recommendation    String?  @db.Text
 
   user              User     @relation(fields: [userId], references: [id])
@@ -317,17 +324,17 @@ model GoalPlan {
   createdAt      DateTime @default(now()) @map("created_at")
 
   // Input Data
-  goalName       String   @map("goal_name") // e.g. "Beli Rumah", "Nikah"
-  targetAmount   Decimal  @map("target_amount") @db.Decimal(15, 2) // Harga Sekarang (PV)
+  goalName       String   @map("goal_name") 
+  targetAmount   Decimal  @map("target_amount") @db.Decimal(15, 2) 
   
-  targetDate     DateTime @map("target_date") // Kapan mau tercapai
+  targetDate     DateTime @map("target_date") 
   
   inflationRate  Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
   returnRate     Decimal  @default(6.0) @map("return_rate") @db.Decimal(5, 2)
 
   // Output Calculation
-  futureValue    Decimal  @map("future_value") @db.Decimal(15, 2) // Harga Nanti (FV)
-  monthlySaving  Decimal  @map("monthly_saving") @db.Decimal(15, 2) // PMT
+  futureValue    Decimal  @map("future_value") @db.Decimal(15, 2) 
+  monthlySaving  Decimal  @map("monthly_saving") @db.Decimal(15, 2) 
 
   user           User     @relation(fields: [userId], references: [id])
 
@@ -339,21 +346,18 @@ model GoalPlan {
 model GoldPriceHistory {
   id        String   @id @default(uuid())
   
-  // Harga Utama (Dalam Rupiah)
-  buyPrice  Decimal  @map("buy_price") @db.Decimal(10, 2)  // Harga user BELI (Harga Butik)
-  sellPrice Decimal  @map("sell_price") @db.Decimal(10, 2) // Harga user JUAL (Buyback)
+  buyPrice  Decimal  @map("buy_price") @db.Decimal(10, 2)  
+  sellPrice Decimal  @map("sell_price") @db.Decimal(10, 2) 
   
-  // Data Tambahan (Valuable untuk UI)
-  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2) // Harga pembukaan hari ini
-  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2) // Perubahan harga (+/-)
+  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2) 
+  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2) 
   
-  // Metadata Standar
-  currency  String   @default("IDR") @map("currency")      // IDR
-  unit      String   @default("GRAM") @map("unit")         // GRAM
-  source    String   @map("source")                        // e.g. "Antam", "Logam Mulia"
+  currency  String   @default("IDR") @map("currency")      
+  unit      String   @default("GRAM") @map("unit")         
+  source    String   @map("source")                        
   
-  fetchedAt DateTime @default(now()) @map("fetched_at")    // Waktu snapshot (Cron Job)
+  fetchedAt DateTime @default(now()) @map("fetched_at")    
 
   @@map("gold_price_histories")
-  @@index([fetchedAt]) // Indexing wajib untuk performa query "Get Today's Price"
+  @@index([fetchedAt]) 
 }

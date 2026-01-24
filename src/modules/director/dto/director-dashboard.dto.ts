@@ -20,7 +20,7 @@ export class UnitRankingDto {
   @ApiProperty({ 
     enum: HealthStatus, 
     example: 'SEHAT', 
-    description: 'Status agregat kesehatan unit' 
+    description: 'Status agregat kesehatan unit (Dihitung berdasarkan Avg Score)' 
   })
   status: HealthStatus;
 }
@@ -48,14 +48,7 @@ export class RiskyEmployeeDto {
   @ApiProperty({ example: 45, description: 'Skor kesehatan finansial (0-100)' })
   healthScore: number;
 
-  @ApiProperty({ 
-    example: 65.5, 
-    description: 'Rasio hutang terhadap pendapatan (%) - Optional', 
-    required: false 
-  })
-  debtToIncomeRatio?: number; 
-
-  @ApiProperty({ example: '2024-04-20T00:00:00.000Z', description: 'Tanggal checkup terakhir' })
+  @ApiProperty({ example: '2026-01-24T00:00:00.000Z', description: 'Tanggal checkup terakhir' })
   lastCheckDate: Date;
 }
 
@@ -93,155 +86,7 @@ export class DashboardStatsDto {
   statusCounts: StatusCountDto;
 }
 
-// ========================================================
-// NEW: DTO UNTUK AUDIT DETAIL KARYAWAN
-// ========================================================
-
-// --------------------------------------------------------
-// 5. Bagian Profile Header
-// --------------------------------------------------------
-export class AuditProfileDto {
-  @ApiProperty({ example: 'uuid-123' })
-  id: string;
-
-  @ApiProperty({ example: 'Ahmad Junaedi' })
-  fullName: string;
-
-  @ApiProperty({ example: 'Divisi Umum' })
-  unitName: string;
-
-  @ApiProperty({ example: 'ahmad@pamjaya.co.id' })
-  email: string;
-
-  @ApiProperty({ enum: HealthStatus, example: 'BAHAYA' })
-  status: HealthStatus;
-
-  @ApiProperty({ example: 40 })
-  healthScore: number;
-
-  @ApiProperty()
-  lastCheckDate: Date;
-}
-
-// --------------------------------------------------------
-// 6. Bagian Demografi (Nested di dalam Record)
-// --------------------------------------------------------
-export class AuditDemographicDto {
-  @ApiProperty({ example: 'Ahmad Junaedi' })
-  name: string;
-  
-  // Field lain opsional karena diambil dari User table yang mungkin kosong
-  @ApiProperty({ required: false }) dob?: string;
-  @ApiProperty({ required: false }) gender?: string;
-  @ApiProperty({ required: false }) occupation?: string;
-}
-
-// --------------------------------------------------------
-// 7. Bagian Financial Record (Mapping Eksplisit 40+ Variabel)
-// --------------------------------------------------------
-export class FinancialRecordDto {
-  @ApiProperty({ type: AuditDemographicDto })
-  userProfile: AuditDemographicDto;
-
-  // --- A. Aset Likuid ---
-  @ApiProperty() assetCash: number;
-
-  // --- B. Aset Personal ---
-  @ApiProperty() assetHome: number;
-  @ApiProperty() assetVehicle: number;
-  @ApiProperty() assetJewelry: number;
-  @ApiProperty() assetAntique: number;
-  @ApiProperty() assetPersonalOther: number;
-
-  // --- C. Aset Investasi ---
-  @ApiProperty() assetInvHome: number;
-  @ApiProperty() assetInvVehicle: number;
-  @ApiProperty() assetGold: number;
-  @ApiProperty() assetInvAntique: number;
-  @ApiProperty() assetStocks: number;
-  @ApiProperty() assetMutualFund: number;
-  @ApiProperty() assetBonds: number;
-  @ApiProperty() assetDeposit: number;
-  @ApiProperty() assetInvOther: number;
-
-  // --- E. Utang Konsumtif ---
-  @ApiProperty() debtKPR: number;
-  @ApiProperty() debtKPM: number;
-  @ApiProperty() debtCC: number;
-  @ApiProperty() debtCoop: number;
-  @ApiProperty() debtConsumptiveOther: number;
-
-  // --- F. Utang Usaha ---
-  @ApiProperty() debtBusiness: number;
-
-  // --- I. Penghasilan ---
-  @ApiProperty() incomeFixed: number;
-  @ApiProperty() incomeVariable: number;
-
-  // --- K. Cicilan Utang ---
-  @ApiProperty() installmentKPR: number;
-  @ApiProperty() installmentKPM: number;
-  @ApiProperty() installmentCC: number;
-  @ApiProperty() installmentCoop: number;
-  @ApiProperty() installmentConsumptiveOther: number;
-  @ApiProperty() installmentBusiness: number;
-
-  // --- L. Premi Asuransi ---
-  @ApiProperty() insuranceLife: number;
-  @ApiProperty() insuranceHealth: number;
-  @ApiProperty() insuranceHome: number;
-  @ApiProperty() insuranceVehicle: number;
-  @ApiProperty() insuranceBPJS: number;
-  @ApiProperty() insuranceOther: number;
-
-  // --- M. Tabungan ---
-  @ApiProperty() savingEducation: number;
-  @ApiProperty() savingRetirement: number;
-  @ApiProperty() savingPilgrimage: number;
-  @ApiProperty() savingHoliday: number;
-  @ApiProperty() savingEmergency: number;
-  @ApiProperty() savingOther: number;
-
-  // --- N. Pengeluaran ---
-  @ApiProperty() expenseFood: number;
-  @ApiProperty() expenseSchool: number;
-  @ApiProperty() expenseTransport: number;
-  @ApiProperty() expenseCommunication: number;
-  @ApiProperty() expenseHelpers: number;
-  @ApiProperty() expenseTax: number;
-  @ApiProperty() expenseLifestyle: number;
-}
-
-// --------------------------------------------------------
-// 8. Bagian Hasil Analisa
-// --------------------------------------------------------
-export class AnalysisResultDto {
-  @ApiProperty({ example: 45 })
-  score: number;
-
-  @ApiProperty({ example: 'BAHAYA' })
-  globalStatus: string;
-
-  @ApiProperty({ example: 250000000, description: 'Kekayaan Bersih' })
-  netWorth: number;
-
-  @ApiProperty({ example: 1500000, description: 'Surplus/Defisit Bulanan' })
-  surplusDeficit: number;
-
-  @ApiProperty()
-  generatedAt: Date;
-}
-
-// --------------------------------------------------------
-// 9. Wrapper DTO Utama (Response Endpoint)
-// --------------------------------------------------------
-export class EmployeeAuditDetailDto {
-  @ApiProperty({ type: AuditProfileDto })
-  profile: AuditProfileDto;
-
-  @ApiProperty({ type: FinancialRecordDto })
-  record: FinancialRecordDto;
-
-  @ApiProperty({ type: AnalysisResultDto })
-  analysis: AnalysisResultDto;
-}
+// NOTE: 
+// DTO untuk 'EmployeeAuditDetailDto' telah dipindahkan ke file:
+// src/modules/director/dto/employee-detail-response.dto.ts
+// untuk menjaga Separation of Concerns.

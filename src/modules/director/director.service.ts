@@ -3,15 +3,14 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import { HealthStatus } from '@prisma/client';
 
-// 1. Import DTO untuk Dashboard (Stats & Risky List)
+// 1. Import DTO
 import { 
   DashboardStatsDto, 
   RiskyEmployeeDto, 
   UnitRankingDto 
 } from './dto/director-dashboard.dto';
 
-// 2. Import DTO untuk Detail Employee (Gunakan file yang BARU dibuat di Step 4)
-//    Ini mengatasi error "ratios does not exist"
+// 2. Import DTO Detail Employee
 import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 
 @Injectable()
@@ -22,58 +21,40 @@ export class DirectorService {
   ) {}
 
   // ===========================================================================
-  // 1. DASHBOARD STATS (Agregat Data)
+  // 1. DASHBOARD STATS (OPTIMIZED - DATABASE AGGREGATION)
   // ===========================================================================
   async getDashboardStats(): Promise<DashboardStatsDto> {
-    const users = await this.prisma.user.findMany({
+    const totalEmployees = await this.prisma.user.count({
       where: { role: 'USER' },
-      select: {
-        id: true,
-        financialChecks: {
-          orderBy: { checkDate: 'desc' },
-          take: 1,
-          select: {
-            status: true,
-            healthScore: true,
-            totalNetWorth: true,
-          },
-        },
-      },
     });
 
-    let totalEmployees = users.length;
-    let totalScore = 0;
-    let totalAssets = 0;
-    let countSehat = 0;
-    let countWaspada = 0;
-    let countBahaya = 0;
-    let activeDataCount = 0;
+    const rawStats: any[] = await this.prisma.$queryRaw`
+      SELECT
+        COALESCE(AVG(fc.health_score), 0)::float as "avgScore",
+        COALESCE(SUM(fc.total_net_worth), 0)::float as "totalAssets",
+        COUNT(CASE WHEN fc.status = 'SEHAT' THEN 1 END)::int as "countSehat",
+        COUNT(CASE WHEN fc.status = 'WASPADA' THEN 1 END)::int as "countWaspada",
+        COUNT(CASE WHEN fc.status = 'BAHAYA' THEN 1 END)::int as "countBahaya"
+      FROM (
+        SELECT DISTINCT ON (user_id) *
+        FROM financial_checkups
+        ORDER BY user_id, check_date DESC
+      ) fc
+      JOIN users u ON u.id = fc.user_id
+      WHERE u.role = 'USER';
+    `;
 
-    for (const user of users) {
-      const latestCheckup = user.financialChecks[0];
-
-      if (latestCheckup) {
-        activeDataCount++;
-        totalScore += latestCheckup.healthScore;
-        totalAssets += Number(latestCheckup.totalNetWorth);
-
-        if (latestCheckup.status === HealthStatus.SEHAT) countSehat++;
-        else if (latestCheckup.status === HealthStatus.WASPADA) countWaspada++;
-        else if (latestCheckup.status === HealthStatus.BAHAYA) countBahaya++;
-      }
-    }
-
-    const avgHealthScore = activeDataCount > 0 ? Math.round(totalScore / activeDataCount) : 0;
+    const stats = rawStats[0] || {};
 
     return {
       totalEmployees,
-      avgHealthScore,
-      riskyEmployeesCount: countBahaya,
-      totalAssetsManaged: totalAssets,
+      avgHealthScore: Math.round(stats.avgScore || 0),
+      riskyEmployeesCount: stats.countBahaya || 0,
+      totalAssetsManaged: stats.totalAssets || 0,
       statusCounts: {
-        SEHAT: countSehat,
-        WASPADA: countWaspada,
-        BAHAYA: countBahaya,
+        SEHAT: stats.countSehat || 0,
+        WASPADA: stats.countWaspada || 0,
+        BAHAYA: stats.countBahaya || 0,
       },
     };
   }
@@ -90,7 +71,7 @@ export class DirectorService {
         unitKerja: { select: { namaUnit: true } },
         financialChecks: {
           orderBy: { checkDate: 'desc' },
-          take: 1,
+          take: 1, 
           select: {
             status: true,
             healthScore: true,
@@ -100,13 +81,10 @@ export class DirectorService {
       },
     });
 
-    // [FIX] Tambahkan return type explicit pada map: "RiskyEmployeeDto | null"
-    // Ini membantu TS memvalidasi objek di dalam return
     const riskyList = users
       .map((u): RiskyEmployeeDto | null => {
         const lastCheck = u.financialChecks[0];
         
-        // Filter: Skip jika tidak ada data atau status SEHAT
         if (!lastCheck) return null;
         if (lastCheck.status === HealthStatus.SEHAT) return null;
 
@@ -114,66 +92,59 @@ export class DirectorService {
           id: u.id,
           fullName: u.fullName,
           unitName: u.unitKerja?.namaUnit || 'Tidak Ada Unit',
-          // [FIX] Pastikan status compatible dengan DTO
           status: lastCheck.status, 
           healthScore: lastCheck.healthScore,
           lastCheckDate: lastCheck.checkDate,
         };
       })
-      // [FIX] Type Predicate: "item is RiskyEmployeeDto"
-      // Ini memberitahu TS bahwa hasil filter pasti BUKAN null
       .filter((item): item is RiskyEmployeeDto => item !== null);
 
-    // Sorting: Aman karena TS sudah tahu item tidak mungkin null
     return riskyList.sort((a, b) => a.healthScore - b.healthScore);
   }
 
   // ===========================================================================
-  // 3. UNIT RANKING (Analisa Per Divisi)
+  // 3. UNIT RANKING (OPTIMIZED - DATABASE AGGREGATION)
   // ===========================================================================
   async getUnitRankings(): Promise<UnitRankingDto[]> {
-    const units = await this.prisma.unitKerja.findMany({
-      include: {
-        users: {
-          where: { role: 'USER' },
-          select: {
-            financialChecks: {
-              orderBy: { checkDate: 'desc' },
-              take: 1,
-              select: { healthScore: true },
-            },
-          },
-        },
-      },
-    });
+    // Logic:
+    // 1. LEFT JOIN 'unit_kerja' ke 'users' -> Menghitung jumlah karyawan per unit
+    // 2. LEFT JOIN ke Subquery 'financial_checkups' (Latest) -> Menghitung Avg Health Score
+    // 3. GROUP BY unit_kerja.id
+    // 4. ORDER BY avgScore DESC (Langsung dari DB)
 
-    const rankings = units.map((unit) => {
-      let totalScore = 0;
-      let count = 0;
+    const rawRankings: any[] = await this.prisma.$queryRaw`
+      SELECT
+        uk.id,
+        uk.nama_unit as "unitName",
+        COUNT(u.id)::int as "employeeCount",
+        COALESCE(AVG(fc.health_score), 0)::float as "avgScore"
+      FROM unit_kerja uk
+      LEFT JOIN users u ON u.unit_kerja_id = uk.id AND u.role = 'USER'
+      LEFT JOIN (
+        SELECT DISTINCT ON (user_id) user_id, health_score
+        FROM financial_checkups
+        ORDER BY user_id, check_date DESC
+      ) fc ON fc.user_id = u.id
+      GROUP BY uk.id
+      ORDER BY "avgScore" DESC;
+    `;
 
-      unit.users.forEach((u) => {
-        if (u.financialChecks.length > 0) {
-          totalScore += u.financialChecks[0].healthScore;
-          count++;
-        }
-      });
-
-      const avgScore = count > 0 ? Math.round(totalScore / count) : 0;
-      
+    // Mapping Raw Result ke DTO (+ Logic Status Labeling)
+    return rawRankings.map((row) => {
+      const score = Math.round(row.avgScore);
       let status: HealthStatus = HealthStatus.BAHAYA;
-      if (avgScore >= 80) status = HealthStatus.SEHAT;
-      else if (avgScore >= 60) status = HealthStatus.WASPADA;
+      
+      if (score >= 80) status = HealthStatus.SEHAT;
+      else if (score >= 60) status = HealthStatus.WASPADA;
 
       return {
-        id: unit.id,
-        unitName: unit.namaUnit,
-        employeeCount: unit.users.length,
-        avgScore,
-        status,
+        id: row.id,
+        unitName: row.unitName,
+        employeeCount: row.employeeCount,
+        avgScore: score,
+        status, // Status dikalkulasi saat mapping, datanya valid
       };
     });
-
-    return rankings.sort((a, b) => b.avgScore - a.avgScore);
   }
 
   // ===========================================================================
@@ -210,7 +181,6 @@ export class DirectorService {
   // 5. EMPLOYEE DETAIL (Deep Dive + Automatic Audit)
   // ===========================================================================
   async getEmployeeDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
-    // A. Validasi User
     const user = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       include: { unitKerja: true }
@@ -218,7 +188,6 @@ export class DirectorService {
 
     if (!user) throw new NotFoundException('Karyawan tidak ditemukan');
 
-    // B. Ambil Data Checkup Terakhir
     const c = await this.prisma.financialCheckup.findFirst({
       where: { userId: targetUserId },
       orderBy: { checkDate: 'desc' }
@@ -228,7 +197,7 @@ export class DirectorService {
         return null; 
     }
 
-    // C. AUDIT TRAIL TRIGGER
+    // AUDIT TRAIL
     this.auditService.logAccess({
       actorId: actorId,
       targetUserId: targetUserId,
@@ -239,8 +208,7 @@ export class DirectorService {
       }
     });
 
-    // D. Mapping Response
-    // Menggunakan DTO dari 'employee-detail-response.dto.ts' yang memiliki properti 'ratios'
+    // MAPPING RESPONSE
     return {
       profile: {
         id: user.id,
@@ -258,7 +226,6 @@ export class DirectorService {
         netWorth: Number(c.totalNetWorth),
         surplusDeficit: Number(c.surplusDeficit), 
         generatedAt: c.checkDate,
-        // [FIXED] Property 'ratios' sekarang dikenali karena import DTO sudah benar
         ratios: c.ratiosDetails as any 
       },
 
@@ -268,8 +235,6 @@ export class DirectorService {
           dob: user.dateOfBirth ? user.dateOfBirth.toISOString() : undefined,
           ...c.userProfile as any 
         },
-
-        // Mapping Data Mentah
         assetCash: Number(c.assetCash),
         assetHome: Number(c.assetHome),
         assetVehicle: Number(c.assetVehicle),
