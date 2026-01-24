@@ -1,9 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { FinancialService } from '../financial/financial.service'; // <--- Reuse Logic
 import { HealthStatus } from '@prisma/client';
 
-// 1. Import DTO
+// 1. Import DTO Dashboard
 import { 
   DashboardStatsDto, 
   RiskyEmployeeDto, 
@@ -17,11 +18,12 @@ import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 export class DirectorService {
   constructor(
     private prisma: PrismaService,
-    private auditService: AuditService
+    private auditService: AuditService,
+    private financialService: FinancialService 
   ) {}
 
   // ===========================================================================
-  // 1. DASHBOARD STATS (OPTIMIZED - DATABASE AGGREGATION)
+  // 1. DASHBOARD STATS (OPTIMIZED)
   // ===========================================================================
   async getDashboardStats(): Promise<DashboardStatsDto> {
     const totalEmployees = await this.prisma.user.count({
@@ -60,11 +62,19 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 2. RISK MONITOR (Daftar Karyawan Berisiko)
+  // 2. RISK MONITOR (DATABASE FILTERING)
   // ===========================================================================
   async getRiskyEmployees(): Promise<RiskyEmployeeDto[]> {
     const users = await this.prisma.user.findMany({
-      where: { role: 'USER' },
+      where: { 
+        role: 'USER',
+        // Optimasi: Hanya ambil user yang pernah punya status Warning/Danger
+        financialChecks: {
+          some: {
+            status: { in: [HealthStatus.BAHAYA, HealthStatus.WASPADA] }
+          }
+        }
+      },
       select: {
         id: true,
         fullName: true,
@@ -103,15 +113,9 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 3. UNIT RANKING (OPTIMIZED - DATABASE AGGREGATION)
+  // 3. UNIT RANKING (OPTIMIZED)
   // ===========================================================================
   async getUnitRankings(): Promise<UnitRankingDto[]> {
-    // Logic:
-    // 1. LEFT JOIN 'unit_kerja' ke 'users' -> Menghitung jumlah karyawan per unit
-    // 2. LEFT JOIN ke Subquery 'financial_checkups' (Latest) -> Menghitung Avg Health Score
-    // 3. GROUP BY unit_kerja.id
-    // 4. ORDER BY avgScore DESC (Langsung dari DB)
-
     const rawRankings: any[] = await this.prisma.$queryRaw`
       SELECT
         uk.id,
@@ -129,7 +133,6 @@ export class DirectorService {
       ORDER BY "avgScore" DESC;
     `;
 
-    // Mapping Raw Result ke DTO (+ Logic Status Labeling)
     return rawRankings.map((row) => {
       const score = Math.round(row.avgScore);
       let status: HealthStatus = HealthStatus.BAHAYA;
@@ -142,13 +145,13 @@ export class DirectorService {
         unitName: row.unitName,
         employeeCount: row.employeeCount,
         avgScore: score,
-        status, // Status dikalkulasi saat mapping, datanya valid
+        status, 
       };
     });
   }
 
   // ===========================================================================
-  // 4. SEARCH EMPLOYEES (Pencarian Global)
+  // 4. SEARCH EMPLOYEES
   // ===========================================================================
   async searchEmployees(keyword: string) {
     if (!keyword) return [];
@@ -178,9 +181,10 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 5. EMPLOYEE DETAIL (Deep Dive + Automatic Audit)
+  // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT)
   // ===========================================================================
   async getEmployeeDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
+    // A. Validasi User Existence & Profile Fetching
     const user = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       include: { unitKerja: true }
@@ -188,16 +192,15 @@ export class DirectorService {
 
     if (!user) throw new NotFoundException('Karyawan tidak ditemukan');
 
-    const c = await this.prisma.financialCheckup.findFirst({
-      where: { userId: targetUserId },
-      orderBy: { checkDate: 'desc' }
-    });
+    // B. Ambil Data Checkup Terakhir (Reuse Logic dari FinancialService)
+    const c = await this.financialService.getLatestCheckup(targetUserId, 'DIRECTOR');
 
     if (!c) {
-        return null; 
+        return null; // Bisa diganti throw exception jika rule bisnis mengharuskan
     }
 
-    // AUDIT TRAIL
+    // C. AUDIT TRIGGER (Critical Step)
+    // Mencatat bahwa Direksi melihat data detail ini SEBELUM return data
     this.auditService.logAccess({
       actorId: actorId,
       targetUserId: targetUserId,
@@ -208,7 +211,10 @@ export class DirectorService {
       }
     });
 
-    // MAPPING RESPONSE
+    // D. PRIVACY FILTERING & MAPPING
+    // Kita melakukan mapping manual satu per satu field.
+    // Ini bertindak sebagai 'Whitelist'. Field sensitif di DB yang TIDAK di-map 
+    // otomatis tidak akan terkirim ke frontend.
     return {
       profile: {
         id: user.id,
@@ -235,12 +241,16 @@ export class DirectorService {
           dob: user.dateOfBirth ? user.dateOfBirth.toISOString() : undefined,
           ...c.userProfile as any 
         },
+        
+        // --- ASSET ---
         assetCash: Number(c.assetCash),
         assetHome: Number(c.assetHome),
         assetVehicle: Number(c.assetVehicle),
         assetJewelry: Number(c.assetJewelry),
         assetAntique: Number(c.assetAntique),
         assetPersonalOther: Number(c.assetPersonalOther),
+        
+        // --- INVESTMENT ---
         assetInvHome: Number(c.assetInvHome),
         assetInvVehicle: Number(c.assetInvVehicle),
         assetGold: Number(c.assetGold),
@@ -250,32 +260,40 @@ export class DirectorService {
         assetBonds: Number(c.assetBonds),
         assetDeposit: Number(c.assetDeposit),
         assetInvOther: Number(c.assetInvOther),
+        
+        // --- DEBT ---
         debtKPR: Number(c.debtKPR),
         debtKPM: Number(c.debtKPM),
         debtCC: Number(c.debtCC),
         debtCoop: Number(c.debtCoop),
         debtConsumptiveOther: Number(c.debtConsumptiveOther),
         debtBusiness: Number(c.debtBusiness),
+        
+        // --- CASHFLOW ---
         incomeFixed: Number(c.incomeFixed),
         incomeVariable: Number(c.incomeVariable),
+        
         installmentKPR: Number(c.installmentKPR),
         installmentKPM: Number(c.installmentKPM),
         installmentCC: Number(c.installmentCC),
         installmentCoop: Number(c.installmentCoop),
         installmentConsumptiveOther: Number(c.installmentConsumptiveOther),
         installmentBusiness: Number(c.installmentBusiness),
+        
         insuranceLife: Number(c.insuranceLife),
         insuranceHealth: Number(c.insuranceHealth),
         insuranceHome: Number(c.insuranceHome),
         insuranceVehicle: Number(c.insuranceVehicle),
         insuranceBPJS: Number(c.insuranceBPJS),
         insuranceOther: Number(c.insuranceOther),
+        
         savingEducation: Number(c.savingEducation),
         savingRetirement: Number(c.savingRetirement),
         savingPilgrimage: Number(c.savingPilgrimage),
         savingHoliday: Number(c.savingHoliday),
         savingEmergency: Number(c.savingEmergency),
         savingOther: Number(c.savingOther),
+        
         expenseFood: Number(c.expenseFood),
         expenseSchool: Number(c.expenseSchool),
         expenseTransport: Number(c.expenseTransport),

@@ -13,7 +13,7 @@ import {
   calculateGoalPlan,
   calculateEducationPlan
 } from './utils/financial-math.util';
-import { HealthStatus, InsuranceType } from '@prisma/client';
+import { HealthStatus } from '@prisma/client';
 
 @Injectable()
 export class FinancialService {
@@ -49,7 +49,10 @@ export class FinancialService {
   }
 
   // [IMPORTANT] Method ini Public & Exported untuk dipakai DirectorService
-  async getLatestCheckup(userId: string) {
+  // Refactor: Menambahkan parameter actorRole untuk skalabilitas filtering akses
+  async getLatestCheckup(userId: string, actorRole?: string) {
+    // Saat ini logicnya masih mengambil full data
+    // Parameter actorRole disiapkan jika nanti ada kebutuhan filtering field di level database
     return this.prisma.financialCheckup.findFirst({
       where: { userId },
       orderBy: { checkDate: 'desc' },

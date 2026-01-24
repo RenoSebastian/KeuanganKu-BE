@@ -13,8 +13,8 @@ import {
   DashboardStatsDto,
   RiskyEmployeeDto,
   UnitRankingDto,
-} from './dto/director-dashboard.dto'; // Asumsi DTO dashboard ada di sini
-import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto'; // Import DTO Detail dari file yang baru dibuat
+} from './dto/director-dashboard.dto'; 
+import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto'; 
 
 @ApiTags('Director Dashboard') 
 @ApiBearerAuth()              
