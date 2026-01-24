@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { FinancialService } from '../financial/financial.service'; // <--- Reuse Logic
+import { FinancialService } from '../financial/financial.service';
 import { HealthStatus } from '@prisma/client';
 
 // 1. Import DTO Dashboard
@@ -68,7 +68,6 @@ export class DirectorService {
     const users = await this.prisma.user.findMany({
       where: { 
         role: 'USER',
-        // Optimasi: Hanya ambil user yang pernah punya status Warning/Danger
         financialChecks: {
           some: {
             status: { in: [HealthStatus.BAHAYA, HealthStatus.WASPADA] }
@@ -151,40 +150,79 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 4. SEARCH EMPLOYEES
+  // 4. SEARCH EMPLOYEES (ADVANCED FUZZY SEARCH + MAPPING)
   // ===========================================================================
   async searchEmployees(keyword: string) {
     if (!keyword) return [];
 
-    return this.prisma.user.findMany({
-      where: {
-        role: 'USER',
-        OR: [
-          { fullName: { contains: keyword, mode: 'insensitive' } },
-          { email: { contains: keyword, mode: 'insensitive' } },
-          { unitKerja: { namaUnit: { contains: keyword, mode: 'insensitive' } } },
-        ],
+    const safeKeyword = keyword.trim();
+    const THRESHOLD = 0.1; 
+
+    // [STEP 2] Execute Raw Query
+    const results: any[] = await this.prisma.$queryRaw`
+      SELECT
+        u.id,
+        u.full_name as "fullName",
+        u.email,
+        uk.nama_unit as "unitName",
+        fc.status,
+        fc.health_score as "healthScore",
+        
+        GREATEST(
+          SIMILARITY(u.full_name, ${safeKeyword}), 
+          SIMILARITY(uk.nama_unit, ${safeKeyword})
+        ) as "matchScore"
+
+      FROM users u
+      LEFT JOIN unit_kerja uk ON u.unit_kerja_id = uk.id
+      LEFT JOIN (
+        SELECT DISTINCT ON (user_id) user_id, status, health_score
+        FROM financial_checkups
+        ORDER BY user_id, check_date DESC
+      ) fc ON fc.user_id = u.id
+
+      WHERE 
+        u.role = 'USER' AND 
+        (
+          SIMILARITY(u.full_name, ${safeKeyword}) > ${THRESHOLD} 
+          OR 
+          SIMILARITY(uk.nama_unit, ${safeKeyword}) > ${THRESHOLD}
+          OR
+          u.full_name ILIKE ${'%' + safeKeyword + '%'}
+          OR
+          u.email ILIKE ${'%' + safeKeyword + '%'}
+          OR
+          uk.nama_unit ILIKE ${'%' + safeKeyword + '%'}
+        )
+
+      ORDER BY "matchScore" DESC
+      LIMIT 20;
+    `;
+
+    // [STEP 3] Response Mapping (The Adapter)
+    // Mengubah hasil Raw SQL (Flat) menjadi Nested Object sesuai DTO Frontend.
+    return results.map((row) => ({
+      id: row.id,
+      fullName: row.fullName,
+      email: row.email,
+      
+      // Mapping ke Nested Object 'unitKerja'
+      unitKerja: { 
+        namaUnit: row.unitName || 'Tidak Ada Unit' 
       },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        unitKerja: { select: { namaUnit: true } },
-        financialChecks: {
-          orderBy: { checkDate: 'desc' },
-          take: 1,
-          select: { status: true, healthScore: true },
-        },
-      },
-      take: 20,
-    });
+      
+      // Mapping ke Array 'financialChecks' (Simulasi Relation)
+      financialChecks: row.status ? [{
+        status: row.status as HealthStatus,
+        healthScore: row.healthScore
+      }] : []
+    }));
   }
 
   // ===========================================================================
   // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT)
   // ===========================================================================
   async getEmployeeDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
-    // A. Validasi User Existence & Profile Fetching
     const user = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       include: { unitKerja: true }
@@ -192,15 +230,12 @@ export class DirectorService {
 
     if (!user) throw new NotFoundException('Karyawan tidak ditemukan');
 
-    // B. Ambil Data Checkup Terakhir (Reuse Logic dari FinancialService)
     const c = await this.financialService.getLatestCheckup(targetUserId, 'DIRECTOR');
 
     if (!c) {
-        return null; // Bisa diganti throw exception jika rule bisnis mengharuskan
+        return null; 
     }
 
-    // C. AUDIT TRIGGER (Critical Step)
-    // Mencatat bahwa Direksi melihat data detail ini SEBELUM return data
     this.auditService.logAccess({
       actorId: actorId,
       targetUserId: targetUserId,
@@ -211,10 +246,6 @@ export class DirectorService {
       }
     });
 
-    // D. PRIVACY FILTERING & MAPPING
-    // Kita melakukan mapping manual satu per satu field.
-    // Ini bertindak sebagai 'Whitelist'. Field sensitif di DB yang TIDAK di-map 
-    // otomatis tidak akan terkirim ke frontend.
     return {
       profile: {
         id: user.id,
@@ -241,16 +272,12 @@ export class DirectorService {
           dob: user.dateOfBirth ? user.dateOfBirth.toISOString() : undefined,
           ...c.userProfile as any 
         },
-        
-        // --- ASSET ---
         assetCash: Number(c.assetCash),
         assetHome: Number(c.assetHome),
         assetVehicle: Number(c.assetVehicle),
         assetJewelry: Number(c.assetJewelry),
         assetAntique: Number(c.assetAntique),
         assetPersonalOther: Number(c.assetPersonalOther),
-        
-        // --- INVESTMENT ---
         assetInvHome: Number(c.assetInvHome),
         assetInvVehicle: Number(c.assetInvVehicle),
         assetGold: Number(c.assetGold),
@@ -260,40 +287,32 @@ export class DirectorService {
         assetBonds: Number(c.assetBonds),
         assetDeposit: Number(c.assetDeposit),
         assetInvOther: Number(c.assetInvOther),
-        
-        // --- DEBT ---
         debtKPR: Number(c.debtKPR),
         debtKPM: Number(c.debtKPM),
         debtCC: Number(c.debtCC),
         debtCoop: Number(c.debtCoop),
         debtConsumptiveOther: Number(c.debtConsumptiveOther),
         debtBusiness: Number(c.debtBusiness),
-        
-        // --- CASHFLOW ---
         incomeFixed: Number(c.incomeFixed),
         incomeVariable: Number(c.incomeVariable),
-        
         installmentKPR: Number(c.installmentKPR),
         installmentKPM: Number(c.installmentKPM),
         installmentCC: Number(c.installmentCC),
         installmentCoop: Number(c.installmentCoop),
         installmentConsumptiveOther: Number(c.installmentConsumptiveOther),
         installmentBusiness: Number(c.installmentBusiness),
-        
         insuranceLife: Number(c.insuranceLife),
         insuranceHealth: Number(c.insuranceHealth),
         insuranceHome: Number(c.insuranceHome),
         insuranceVehicle: Number(c.insuranceVehicle),
         insuranceBPJS: Number(c.insuranceBPJS),
         insuranceOther: Number(c.insuranceOther),
-        
         savingEducation: Number(c.savingEducation),
         savingRetirement: Number(c.savingRetirement),
         savingPilgrimage: Number(c.savingPilgrimage),
         savingHoliday: Number(c.savingHoliday),
         savingEmergency: Number(c.savingEmergency),
         savingOther: Number(c.savingOther),
-        
         expenseFood: Number(c.expenseFood),
         expenseSchool: Number(c.expenseSchool),
         expenseTransport: Number(c.expenseTransport),
