@@ -9,7 +9,7 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { 
   calculateFinancialHealth,
   calculatePensionPlan,
-  calculateInsurancePlan, // Pakai yang updated
+  calculateInsurancePlan,
   calculateGoalPlan,
   calculateEducationPlan
 } from './utils/financial-math.util';
@@ -48,6 +48,7 @@ export class FinancialService {
     });
   }
 
+  // [IMPORTANT] Method ini Public & Exported untuk dipakai DirectorService
   async getLatestCheckup(userId: string) {
     return this.prisma.financialCheckup.findFirst({
       where: { userId },
@@ -284,9 +285,8 @@ export class FinancialService {
     return { score, status, recommendation };
   }
 
-  // Tambahkan method ini di dalam class FinancialService
+  // --- METHODS UNTUK MANAJEMEN RENCANA PENDIDIKAN ---
 
-  // --- UPDATE METHOD INI ---
   async getEducationPlans(userId: string) {
     // 1. Ambil data mentah dari DB (Header + Detail Stages)
     const plans = await this.prisma.educationPlan.findMany({
@@ -298,30 +298,26 @@ export class FinancialService {
     });
 
     // 2. Transformasi ke format Response yang diharapkan Frontend
-    // Format: { plan: {...}, calculation: { stagesBreakdown: [...] } }
     return plans.map((p) => {
-      // Pisahkan property 'stages' dari object plan utama agar rapi
       const { stages, ...planData } = p;
 
-      // Hitung total untuk kelengkapan data calculation (optional tapi good practice)
-      // Gunakan Number() karena Prisma Decimal mungkin return string/object
+      // Hitung total untuk kelengkapan data calculation
       const totalFutureCost = stages.reduce((acc, s) => acc + Number(s.futureCost), 0);
       const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
 
       return {
-        plan: planData, // Data Header (Nama Anak, DOB, Inflasi settings)
+        plan: planData, 
         calculation: {
           totalFutureCost,
           monthlySaving: totalMonthlySaving,
-          stagesBreakdown: stages, // Masukkan stages ke sini agar Frontend terbaca
+          stagesBreakdown: stages,
         },
       };
     });
   }
 
-  // 2. ADD method ini untuk mengatasi "DELETE 404 Not Found"
   async deleteEducationPlan(userId: string, planId: string) {
-    // Cek dulu apakah plan ini milik user yang sedang login (Security)
+    // Cek kepemilikan
     const plan = await this.prisma.educationPlan.findFirst({
       where: { id: planId, userId },
     });
@@ -330,7 +326,7 @@ export class FinancialService {
       throw new NotFoundException('Rencana pendidikan tidak ditemukan');
     }
 
-    // Hapus Plan (Stages akan terhapus otomatis karena onDelete: Cascade di schema.prisma)
+    // Hapus Plan
     return this.prisma.educationPlan.delete({
       where: { id: planId },
     });
