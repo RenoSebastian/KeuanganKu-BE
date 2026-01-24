@@ -1,26 +1,30 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service'; // <--- IMPORT AUDIT SERVICE
+import { AuditService } from '../audit/audit.service';
 import { HealthStatus } from '@prisma/client';
+
+// 1. Import DTO untuk Dashboard (Stats & Risky List)
 import { 
   DashboardStatsDto, 
   RiskyEmployeeDto, 
-  UnitRankingDto,
-  EmployeeAuditDetailDto 
+  UnitRankingDto 
 } from './dto/director-dashboard.dto';
+
+// 2. Import DTO untuk Detail Employee (Gunakan file yang BARU dibuat di Step 4)
+//    Ini mengatasi error "ratios does not exist"
+import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 
 @Injectable()
 export class DirectorService {
   constructor(
     private prisma: PrismaService,
-    private auditService: AuditService // <--- INJECT AUDIT SERVICE
+    private auditService: AuditService
   ) {}
 
   // ===========================================================================
   // 1. DASHBOARD STATS (Agregat Data)
   // ===========================================================================
   async getDashboardStats(): Promise<DashboardStatsDto> {
-    // Mengambil user dan HANYA checkup terakhirnya (Optimization)
     const users = await this.prisma.user.findMany({
       where: { role: 'USER' },
       select: {
@@ -96,10 +100,13 @@ export class DirectorService {
       },
     });
 
+    // [FIX] Tambahkan return type explicit pada map: "RiskyEmployeeDto | null"
+    // Ini membantu TS memvalidasi objek di dalam return
     const riskyList = users
-      .map((u) => {
+      .map((u): RiskyEmployeeDto | null => {
         const lastCheck = u.financialChecks[0];
-        // Filter Logic: Hanya ambil yang punya data DAN statusnya BUKAN Sehat
+        
+        // Filter: Skip jika tidak ada data atau status SEHAT
         if (!lastCheck) return null;
         if (lastCheck.status === HealthStatus.SEHAT) return null;
 
@@ -107,14 +114,17 @@ export class DirectorService {
           id: u.id,
           fullName: u.fullName,
           unitName: u.unitKerja?.namaUnit || 'Tidak Ada Unit',
-          status: lastCheck.status,
+          // [FIX] Pastikan status compatible dengan DTO
+          status: lastCheck.status, 
           healthScore: lastCheck.healthScore,
           lastCheckDate: lastCheck.checkDate,
         };
       })
+      // [FIX] Type Predicate: "item is RiskyEmployeeDto"
+      // Ini memberitahu TS bahwa hasil filter pasti BUKAN null
       .filter((item): item is RiskyEmployeeDto => item !== null);
 
-    // Sorting: Tampilkan yang paling "Sakit" (Score terendah) dulu
+    // Sorting: Aman karena TS sudah tahu item tidak mungkin null
     return riskyList.sort((a, b) => a.healthScore - b.healthScore);
   }
 
@@ -163,7 +173,6 @@ export class DirectorService {
       };
     });
 
-    // Sorting: Unit dengan performa terbaik di atas
     return rankings.sort((a, b) => b.avgScore - a.avgScore);
   }
 
@@ -179,7 +188,6 @@ export class DirectorService {
         OR: [
           { fullName: { contains: keyword, mode: 'insensitive' } },
           { email: { contains: keyword, mode: 'insensitive' } },
-          // Nested Relation Filter (Mencari berdasarkan nama unit kerja)
           { unitKerja: { namaUnit: { contains: keyword, mode: 'insensitive' } } },
         ],
       },
@@ -194,7 +202,7 @@ export class DirectorService {
           select: { status: true, healthScore: true },
         },
       },
-      take: 20, // Limit hasil pencarian
+      take: 20,
     });
   }
 
@@ -217,11 +225,10 @@ export class DirectorService {
     });
 
     if (!c) {
-        return null; // Atau throw exception jika ingin strict
+        return null; 
     }
 
-    // C. AUDIT TRAIL TRIGGER (FIRE-AND-FORGET)
-    // Mencatat bahwa Direksi sedang melihat data detail ini
+    // C. AUDIT TRAIL TRIGGER
     this.auditService.logAccess({
       actorId: actorId,
       targetUserId: targetUserId,
@@ -232,7 +239,8 @@ export class DirectorService {
       }
     });
 
-    // D. Mapping Response (Manual Mapping untuk Typescript Safety)
+    // D. Mapping Response
+    // Menggunakan DTO dari 'employee-detail-response.dto.ts' yang memiliki properti 'ratios'
     return {
       profile: {
         id: user.id,
@@ -250,29 +258,24 @@ export class DirectorService {
         netWorth: Number(c.totalNetWorth),
         surplusDeficit: Number(c.surplusDeficit), 
         generatedAt: c.checkDate,
-        ratios: c.ratiosDetails as any // Passing JSON raw ke FE
+        // [FIXED] Property 'ratios' sekarang dikenali karena import DTO sudah benar
+        ratios: c.ratiosDetails as any 
       },
 
       record: {
         userProfile: {
           name: user.fullName,
           dob: user.dateOfBirth ? user.dateOfBirth.toISOString() : undefined,
-          ...c.userProfile as any // Spread sisa data profil json
+          ...c.userProfile as any 
         },
 
-        // --- MAPPING FIELD DATABASE KE DTO FRONTEND ---
-        
-        // 1. Aset Likuid
+        // Mapping Data Mentah
         assetCash: Number(c.assetCash),
-
-        // 2. Aset Personal
         assetHome: Number(c.assetHome),
         assetVehicle: Number(c.assetVehicle),
         assetJewelry: Number(c.assetJewelry),
         assetAntique: Number(c.assetAntique),
         assetPersonalOther: Number(c.assetPersonalOther),
-
-        // 3. Aset Investasi
         assetInvHome: Number(c.assetInvHome),
         assetInvVehicle: Number(c.assetInvVehicle),
         assetGold: Number(c.assetGold),
@@ -282,46 +285,32 @@ export class DirectorService {
         assetBonds: Number(c.assetBonds),
         assetDeposit: Number(c.assetDeposit),
         assetInvOther: Number(c.assetInvOther),
-
-        // 4. Utang Konsumtif
         debtKPR: Number(c.debtKPR),
         debtKPM: Number(c.debtKPM),
         debtCC: Number(c.debtCC),
         debtCoop: Number(c.debtCoop),
         debtConsumptiveOther: Number(c.debtConsumptiveOther),
-
-        // 5. Utang Usaha
         debtBusiness: Number(c.debtBusiness),
-
-        // 6. Penghasilan
         incomeFixed: Number(c.incomeFixed),
         incomeVariable: Number(c.incomeVariable),
-
-        // 7. Cicilan Utang
         installmentKPR: Number(c.installmentKPR),
         installmentKPM: Number(c.installmentKPM),
         installmentCC: Number(c.installmentCC),
         installmentCoop: Number(c.installmentCoop),
         installmentConsumptiveOther: Number(c.installmentConsumptiveOther),
         installmentBusiness: Number(c.installmentBusiness),
-
-        // 8. Asuransi
         insuranceLife: Number(c.insuranceLife),
         insuranceHealth: Number(c.insuranceHealth),
         insuranceHome: Number(c.insuranceHome),
         insuranceVehicle: Number(c.insuranceVehicle),
         insuranceBPJS: Number(c.insuranceBPJS),
         insuranceOther: Number(c.insuranceOther),
-
-        // 9. Tabungan
         savingEducation: Number(c.savingEducation),
         savingRetirement: Number(c.savingRetirement),
         savingPilgrimage: Number(c.savingPilgrimage),
         savingHoliday: Number(c.savingHoliday),
         savingEmergency: Number(c.savingEmergency),
         savingOther: Number(c.savingOther),
-
-        // 10. Pengeluaran Rutin
         expenseFood: Number(c.expenseFood),
         expenseSchool: Number(c.expenseSchool),
         expenseTransport: Number(c.expenseTransport),
