@@ -1,29 +1,25 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
-import { AuthGuard } from '@nestjs/passport';
+import { AuditService } from './audit.service';
+import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard'; // Pastikan path import sesuai struktur folder
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
-import { AuditService } from './audit.service';
+import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 
-@ApiTags('Director Dashboard')
-@UseGuards(AuthGuard('jwt'), RolesGuard) // Double Guard: Login + Cek Role
+@ApiTags('Audit System')
 @ApiBearerAuth()
-@Controller('director')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(Role.DIRECTOR) // Security: Hanya Direksi yang boleh akses log sistem
+@Controller('audit')
 export class AuditController {
-  constructor(private auditService: AuditService) {}
+  constructor(private readonly auditService: AuditService) {}
 
   @Get('logs')
-  @Roles(Role.DIRECTOR, Role.ADMIN) // HANYA DIREKSI/ADMIN
-  @ApiOperation({ summary: 'Melihat jejak aktivitas user (Audit Trail)' })
-  getLogs() {
+  @ApiOperation({ summary: 'Melihat riwayat aktivitas sistem (Audit Trail)' })
+  async getAuditLogs() {
     return this.auditService.getAllLogs();
   }
 
-  @Get('risky-employees')
-  @Roles(Role.DIRECTOR)
-  @ApiOperation({ summary: 'List karyawan dengan kesehatan keuangan BAHAYA' })
-  getRiskyEmployees() {
-    return this.auditService.getRiskyEmployees();
-  }
+  // [CLEANUP] Method getRiskyEmployees dihapus dari sini.
+  // Fitur tersebut sekarang berada di DirectorController (Director Module).
 }
