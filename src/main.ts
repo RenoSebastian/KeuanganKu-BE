@@ -3,34 +3,58 @@ import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 
-async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+// --- ADDED: Imports untuk Logging System ---
+import { WinstonModule } from 'nest-winston';
+import { winstonConfig } from './common/configs/winston.config';
+import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
+import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+// -------------------------------------------
 
-  // 1. Enable CORS (Agar Frontend Next.js bisa nembak API ini)
+async function bootstrap() {
+  // 1. Create App dengan Logger Custom (Winston)
+  // Kita inject konfigurasi logger di sini agar saat booting pun lognya sudah terekam
+  const app = await NestFactory.create(AppModule, {
+    logger: WinstonModule.createLogger(winstonConfig),
+  });
+
+  // 2. Enable CORS
   app.enableCors();
 
-  // 2. Global Validation Pipe (Filter Data Sampah di Pintu Depan)
-  // whitelist: true -> properti yang tidak ada di DTO akan dibuang otomatis
+  // 3. Global Registration (Wiring Components)
+  // ---------------------------------------------------------
+  // A. Pasang "CCTV" (Mencatat semua request masuk & durasinya)
+  app.useGlobalInterceptors(new LoggingInterceptor());
+
+  // B. Pasang "Jaring Pengaman" (Menangkap error crash & simpan ke file log)
+  app.useGlobalFilters(new AllExceptionsFilter());
+
+  // C. Pasang "Filter Sampah" (Validasi DTO)
   app.useGlobalPipes(new ValidationPipe({
     whitelist: true,
     transform: true,
   }));
+  // ---------------------------------------------------------
 
-  // 3. Setup Swagger (Dokumentasi API Otomatis)
+  // 4. Setup Swagger
   const config = new DocumentBuilder()
     .setTitle('Keuanganku API')
     .setDescription('Dokumentasi API untuk Aplikasi Perencanaan Keuangan PAM JAYA')
     .setVersion('1.0')
-    .addBearerAuth() // Support Login Token di Docs
+    .addBearerAuth()
     .build();
   
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document); // Akses di: localhost:4000/api/docs
+  SwaggerModule.setup('api/docs', app, document);
 
-  // 4. Jalankan Server
+  // 5. Jalankan Server
   const port = process.env.PORT || 4000;
   await app.listen(port);
-  console.log(`🚀 Server berjalan di http://localhost:${port}`);
-  console.log(`📄 Swagger Docs di http://localhost:${port}/api/docs`);
+  
+  // Karena logger default sudah diganti Winston, log ini pun akan masuk ke file & console dengan format baru
+  // Kita bisa pakai logger instance dari app context jika mau, tapi console.log biasa juga akan ter-intercept
+  // atau lebih baik gunakan Logger class dari @nestjs/common untuk konsistensi:
+  const logger = new (await import('@nestjs/common')).Logger('Bootstrap');
+  logger.log(`🚀 Server berjalan di http://localhost:${port}`);
+  logger.log(`📄 Swagger Docs di http://localhost:${port}/api/docs`);
 }
 bootstrap();
