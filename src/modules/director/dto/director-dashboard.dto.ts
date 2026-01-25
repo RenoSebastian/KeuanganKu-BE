@@ -48,6 +48,10 @@ export class RiskyEmployeeDto {
   @ApiProperty({ example: 45, description: 'Skor kesehatan finansial (0-100)' })
   healthScore: number;
 
+  // [FIX] Properti ini ditambahkan untuk mengatasi error di Service
+  @ApiProperty({ example: 35, description: 'Rasio hutang terhadap pendapatan (%)', required: false })
+  debtToIncomeRatio?: number;
+
   @ApiProperty({ example: '2026-01-24T00:00:00.000Z', description: 'Tanggal checkup terakhir' })
   lastCheckDate: Date;
 }
@@ -114,7 +118,3 @@ export class DashboardSummaryDto {
   @ApiProperty({ type: DashboardMetaDto, description: 'Metadata response' })
   meta: DashboardMetaDto;
 }
-
-// NOTE: 
-// DTO untuk 'EmployeeAuditDetailDto' berada di file terpisah:
-// src/modules/director/dto/employee-detail-response.dto.ts

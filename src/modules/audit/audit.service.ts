@@ -10,35 +10,29 @@ export class AuditService {
 
   /**
    * MENCATAT JEJAK DIGITAL (AUDIT TRAIL)
-   * Konsep: Fire-and-Forget (Non-blocking priority)
-   * Logic: 
-   * 1. Terima payload DTO.
-   * 2. Lakukan insert ke DB secara asynchronous.
-   * 3. Jika gagal, catat di console server (Logger) agar tidak men-crash request utama.
+   * Signature: logAccess(dto: CreateAuditLogDto) -> 1 Argument
    */
-  async logAccess(actorId: string, targetUserId: string, p0: string, p1: { employeeName: string; healthScore: number; }, dto: CreateAuditLogDto): Promise<void> {
+  async logAccess(dto: CreateAuditLogDto): Promise<void> {
     try {
       await this.prisma.accessLog.create({
         data: {
           actorId: dto.actorId,
-          targetUserId: dto.targetUserId ?? null, // Handle null explicitly
+          targetUserId: dto.targetUserId ?? null, // Handle jika undefined
           action: dto.action,
-          metadata: dto.metadata ?? {}, // Simpan sebagai JSON
+          metadata: dto.metadata ?? {},
         },
       });
     } catch (error) {
-      // CRITICAL: Jangan throw error ke user! 
-      // Kegagalan log tidak boleh membatalkan aksi bisnis (misal: view dashboard).
-      // Cukup catat di internal system log.
+      // Fail-safe: Error log tidak boleh mematikan flow utama
       this.logger.error(
         `[AUDIT FAILURE] Failed to log action '${dto.action}' by ${dto.actorId}`, 
-        error.stack
+        error instanceof Error ? error.stack : String(error)
       );
     }
   }
 
   /**
-   * READ: UNTUK KEBUTUHAN HALAMAN HISTORY LOG DIREKSI
+   * READ: HISTORY LOG
    */
   async getAllLogs() {
     return this.prisma.accessLog.findMany({
@@ -51,10 +45,7 @@ export class AuditService {
         },
       },
       orderBy: { accessedAt: 'desc' },
-      take: 100, // Limit 100 log terakhir demi performa
+      take: 100,
     });
   }
-
-  // NOTE: getRiskyEmployees() dipindahkan ke FinancialService/DirectorService
-  // untuk menjaga Single Responsibility Principle.
 }

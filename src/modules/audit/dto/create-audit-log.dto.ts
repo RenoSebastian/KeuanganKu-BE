@@ -1,19 +1,23 @@
-import { IsString, IsNotEmpty, IsOptional, IsUUID, IsObject } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
+import { IsString, IsNotEmpty, IsOptional, IsObject } from 'class-validator';
 
 export class CreateAuditLogDto {
-  @IsUUID('4', { message: 'Actor ID harus berupa UUID valid' })
+  @ApiProperty({ example: 'uuid-actor', description: 'ID User yang melakukan aksi' })
+  @IsString()
   @IsNotEmpty()
   actorId: string;
 
-  @IsUUID('4', { message: 'Target User ID harus berupa UUID valid' })
+  @ApiProperty({ example: 'uuid-target', description: 'ID User yang datanya diakses (Opsional)', required: false })
+  @IsString()
   @IsOptional()
-  targetUserId?: string; // Optional: Karena tidak semua aksi melibatkan user lain
+  targetUserId?: string;
 
+  @ApiProperty({ example: 'VIEW_EMPLOYEE_DETAIL', description: 'Jenis aksi yang dilakukan' })
   @IsString()
   @IsNotEmpty()
-  action: string; // Contoh: "VIEW_DETAIL", "EXPORT_PDF"
+  action: string;
 
-  @IsObject()
+  @ApiProperty({ example: { score: 80 }, description: 'Metadata tambahan (JSON)', required: false })
   @IsOptional()
-  metadata?: Record<string, any>; // Fleksibel untuk menyimpan IP, User Agent, atau Snapshot data
+  metadata?: Record<string, any>;
 }

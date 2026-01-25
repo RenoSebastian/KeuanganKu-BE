@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { FinancialService } from '../financial/financial.service'; // Pastikan diimport
+import { FinancialService } from '../financial/financial.service';
 import { HealthStatus } from '@prisma/client';
 
 // Utility Import (Step 1 Integration)
@@ -226,7 +226,7 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT + ON-THE-FLY CALC)
+  // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT)
   // ===========================================================================
   async getEmployeeAuditDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
     const user = await this.prisma.user.findUnique({
@@ -242,24 +242,22 @@ export class DirectorService {
         return null; 
     }
 
-    // AUDIT TRAIL LOGGING
-    await this.auditService.logAccess(
-      actorId,
-      targetUserId,
-      'VIEW_EMPLOYEE_DETAIL',
-      { 
+    // [FIX 1] Pass object, bukan multiple arguments
+    await this.auditService.logAccess({
+      actorId: actorId,
+      targetUserId: targetUserId,
+      action: 'VIEW_EMPLOYEE_DETAIL',
+      metadata: { 
         employeeName: user.fullName,
         healthScore: c.healthScore
       }
-    );
+    });
 
-    // [STEP 2: ADAPTER LOGIC]
-    // Cek apakah hasil analisa (Rasio) sudah tersimpan di database?
-    let analysisRatios = c.ratiosDetails;
+    // [FIX 2] Type Casting untuk menghindari error Prisma JsonValue vs RatioDetail[]
+    let analysisRatios: any = c.ratiosDetails;
 
-    // Jika belum ada (null), hitung secara on-the-fly menggunakan Utility
+    // On-the-fly Calculation jika data belum matang
     if (!analysisRatios) {
-        // Casting raw DB data ke DTO input untuk kalkulator
         const rawDataForCalc: CreateFinancialRecordDto = {
             assetCash: Number(c.assetCash),
             assetHome: Number(c.assetHome),
@@ -333,8 +331,7 @@ export class DirectorService {
         netWorth: Number(c.totalNetWorth),
         surplusDeficit: Number(c.surplusDeficit), 
         generatedAt: c.checkDate,
-        // Gunakan hasil adaptasi (DB atau On-the-fly)
-        ratios: analysisRatios as any 
+        ratios: analysisRatios as any // Explicit casting
       },
 
       record: {
