@@ -13,14 +13,14 @@ import {
   DashboardStatsDto,
   RiskyEmployeeDto,
   UnitRankingDto,
-  DashboardSummaryDto, // <--- IMPORT DTO SUMMARY (PHASE 5)
+  DashboardSummaryDto,
 } from './dto/director-dashboard.dto'; 
 import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto'; 
 
 @ApiTags('Director Dashboard') 
 @ApiBearerAuth()              
-@UseGuards(JwtAuthGuard, RolesGuard) // GUARD AKTIF: Cek Login & Cek Role
-@Roles(client.Role.DIRECTOR)          // SECURITY HARD LOCK: Hanya Role DIRECTOR yang boleh masuk
+@UseGuards(JwtAuthGuard, RolesGuard) // LAYER 1: Cek Token Valid & Cek Role Guard Active
+@Roles(client.Role.DIRECTOR)          // LAYER 2: Spesifik hanya Role DIRECTOR
 @Controller('director')
 export class DirectorController {
   constructor(private readonly directorService: DirectorService) {}
@@ -52,7 +52,8 @@ export class DirectorController {
   @ApiOperation({ summary: 'Mendapatkan daftar karyawan dengan status BAHAYA/WASPADA' })
   @ApiResponse({ status: 200, type: [RiskyEmployeeDto] })
   getRiskMonitor() {
-    return this.directorService.getRiskyEmployees();
+    // Memanggil method getRiskMonitor (sesuai update di service step sebelumnya)
+    return this.directorService.getRiskMonitor();
   }
 
   // ===========================================================================
@@ -78,14 +79,14 @@ export class DirectorController {
   // ===========================================================================
   // 5. EMPLOYEE DETAIL (Deep Dive + Audit)
   // ===========================================================================
-  @Get('employees/:id/checkup') // Route sesuai Logic Workflow
-  @ApiOperation({ summary: 'Mendapatkan detail audit lengkap satu karyawan (Trigger Audit Log)' })
+  @Get('employees/:id/checkup') 
+  @ApiOperation({ summary: 'Mendapatkan detail audit lengkap satu karyawan (Memicu Audit Log)' })
   @ApiResponse({ status: 200, type: EmployeeAuditDetailDto })
   async getEmployeeAuditDetail(
-    @GetUser() director: client.User, // Ambil User object milik Direksi (Actor)
-    @Param('id') targetUserId: string // Ambil ID Karyawan (Target)
+    @GetUser() director: client.User, // Mengambil data Direksi yang sedang login (Actor)
+    @Param('id') targetUserId: string // ID Karyawan yang ingin dilihat (Target)
   ) {
-    // Panggil Service dengan 2 parameter untuk memicu Audit Trail
-    return this.directorService.getEmployeeDetail(director.id, targetUserId);
+    // Service akan mencatat Audit Trail: Actor -> Melihat -> Target
+    return this.directorService.getEmployeeAuditDetail(director.id, targetUserId);
   }
 }

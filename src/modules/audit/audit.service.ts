@@ -16,7 +16,7 @@ export class AuditService {
    * 2. Lakukan insert ke DB secara asynchronous.
    * 3. Jika gagal, catat di console server (Logger) agar tidak men-crash request utama.
    */
-  async logAccess(dto: CreateAuditLogDto): Promise<void> {
+  async logAccess(actorId: string, targetUserId: string, p0: string, p1: { employeeName: string; healthScore: number; }, dto: CreateAuditLogDto): Promise<void> {
     try {
       await this.prisma.accessLog.create({
         data: {

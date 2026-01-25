@@ -5,25 +5,25 @@ import { HealthStatus } from '@prisma/client';
 // 1. SUB-DTO: HEADER PROFIL KARYAWAN
 // ============================================================================
 export class EmployeeProfileDto {
-  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000' })
+  @ApiProperty({ example: '550e8400-e29b-41d4-a716-446655440000', description: 'ID unik karyawan (UUID)' })
   id: string;
 
-  @ApiProperty({ example: 'Budi Santoso' })
+  @ApiProperty({ example: 'Budi Santoso', description: 'Nama lengkap karyawan' })
   fullName: string;
 
-  @ApiProperty({ example: 'Divisi Teknologi Informasi' })
+  @ApiProperty({ example: 'Divisi Teknologi Informasi', description: 'Nama unit kerja/divisi' })
   unitName: string;
 
-  @ApiProperty({ example: 'budi@pamjaya.co.id' })
+  @ApiProperty({ example: 'budi@pamjaya.co.id', description: 'Email korporat karyawan' })
   email: string;
 
-  @ApiProperty({ enum: HealthStatus, example: 'BAHAYA' })
+  @ApiProperty({ enum: HealthStatus, example: 'BAHAYA', description: 'Status kesehatan finansial saat ini' })
   status: HealthStatus;
 
   @ApiProperty({ example: 45, description: 'Skor kesehatan finansial (0-100)' })
   healthScore: number;
 
-  @ApiProperty({ example: '2026-01-24T10:00:00.000Z' })
+  @ApiProperty({ example: '2026-01-24T10:00:00.000Z', description: 'Waktu checkup terakhir dilakukan' })
   lastCheckDate: Date;
 }
 
@@ -31,28 +31,28 @@ export class EmployeeProfileDto {
 // 2. SUB-DTO: HASIL ANALISA (SUMMARY)
 // ============================================================================
 export class FinancialAnalysisDto {
-  @ApiProperty({ example: 45 })
+  @ApiProperty({ example: 45, description: 'Skor akhir hasil kalkulasi' })
   score: number;
 
-  @ApiProperty({ enum: HealthStatus, example: 'BAHAYA' })
+  @ApiProperty({ enum: HealthStatus, example: 'BAHAYA', description: 'Status global hasil checkup' })
   globalStatus: HealthStatus;
 
-  @ApiProperty({ example: 500000000, description: 'Total Kekayaan Bersih' })
+  @ApiProperty({ example: 500000000, description: 'Total Kekayaan Bersih (Net Worth)' })
   netWorth: number;
 
-  @ApiProperty({ example: -2000000, description: 'Surplus/Defisit Bulanan' })
+  @ApiProperty({ example: -2000000, description: 'Surplus/Defisit Arus Kas Bulanan' })
   surplusDeficit: number;
 
-  @ApiProperty()
+  @ApiProperty({ description: 'Waktu analisa ini digenerate' })
   generatedAt: Date;
 
   @ApiProperty({ 
-    description: 'Detail rasio finansial (JSON dynamic)',
+    description: 'Detail rasio finansial (Array of Objects dari engine)',
     example: [
-      { id: 'saving_ratio', label: 'Rasio Tabungan', value: 5, grade: 'POOR' }
+      { id: 'saving_ratio', label: 'Rasio Tabungan', value: 5, grade: 'POOR', statusColor: 'RED' }
     ]
   })
-  ratios: any; // Menggunakan 'any' karena struktur JSON dinamis dari engine
+  ratios: any; // Menggunakan 'any' karena struktur JSON dinamis dari financial engine
 }
 
 // ============================================================================
@@ -62,93 +62,93 @@ class UserProfileDataDto {
   @ApiProperty({ example: 'Budi Santoso' })
   name: string;
 
-  @ApiProperty({ example: '1985-08-17' })
+  @ApiProperty({ example: '1985-08-17', required: false })
   dob?: string;
 }
 
 export class FinancialRecordDataDto {
-  @ApiProperty({ type: UserProfileDataDto })
+  @ApiProperty({ type: UserProfileDataDto, description: 'Snapshot data profil saat checkup' })
   userProfile: UserProfileDataDto;
 
   // --- A. ASET LIKUID ---
-  @ApiProperty() assetCash: number;
+  @ApiProperty({ example: 10000000 }) assetCash: number;
 
   // --- B. ASET PERSONAL ---
-  @ApiProperty() assetHome: number;
-  @ApiProperty() assetVehicle: number;
-  @ApiProperty() assetJewelry: number;
-  @ApiProperty() assetAntique: number;
-  @ApiProperty() assetPersonalOther: number;
+  @ApiProperty({ example: 500000000 }) assetHome: number;
+  @ApiProperty({ example: 150000000 }) assetVehicle: number;
+  @ApiProperty({ example: 5000000 }) assetJewelry: number;
+  @ApiProperty({ example: 0 }) assetAntique: number;
+  @ApiProperty({ example: 2000000 }) assetPersonalOther: number;
 
   // --- C. ASET INVESTASI ---
-  @ApiProperty() assetInvHome: number;
-  @ApiProperty() assetInvVehicle: number;
-  @ApiProperty() assetGold: number;
-  @ApiProperty() assetInvAntique: number;
-  @ApiProperty() assetStocks: number;
-  @ApiProperty() assetMutualFund: number;
-  @ApiProperty() assetBonds: number;
-  @ApiProperty() assetDeposit: number;
-  @ApiProperty() assetInvOther: number;
+  @ApiProperty({ example: 0 }) assetInvHome: number;
+  @ApiProperty({ example: 0 }) assetInvVehicle: number;
+  @ApiProperty({ example: 10000000 }) assetGold: number;
+  @ApiProperty({ example: 0 }) assetInvAntique: number;
+  @ApiProperty({ example: 5000000 }) assetStocks: number;
+  @ApiProperty({ example: 15000000 }) assetMutualFund: number;
+  @ApiProperty({ example: 0 }) assetBonds: number;
+  @ApiProperty({ example: 20000000 }) assetDeposit: number;
+  @ApiProperty({ example: 0 }) assetInvOther: number;
 
   // --- D. UTANG KONSUMTIF ---
-  @ApiProperty() debtKPR: number;
-  @ApiProperty() debtKPM: number;
-  @ApiProperty() debtCC: number;
-  @ApiProperty() debtCoop: number;
-  @ApiProperty() debtConsumptiveOther: number;
+  @ApiProperty({ example: 300000000 }) debtKPR: number;
+  @ApiProperty({ example: 50000000 }) debtKPM: number;
+  @ApiProperty({ example: 5000000 }) debtCC: number;
+  @ApiProperty({ example: 0 }) debtCoop: number;
+  @ApiProperty({ example: 0 }) debtConsumptiveOther: number;
 
   // --- E. UTANG USAHA ---
-  @ApiProperty() debtBusiness: number;
+  @ApiProperty({ example: 0 }) debtBusiness: number;
 
   // --- F. PENGHASILAN ---
-  @ApiProperty() incomeFixed: number;
-  @ApiProperty() incomeVariable: number;
+  @ApiProperty({ example: 15000000 }) incomeFixed: number;
+  @ApiProperty({ example: 2000000 }) incomeVariable: number;
 
-  // --- G. CICILAN UTANG ---
-  @ApiProperty() installmentKPR: number;
-  @ApiProperty() installmentKPM: number;
-  @ApiProperty() installmentCC: number;
-  @ApiProperty() installmentCoop: number;
-  @ApiProperty() installmentConsumptiveOther: number;
-  @ApiProperty() installmentBusiness: number;
+  // --- G. CICILAN UTANG (PENGELUARAN) ---
+  @ApiProperty({ example: 3500000 }) installmentKPR: number;
+  @ApiProperty({ example: 1500000 }) installmentKPM: number;
+  @ApiProperty({ example: 500000 }) installmentCC: number;
+  @ApiProperty({ example: 0 }) installmentCoop: number;
+  @ApiProperty({ example: 0 }) installmentConsumptiveOther: number;
+  @ApiProperty({ example: 0 }) installmentBusiness: number;
 
-  // --- H. ASURANSI ---
-  @ApiProperty() insuranceLife: number;
-  @ApiProperty() insuranceHealth: number;
-  @ApiProperty() insuranceHome: number;
-  @ApiProperty() insuranceVehicle: number;
-  @ApiProperty() insuranceBPJS: number;
-  @ApiProperty() insuranceOther: number;
+  // --- H. ASURANSI (PENGELUARAN) ---
+  @ApiProperty({ example: 500000 }) insuranceLife: number;
+  @ApiProperty({ example: 750000 }) insuranceHealth: number;
+  @ApiProperty({ example: 0 }) insuranceHome: number;
+  @ApiProperty({ example: 0 }) insuranceVehicle: number;
+  @ApiProperty({ example: 200000 }) insuranceBPJS: number;
+  @ApiProperty({ example: 0 }) insuranceOther: number;
 
-  // --- I. TABUNGAN & INVESTASI RUTIN ---
-  @ApiProperty() savingEducation: number;
-  @ApiProperty() savingRetirement: number;
-  @ApiProperty() savingPilgrimage: number;
-  @ApiProperty() savingHoliday: number;
-  @ApiProperty() savingEmergency: number;
-  @ApiProperty() savingOther: number;
+  // --- I. TABUNGAN & INVESTASI RUTIN (PENGELUARAN) ---
+  @ApiProperty({ example: 1000000 }) savingEducation: number;
+  @ApiProperty({ example: 1000000 }) savingRetirement: number;
+  @ApiProperty({ example: 0 }) savingPilgrimage: number;
+  @ApiProperty({ example: 0 }) savingHoliday: number;
+  @ApiProperty({ example: 500000 }) savingEmergency: number;
+  @ApiProperty({ example: 0 }) savingOther: number;
 
-  // --- J. PENGELUARAN RUTIN ---
-  @ApiProperty() expenseFood: number;
-  @ApiProperty() expenseSchool: number;
-  @ApiProperty() expenseTransport: number;
-  @ApiProperty() expenseCommunication: number;
-  @ApiProperty() expenseHelpers: number;
-  @ApiProperty() expenseTax: number;
-  @ApiProperty() expenseLifestyle: number;
+  // --- J. PENGELUARAN RUTIN LAINNYA ---
+  @ApiProperty({ example: 3000000 }) expenseFood: number;
+  @ApiProperty({ example: 1500000 }) expenseSchool: number;
+  @ApiProperty({ example: 1000000 }) expenseTransport: number;
+  @ApiProperty({ example: 500000 }) expenseCommunication: number;
+  @ApiProperty({ example: 0 }) expenseHelpers: number;
+  @ApiProperty({ example: 0 }) expenseTax: number;
+  @ApiProperty({ example: 1000000 }) expenseLifestyle: number;
 }
 
 // ============================================================================
 // 4. WRAPPER UTAMA (RESPONSE DTO)
 // ============================================================================
 export class EmployeeAuditDetailDto {
-  @ApiProperty({ type: EmployeeProfileDto })
+  @ApiProperty({ type: EmployeeProfileDto, description: 'Informasi identitas dan status audit karyawan' })
   profile: EmployeeProfileDto;
 
-  @ApiProperty({ type: FinancialAnalysisDto })
+  @ApiProperty({ type: FinancialAnalysisDto, description: 'Hasil analisa dan skor kesehatan finansial' })
   analysis: FinancialAnalysisDto;
 
-  @ApiProperty({ type: FinancialRecordDataDto })
+  @ApiProperty({ type: FinancialRecordDataDto, description: 'Data mentah inputan financial checkup' })
   record: FinancialRecordDataDto;
 }

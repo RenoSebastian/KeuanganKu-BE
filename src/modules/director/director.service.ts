@@ -1,15 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { FinancialService } from '../financial/financial.service';
 import { HealthStatus } from '@prisma/client';
 
-// 1. Import DTO Dashboard & Summary
+// 1. Import DTO
 import { 
   DashboardStatsDto, 
   RiskyEmployeeDto, 
-  UnitRankingDto,
-  DashboardSummaryDto // <--- Import DTO Baru (Phase 5)
+  UnitRankingDto 
 } from './dto/director-dashboard.dto';
 
 // 2. Import DTO Detail Employee
@@ -19,37 +17,11 @@ import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 export class DirectorService {
   constructor(
     private prisma: PrismaService,
-    private auditService: AuditService,
-    private financialService: FinancialService 
+    private auditService: AuditService
   ) {}
 
   // ===========================================================================
-  // PHASE 5: ORCHESTRATOR (PARALLEL EXECUTION)
-  // ===========================================================================
-  async getDashboardSummary(): Promise<DashboardSummaryDto> {
-    // [PARALLEL EXECUTION]
-    // Memicu 3 query berat sekaligus tanpa menunggu satu sama lain.
-    // Ini mengurangi total latency secara signifikan (Non-blocking I/O).
-    const [stats, riskyAll, rankingsAll] = await Promise.all([
-      this.getDashboardStats(),
-      this.getRiskyEmployees(),
-      this.getUnitRankings(),
-    ]);
-
-    // [ASSEMBLY]
-    // Menggabungkan hasil dan membatasi list hanya untuk preview (Top 5).
-    return {
-      stats,
-      topRiskyEmployees: riskyAll.slice(0, 5), // Ambil 5 teratas (paling berisiko)
-      unitRankings: rankingsAll.slice(0, 5),   // Ambil 5 teratas (unit kerja)
-      meta: {
-        generatedAt: new Date(),
-      },
-    };
-  }
-
-  // ===========================================================================
-  // 1. DASHBOARD STATS (OPTIMIZED)
+  // 1. DASHBOARD STATS (OPTIMIZED - DATABASE AGGREGATION)
   // ===========================================================================
   async getDashboardStats(): Promise<DashboardStatsDto> {
     const totalEmployees = await this.prisma.user.count({
@@ -88,18 +60,11 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 2. RISK MONITOR (DATABASE FILTERING)
+  // 2. RISK MONITOR (Daftar Karyawan Berisiko)
   // ===========================================================================
   async getRiskyEmployees(): Promise<RiskyEmployeeDto[]> {
     const users = await this.prisma.user.findMany({
-      where: { 
-        role: 'USER',
-        financialChecks: {
-          some: {
-            status: { in: [HealthStatus.BAHAYA, HealthStatus.WASPADA] }
-          }
-        }
-      },
+      where: { role: 'USER' },
       select: {
         id: true,
         fullName: true,
@@ -138,9 +103,15 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 3. UNIT RANKING (OPTIMIZED)
+  // 3. UNIT RANKING (OPTIMIZED - DATABASE AGGREGATION)
   // ===========================================================================
   async getUnitRankings(): Promise<UnitRankingDto[]> {
+    // Logic:
+    // 1. LEFT JOIN 'unit_kerja' ke 'users' -> Menghitung jumlah karyawan per unit
+    // 2. LEFT JOIN ke Subquery 'financial_checkups' (Latest) -> Menghitung Avg Health Score
+    // 3. GROUP BY unit_kerja.id
+    // 4. ORDER BY avgScore DESC (Langsung dari DB)
+
     const rawRankings: any[] = await this.prisma.$queryRaw`
       SELECT
         uk.id,
@@ -158,6 +129,7 @@ export class DirectorService {
       ORDER BY "avgScore" DESC;
     `;
 
+    // Mapping Raw Result ke DTO (+ Logic Status Labeling)
     return rawRankings.map((row) => {
       const score = Math.round(row.avgScore);
       let status: HealthStatus = HealthStatus.BAHAYA;
@@ -170,76 +142,43 @@ export class DirectorService {
         unitName: row.unitName,
         employeeCount: row.employeeCount,
         avgScore: score,
-        status, 
+        status, // Status dikalkulasi saat mapping, datanya valid
       };
     });
   }
 
   // ===========================================================================
-  // 4. SEARCH EMPLOYEES (ADVANCED FUZZY SEARCH)
+  // 4. SEARCH EMPLOYEES (Pencarian Global)
   // ===========================================================================
   async searchEmployees(keyword: string) {
     if (!keyword) return [];
 
-    const safeKeyword = keyword.trim();
-    const THRESHOLD = 0.1; 
-
-    const results: any[] = await this.prisma.$queryRaw`
-      SELECT
-        u.id,
-        u.full_name as "fullName",
-        u.email,
-        uk.nama_unit as "unitName",
-        fc.status,
-        fc.health_score as "healthScore",
-        
-        GREATEST(
-          SIMILARITY(u.full_name, ${safeKeyword}), 
-          SIMILARITY(uk.nama_unit, ${safeKeyword})
-        ) as "matchScore"
-
-      FROM users u
-      LEFT JOIN unit_kerja uk ON u.unit_kerja_id = uk.id
-      LEFT JOIN (
-        SELECT DISTINCT ON (user_id) user_id, status, health_score
-        FROM financial_checkups
-        ORDER BY user_id, check_date DESC
-      ) fc ON fc.user_id = u.id
-
-      WHERE 
-        u.role = 'USER' AND 
-        (
-          SIMILARITY(u.full_name, ${safeKeyword}) > ${THRESHOLD} 
-          OR 
-          SIMILARITY(uk.nama_unit, ${safeKeyword}) > ${THRESHOLD}
-          OR
-          u.full_name ILIKE ${'%' + safeKeyword + '%'}
-          OR
-          u.email ILIKE ${'%' + safeKeyword + '%'}
-          OR
-          uk.nama_unit ILIKE ${'%' + safeKeyword + '%'}
-        )
-
-      ORDER BY "matchScore" DESC
-      LIMIT 20;
-    `;
-
-    return results.map((row) => ({
-      id: row.id,
-      fullName: row.fullName,
-      email: row.email,
-      unitKerja: { 
-        namaUnit: row.unitName || 'Tidak Ada Unit' 
+    return this.prisma.user.findMany({
+      where: {
+        role: 'USER',
+        OR: [
+          { fullName: { contains: keyword, mode: 'insensitive' } },
+          { email: { contains: keyword, mode: 'insensitive' } },
+          { unitKerja: { namaUnit: { contains: keyword, mode: 'insensitive' } } },
+        ],
       },
-      financialChecks: row.status ? [{
-        status: row.status as HealthStatus,
-        healthScore: row.healthScore
-      }] : []
-    }));
+      select: {
+        id: true,
+        fullName: true,
+        email: true,
+        unitKerja: { select: { namaUnit: true } },
+        financialChecks: {
+          orderBy: { checkDate: 'desc' },
+          take: 1,
+          select: { status: true, healthScore: true },
+        },
+      },
+      take: 20,
+    });
   }
 
   // ===========================================================================
-  // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT)
+  // 5. EMPLOYEE DETAIL (Deep Dive + Automatic Audit)
   // ===========================================================================
   async getEmployeeDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
     const user = await this.prisma.user.findUnique({
@@ -249,12 +188,16 @@ export class DirectorService {
 
     if (!user) throw new NotFoundException('Karyawan tidak ditemukan');
 
-    const c = await this.financialService.getLatestCheckup(targetUserId, 'DIRECTOR');
+    const c = await this.prisma.financialCheckup.findFirst({
+      where: { userId: targetUserId },
+      orderBy: { checkDate: 'desc' }
+    });
 
     if (!c) {
         return null; 
     }
 
+    // AUDIT TRAIL
     this.auditService.logAccess({
       actorId: actorId,
       targetUserId: targetUserId,
@@ -265,6 +208,7 @@ export class DirectorService {
       }
     });
 
+    // MAPPING RESPONSE
     return {
       profile: {
         id: user.id,
