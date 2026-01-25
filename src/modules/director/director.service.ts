@@ -1,13 +1,19 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { FinancialService } from '../financial/financial.service'; // Pastikan diimport
 import { HealthStatus } from '@prisma/client';
 
-// 1. Import DTO
+// Utility Import (Step 1 Integration)
+import { calculateFinancialHealth } from '../financial/utils/financial-math.util';
+import { CreateFinancialRecordDto } from '../financial/dto/create-financial-record.dto';
+
+// 1. Import DTO Dashboard & Summary
 import { 
   DashboardStatsDto, 
   RiskyEmployeeDto, 
-  UnitRankingDto 
+  UnitRankingDto,
+  DashboardSummaryDto
 } from './dto/director-dashboard.dto';
 
 // 2. Import DTO Detail Employee
@@ -17,11 +23,32 @@ import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 export class DirectorService {
   constructor(
     private prisma: PrismaService,
-    private auditService: AuditService
+    private auditService: AuditService,
+    private financialService: FinancialService
   ) {}
 
   // ===========================================================================
-  // 1. DASHBOARD STATS (OPTIMIZED - DATABASE AGGREGATION)
+  // PHASE 5: ORCHESTRATOR (PARALLEL EXECUTION)
+  // ===========================================================================
+  async getDashboardSummary(): Promise<DashboardSummaryDto> {
+    const [stats, riskyAll, rankingsAll] = await Promise.all([
+      this.getDashboardStats(),
+      this.getRiskMonitor(), 
+      this.getUnitRankings(),
+    ]);
+
+    return {
+      stats,
+      topRiskyEmployees: riskyAll.slice(0, 5), // Preview Top 5
+      unitRankings: rankingsAll.slice(0, 5),   // Preview Top 5
+      meta: {
+        generatedAt: new Date(),
+      },
+    };
+  }
+
+  // ===========================================================================
+  // 1. DASHBOARD STATS (OPTIMIZED)
   // ===========================================================================
   async getDashboardStats(): Promise<DashboardStatsDto> {
     const totalEmployees = await this.prisma.user.count({
@@ -60,11 +87,18 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 2. RISK MONITOR (Daftar Karyawan Berisiko)
+  // 2. RISK MONITOR (DATABASE FILTERING)
   // ===========================================================================
-  async getRiskyEmployees(): Promise<RiskyEmployeeDto[]> {
+  async getRiskMonitor(): Promise<RiskyEmployeeDto[]> {
     const users = await this.prisma.user.findMany({
-      where: { role: 'USER' },
+      where: { 
+        role: 'USER',
+        financialChecks: { 
+          some: {
+            status: { in: [HealthStatus.BAHAYA, HealthStatus.WASPADA] }
+          }
+        }
+      },
       select: {
         id: true,
         fullName: true,
@@ -76,6 +110,7 @@ export class DirectorService {
             status: true,
             healthScore: true,
             checkDate: true,
+            userProfile: true 
           },
         },
       },
@@ -88,12 +123,15 @@ export class DirectorService {
         if (!lastCheck) return null;
         if (lastCheck.status === HealthStatus.SEHAT) return null;
 
+        const debtRatio = (lastCheck.userProfile as any)?.debtServiceRatio || 0;
+
         return {
           id: u.id,
           fullName: u.fullName,
           unitName: u.unitKerja?.namaUnit || 'Tidak Ada Unit',
           status: lastCheck.status, 
           healthScore: lastCheck.healthScore,
+          debtToIncomeRatio: debtRatio,
           lastCheckDate: lastCheck.checkDate,
         };
       })
@@ -103,15 +141,9 @@ export class DirectorService {
   }
 
   // ===========================================================================
-  // 3. UNIT RANKING (OPTIMIZED - DATABASE AGGREGATION)
+  // 3. UNIT RANKING (OPTIMIZED)
   // ===========================================================================
   async getUnitRankings(): Promise<UnitRankingDto[]> {
-    // Logic:
-    // 1. LEFT JOIN 'unit_kerja' ke 'users' -> Menghitung jumlah karyawan per unit
-    // 2. LEFT JOIN ke Subquery 'financial_checkups' (Latest) -> Menghitung Avg Health Score
-    // 3. GROUP BY unit_kerja.id
-    // 4. ORDER BY avgScore DESC (Langsung dari DB)
-
     const rawRankings: any[] = await this.prisma.$queryRaw`
       SELECT
         uk.id,
@@ -125,11 +157,10 @@ export class DirectorService {
         FROM financial_checkups
         ORDER BY user_id, check_date DESC
       ) fc ON fc.user_id = u.id
-      GROUP BY uk.id
+      GROUP BY uk.id, uk.nama_unit
       ORDER BY "avgScore" DESC;
     `;
 
-    // Mapping Raw Result ke DTO (+ Logic Status Labeling)
     return rawRankings.map((row) => {
       const score = Math.round(row.avgScore);
       let status: HealthStatus = HealthStatus.BAHAYA;
@@ -142,45 +173,62 @@ export class DirectorService {
         unitName: row.unitName,
         employeeCount: row.employeeCount,
         avgScore: score,
-        status, // Status dikalkulasi saat mapping, datanya valid
+        status, 
       };
     });
   }
 
   // ===========================================================================
-  // 4. SEARCH EMPLOYEES (Pencarian Global)
+  // 4. SEARCH EMPLOYEES (FUZZY SEARCH)
   // ===========================================================================
   async searchEmployees(keyword: string) {
     if (!keyword) return [];
 
-    return this.prisma.user.findMany({
-      where: {
-        role: 'USER',
-        OR: [
-          { fullName: { contains: keyword, mode: 'insensitive' } },
-          { email: { contains: keyword, mode: 'insensitive' } },
-          { unitKerja: { namaUnit: { contains: keyword, mode: 'insensitive' } } },
-        ],
+    const safeKeyword = keyword.trim();
+    
+    const results: any[] = await this.prisma.$queryRaw`
+      SELECT
+        u.id,
+        u.full_name as "fullName",
+        u.email,
+        uk.nama_unit as "unitName",
+        fc.status,
+        fc.health_score as "healthScore"
+      FROM users u
+      LEFT JOIN unit_kerja uk ON u.unit_kerja_id = uk.id
+      LEFT JOIN (
+        SELECT DISTINCT ON (user_id) user_id, status, health_score
+        FROM financial_checkups
+        ORDER BY user_id, check_date DESC
+      ) fc ON fc.user_id = u.id
+      WHERE 
+        u.role = 'USER' AND 
+        (
+          u.full_name ILIKE ${'%' + safeKeyword + '%'}
+          OR 
+          uk.nama_unit ILIKE ${'%' + safeKeyword + '%'}
+        )
+      LIMIT 20;
+    `;
+
+    return results.map((row) => ({
+      id: row.id,
+      fullName: row.fullName,
+      email: row.email,
+      unitKerja: { 
+        name: row.unitName || 'Tidak Ada Unit' 
       },
-      select: {
-        id: true,
-        fullName: true,
-        email: true,
-        unitKerja: { select: { namaUnit: true } },
-        financialChecks: {
-          orderBy: { checkDate: 'desc' },
-          take: 1,
-          select: { status: true, healthScore: true },
-        },
-      },
-      take: 20,
-    });
+      financialChecks: row.status ? [{
+        status: row.status as HealthStatus,
+        healthScore: row.healthScore
+      }] : []
+    }));
   }
 
   // ===========================================================================
-  // 5. EMPLOYEE DETAIL (Deep Dive + Automatic Audit)
+  // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT + ON-THE-FLY CALC)
   // ===========================================================================
-  async getEmployeeDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
+  async getEmployeeAuditDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: targetUserId },
       include: { unitKerja: true }
@@ -188,27 +236,86 @@ export class DirectorService {
 
     if (!user) throw new NotFoundException('Karyawan tidak ditemukan');
 
-    const c = await this.prisma.financialCheckup.findFirst({
-      where: { userId: targetUserId },
-      orderBy: { checkDate: 'desc' }
-    });
+    const c = await this.financialService.getLatestCheckup(targetUserId);
 
     if (!c) {
         return null; 
     }
 
-    // AUDIT TRAIL
-    this.auditService.logAccess({
-      actorId: actorId,
-      targetUserId: targetUserId,
-      action: 'VIEW_EMPLOYEE_DETAIL',
-      metadata: { 
+    // AUDIT TRAIL LOGGING
+    await this.auditService.logAccess(
+      actorId,
+      targetUserId,
+      'VIEW_EMPLOYEE_DETAIL',
+      { 
         employeeName: user.fullName,
         healthScore: c.healthScore
       }
-    });
+    );
 
-    // MAPPING RESPONSE
+    // [STEP 2: ADAPTER LOGIC]
+    // Cek apakah hasil analisa (Rasio) sudah tersimpan di database?
+    let analysisRatios = c.ratiosDetails;
+
+    // Jika belum ada (null), hitung secara on-the-fly menggunakan Utility
+    if (!analysisRatios) {
+        // Casting raw DB data ke DTO input untuk kalkulator
+        const rawDataForCalc: CreateFinancialRecordDto = {
+            assetCash: Number(c.assetCash),
+            assetHome: Number(c.assetHome),
+            assetVehicle: Number(c.assetVehicle),
+            assetJewelry: Number(c.assetJewelry),
+            assetAntique: Number(c.assetAntique),
+            assetPersonalOther: Number(c.assetPersonalOther),
+            assetInvHome: Number(c.assetInvHome),
+            assetInvVehicle: Number(c.assetInvVehicle),
+            assetGold: Number(c.assetGold),
+            assetInvAntique: Number(c.assetInvAntique),
+            assetStocks: Number(c.assetStocks),
+            assetMutualFund: Number(c.assetMutualFund),
+            assetBonds: Number(c.assetBonds),
+            assetDeposit: Number(c.assetDeposit),
+            assetInvOther: Number(c.assetInvOther),
+            debtKPR: Number(c.debtKPR),
+            debtKPM: Number(c.debtKPM),
+            debtCC: Number(c.debtCC),
+            debtCoop: Number(c.debtCoop),
+            debtConsumptiveOther: Number(c.debtConsumptiveOther),
+            debtBusiness: Number(c.debtBusiness),
+            incomeFixed: Number(c.incomeFixed),
+            incomeVariable: Number(c.incomeVariable),
+            installmentKPR: Number(c.installmentKPR),
+            installmentKPM: Number(c.installmentKPM),
+            installmentCC: Number(c.installmentCC),
+            installmentCoop: Number(c.installmentCoop),
+            installmentConsumptiveOther: Number(c.installmentConsumptiveOther),
+            installmentBusiness: Number(c.installmentBusiness),
+            insuranceLife: Number(c.insuranceLife),
+            insuranceHealth: Number(c.insuranceHealth),
+            insuranceHome: Number(c.insuranceHome),
+            insuranceVehicle: Number(c.insuranceVehicle),
+            insuranceBPJS: Number(c.insuranceBPJS),
+            insuranceOther: Number(c.insuranceOther),
+            savingEducation: Number(c.savingEducation),
+            savingRetirement: Number(c.savingRetirement),
+            savingPilgrimage: Number(c.savingPilgrimage),
+            savingHoliday: Number(c.savingHoliday),
+            savingEmergency: Number(c.savingEmergency),
+            savingOther: Number(c.savingOther),
+            expenseFood: Number(c.expenseFood),
+            expenseSchool: Number(c.expenseSchool),
+            expenseTransport: Number(c.expenseTransport),
+            expenseCommunication: Number(c.expenseCommunication),
+            expenseHelpers: Number(c.expenseHelpers),
+            expenseTax: Number(c.expenseTax),
+            expenseLifestyle: Number(c.expenseLifestyle),
+            userProfile: c.userProfile as any,
+        };
+
+        const result = calculateFinancialHealth(rawDataForCalc);
+        analysisRatios = result.ratios;
+    }
+
     return {
       profile: {
         id: user.id,
@@ -226,7 +333,8 @@ export class DirectorService {
         netWorth: Number(c.totalNetWorth),
         surplusDeficit: Number(c.surplusDeficit), 
         generatedAt: c.checkDate,
-        ratios: c.ratiosDetails as any 
+        // Gunakan hasil adaptasi (DB atau On-the-fly)
+        ratios: analysisRatios as any 
       },
 
       record: {

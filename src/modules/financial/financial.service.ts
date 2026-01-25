@@ -24,10 +24,11 @@ export class FinancialService {
   // ===========================================================================
 
   async createCheckup(userId: string, dto: CreateFinancialRecordDto) {
-    // 1. Hitung Ulang (Re-calculate)
+    // 1. Hitung Ulang (Re-calculate) menggunakan Math Utility
+    // Ini menjamin data yang masuk DB sudah "matang" (ada score, status, rasio)
     const analysis = calculateFinancialHealth(dto);
 
-    // 2. Mapping Status
+    // 2. Mapping Status String dari Utility ke Enum Prisma
     let dbStatus: HealthStatus = HealthStatus.BAHAYA;
     if (analysis.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
     else if (analysis.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
@@ -37,13 +38,16 @@ export class FinancialService {
       data: {
         userId,
         ...dto,
+        // Mapping manual karena Prisma tidak otomatis map sub-object JSON
         userProfile: dto.userProfile as any,
         spouseProfile: dto.spouseProfile ? (dto.spouseProfile as any) : undefined,
+        
+        // Simpan Hasil Analisa (Persistence Optimization)
         totalNetWorth: analysis.netWorth,
         surplusDeficit: analysis.surplusDeficit,
         healthScore: analysis.score,
         status: dbStatus,
-        ratiosDetails: analysis.ratios as any, 
+        ratiosDetails: analysis.ratios as any, // Simpan detail rasio sebagai JSON
       },
     });
   }
