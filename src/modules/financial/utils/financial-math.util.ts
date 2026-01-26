@@ -655,38 +655,40 @@ export const calculateEducationPlan = (data: CreateEducationPlanDto) => {
     const { inflationRate = 10, returnRate = 12, stages } = data;
     
     let totalFutureCost = 0;
-    let totalMonthlySaving = 0; // Akumulasi tabungan bulanan
+    let totalMonthlySaving = 0; 
 
-    // Array untuk menyimpan rincian hasil hitungan per jenjang (Drill Down)
-    // Kita tambahkan field 'futureCost' dan 'monthlySaving' ke dalam stage asli
     const stagesBreakdown: Array<typeof stages[0] & { futureCost: number; monthlySaving: number }> = [];
 
     // --- LOOPING SETIAP ITEM BIAYA (GRANULAR) ---
     for (const stage of stages) {
+        // [GUARD CLAUSE] Validasi jika cost 0 (misal S2 tanpa SPP bulanan), langsung return 0
+        if (stage.currentCost <= 0) {
+            stagesBreakdown.push({
+                ...stage,
+                futureCost: 0,
+                monthlySaving: 0
+            });
+            continue; // Skip perhitungan TVM
+        }
+
         // 1. Tentukan Jarak Waktu (Years To Start)
-        // yearsToStart dikirim dari FE (hasil hitungan umur anak vs usia masuk)
         const years = Math.max(0, stage.yearsToStart); 
         const months = years * 12;
 
         // 2. Hitung Future Value (FV) akibat Inflasi
-        // Rumus Dokumen: FV = PV * (1 + i)^n
-        // Asumsi: Biaya naik terus setiap tahun sampai tahun pembayaran tiba
         const iRate = inflationRate / 100;
         const futureCost = stage.currentCost * Math.pow(1 + iRate, years);
 
         // 3. Hitung Tabungan Bulanan (PMT) Khusus Item Ini
-        // Rumus Sinking Fund: PMT untuk mencapai FV dalam waktu n tahun
         let monthlySavingItem = 0;
 
         if (months > 0) {
-            const rRateMonthly = (returnRate / 100) / 12; // Bunga investasi per bulan
+            const rRateMonthly = (returnRate / 100) / 12; 
             
-            // Gunakan helper calculatePMT (PV=0 karena kita mulai menabung dari nol untuk pos ini)
-            // Hasil calculatePMT negatif (cash outflow), jadi kita abs-kan
+            // Rumus PMT untuk target FV
             monthlySavingItem = Math.abs(calculatePMT(rRateMonthly, months, 0, futureCost));
         } else {
-            // Jika waktunya 0 (harus bayar sekarang), berarti tidak bisa ditabung
-            // Opsional: Bisa dianggap lumpsum yg harus ada sekarang
+            // Jika waktunya 0 (harus bayar sekarang), tidak bisa ditabung
             monthlySavingItem = 0; 
         }
 
@@ -704,8 +706,8 @@ export const calculateEducationPlan = (data: CreateEducationPlanDto) => {
 
     return {
         totalFutureCost,
-        monthlySaving: totalMonthlySaving, // Ini angka "seram" yang realistis
-        stagesBreakdown // Data rincian untuk UI "Expand Detail"
+        monthlySaving: totalMonthlySaving, 
+        stagesBreakdown 
     };
 };
 

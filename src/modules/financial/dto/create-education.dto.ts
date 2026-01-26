@@ -23,19 +23,19 @@ export class CreateEducationStageDto {
   @IsEnum(CostType, { message: 'Tipe biaya tidak valid (ENTRY/ANNUAL)' })
   costType: CostType;
 
-  @ApiProperty({ example: 15000000, description: 'Biaya saat ini (Present Value)' })
+  @ApiProperty({ example: 15000000, description: 'Biaya saat ini (Present Value). Boleh 0 untuk skema khusus (misal S2 tanpa SPP).' })
   @IsNumber()
-  @Min(0)
+  @Min(0, { message: 'Biaya tidak boleh negatif' }) // CRITICAL: Mengizinkan 0 agar S2 bisa tanpa biaya bulanan
   @Type(() => Number)
   currentCost: number;
 
   @ApiProperty({ example: 2, description: 'Jarak waktu (tahun) menuju pembayaran biaya ini' })
   @IsNumber()
-  @Min(0)
+  @Min(0, { message: 'Tahun mulai tidak boleh negatif' })
   @Type(() => Number)
   yearsToStart: number; 
   
-  // Catatan: futureCost (FV) dan monthlySaving (PMT) dihitung di Backend.
+  // Catatan: futureCost (FV) dan monthlySaving (PMT) akan dihitung otomatis di Backend Logic.
 }
 
 // --- MAIN DTO: RENCANA PENDIDIKAN (Parent Object) ---
@@ -74,7 +74,7 @@ export class CreateEducationPlanDto {
   // 3. DETAIL TAHAPAN (ARRAY)
   @ApiProperty({ type: [CreateEducationStageDto], description: 'Daftar rincian biaya pendidikan' })
   @IsArray()
-  @ValidateNested({ each: true }) // Validasi setiap item dalam array
-  @Type(() => CreateEducationStageDto) // Transformasi JSON ke Class
+  @ValidateNested({ each: true }) // Validasi deep untuk setiap item dalam array
+  @Type(() => CreateEducationStageDto) // Transformasi JSON ke Class Instance
   stages: CreateEducationStageDto[];
 }
