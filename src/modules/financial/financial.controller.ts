@@ -21,6 +21,7 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 
 // --- GUARDS ---
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { GetUser } from 'src/common/decorators/get-user.decorator';
 
 @ApiTags('Financial Engine')
 @UseGuards(JwtAuthGuard)
@@ -59,9 +60,10 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('budget')
-  @ApiOperation({ summary: 'Simpan Anggaran Bulanan' })
-  async createBudget(@Req() req, @Body() dto: CreateBudgetDto) {
-    const userId = req.user.id;
+  @ApiOperation({ summary: 'Simpan rencana anggaran bulanan (Auto-Calculate supported)' })
+  async createBudget(@GetUser('id') userId: string, @Body() dto: CreateBudgetDto) {
+    // Controller akan mengembalikan objek { budget, analysis } 
+    // yang sudah berisi angka hasil kalkulasi otomatis dari Service
     return this.financialService.createBudget(userId, dto);
   }
 

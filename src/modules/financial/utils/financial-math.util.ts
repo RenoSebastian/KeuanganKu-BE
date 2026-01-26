@@ -708,3 +708,28 @@ export const calculateEducationPlan = (data: CreateEducationPlanDto) => {
         stagesBreakdown // Data rincian untuk UI "Expand Detail"
     };
 };
+
+// ============================================================================
+// 4. BUDGETING ENGINE
+// ============================================================================
+
+/**
+ * LOGIKA: BUDGET SPLIT (SMART BUDGETING 45/20/15/10/10)
+ * Menghitung alokasi otomatis berdasarkan total pendapatan jika user tidak 
+ * memasukkan rincian pengeluaran secara manual.
+ * * Rasio yang digunakan:
+ * - Living Cost (Kebutuhan): 45%
+ * - Productive Debt (Cicilan Produktif): 20%
+ * - Consumptive Debt (Cicilan Konsumtif): 15%
+ * - Insurance (Premi Asuransi): 10%
+ * - Saving (Tabungan/Investasi): 10%
+ */
+export const calculateBudgetSplit = (totalIncome: number) => {
+  return {
+    livingCost: totalIncome * 0.45,
+    productiveDebt: totalIncome * 0.20,
+    consumptiveDebt: totalIncome * 0.15,
+    insurance: totalIncome * 0.10,
+    saving: totalIncome * 0.10,
+  };
+};

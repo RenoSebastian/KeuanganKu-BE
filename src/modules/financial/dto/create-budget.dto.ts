@@ -1,51 +1,62 @@
-import { ApiProperty } from '@nestjs/swagger';
-import { IsNumber, IsNotEmpty, Min, Max } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { IsNumber, IsNotEmpty, Min, Max, IsOptional } from 'class-validator';
 
 export class CreateBudgetDto {
   @ApiProperty({ example: 1, description: 'Bulan (1-12)' })
   @IsNumber()
   @Min(1)
   @Max(12)
+  @IsNotEmpty()
   month: number;
 
   @ApiProperty({ example: 2025 })
   @IsNumber()
+  @IsNotEmpty()
   year: number;
 
   // --- PEMASUKAN ---
   @ApiProperty({ example: 8400000 })
   @IsNumber()
   @Min(0)
+  @IsNotEmpty()
   fixedIncome: number; // Gaji Tetap (Basis Rule)
 
   @ApiProperty({ example: 1500000 })
   @IsNumber()
   @Min(0)
+  @IsNotEmpty()
   variableIncome: number; // Bonus/Tunjangan
 
-  // --- 5 POS PENGELUARAN ---
-  @ApiProperty({ example: 1000000, description: 'Max 20% Gaji Tetap' })
-  @IsNumber()
-  @Min(0)
-  productiveDebt: number;
+  // --- 5 POS PENGELUARAN (SEKARANG OPSIONAL) ---
+  // Sistem akan menghitung otomatis di Service jika field di bawah ini kosong.
 
-  @ApiProperty({ example: 500000, description: 'Max 15% Gaji Tetap' })
+  @ApiPropertyOptional({ example: 1000000, description: 'Max 20% Gaji Tetap' })
   @IsNumber()
   @Min(0)
-  consumptiveDebt: number;
+  @IsOptional()
+  productiveDebt?: number;
 
-  @ApiProperty({ example: 500000, description: 'Min 10% Gaji Tetap' })
+  @ApiPropertyOptional({ example: 500000, description: 'Max 15% Gaji Tetap' })
   @IsNumber()
   @Min(0)
-  insurance: number;
+  @IsOptional()
+  consumptiveDebt?: number;
 
-  @ApiProperty({ example: 1000000, description: 'Min 10% Gaji Tetap' })
+  @ApiPropertyOptional({ example: 500000, description: 'Min 10% Gaji Tetap' })
   @IsNumber()
   @Min(0)
-  saving: number;
+  @IsOptional()
+  insurance?: number;
 
-  @ApiProperty({ example: 3000000, description: 'Max 45% Gaji Tetap' })
+  @ApiPropertyOptional({ example: 1000000, description: 'Min 10% Gaji Tetap' })
   @IsNumber()
   @Min(0)
-  livingCost: number;
+  @IsOptional()
+  saving?: number;
+
+  @ApiPropertyOptional({ example: 3000000, description: 'Max 45% Gaji Tetap' })
+  @IsNumber()
+  @Min(0)
+  @IsOptional()
+  livingCost?: number;
 }

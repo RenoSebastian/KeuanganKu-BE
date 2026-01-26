@@ -11,7 +11,8 @@ import {
   calculatePensionPlan,
   calculateInsurancePlan,
   calculateGoalPlan,
-  calculateEducationPlan
+  calculateEducationPlan,
+  calculateBudgetSplit,
 } from './utils/financial-math.util';
 import { HealthStatus } from '@prisma/client';
 
@@ -83,12 +84,30 @@ export class FinancialService {
   
   async createBudget(userId: string, dto: CreateBudgetDto) {
     const totalIncome = dto.fixedIncome + dto.variableIncome;
+
+    // --- LOGIKA CERDAS: AUTO-CALCULATE JIKA KOSONG ---
+    // Cek jika field utama pengeluaran tidak dikirim atau nol
+    const isManualInput = dto.livingCost && dto.livingCost > 0;
+    
+    let finalAllocation = {
+      livingCost: dto.livingCost || 0,
+      productiveDebt: dto.productiveDebt || 0,
+      consumptiveDebt: dto.consumptiveDebt || 0,
+      insurance: dto.insurance || 0,
+      saving: dto.saving || 0,
+    };
+
+    if (!isManualInput) {
+      // Jika kosong, panggil otak matematika Phase 2
+      finalAllocation = calculateBudgetSplit(totalIncome);
+    }
+
     const totalExpense =
-      dto.productiveDebt +
-      dto.consumptiveDebt +
-      dto.insurance +
-      dto.saving +
-      dto.livingCost;
+      finalAllocation.productiveDebt +
+      finalAllocation.consumptiveDebt +
+      finalAllocation.insurance +
+      finalAllocation.saving +
+      finalAllocation.livingCost;
     
     const balance = totalIncome - totalExpense;
 
@@ -104,11 +123,12 @@ export class FinancialService {
           year: dto.year,
           fixedIncome: dto.fixedIncome,
           variableIncome: dto.variableIncome,
-          productiveDebt: dto.productiveDebt,
-          consumptiveDebt: dto.consumptiveDebt,
-          insurance: dto.insurance,
-          saving: dto.saving,
-          livingCost: dto.livingCost,
+          // Gunakan hasil finalAllocation (bisa manual atau auto-calculate)
+          productiveDebt: finalAllocation.productiveDebt,
+          consumptiveDebt: finalAllocation.consumptiveDebt,
+          insurance: finalAllocation.insurance,
+          saving: finalAllocation.saving,
+          livingCost: finalAllocation.livingCost,
           totalIncome,
           totalExpense,
           balance,
@@ -116,11 +136,16 @@ export class FinancialService {
         },
       });
 
-      const analysis = this.analyzeBudgetHealth(dto);
+      // Jalankan analisa kesehatan berdasarkan data yang sudah lengkap
+      const analysis = this.analyzeBudgetHealth({
+        ...dto,
+        ...finalAllocation
+      });
+      
       return { budget, analysis };
     });
   }
-
+  
   async getMyBudgets(userId: string) {
     return this.prisma.budgetPlan.findMany({
       where: { userId },
@@ -128,7 +153,7 @@ export class FinancialService {
       take: 12,
     });
   }
-
+  
   // ===========================================================================
   // MODULE 3: CALCULATOR - PENSION PLAN (UPDATED LOGIC)
   // ===========================================================================
