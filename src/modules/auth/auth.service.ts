@@ -1,3 +1,5 @@
+// File: src/modules/auth/auth.service.ts
+
 import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
@@ -27,15 +29,16 @@ export class AuthService {
           email: dto.email,
           fullName: dto.fullName,
           passwordHash: hash,
-          unitKerjaId: dto.unitKerjaId, // Pastikan Unit Kerja ID Valid nanti
-          dateOfBirth: new Date(), // Default sementara, nanti diupdate user
+          unitKerjaId: dto.unitKerjaId, // Pastikan FE mengirim unitKerjaId yang valid
+          dateOfBirth: new Date(), // Placeholder, nanti user update profil sendiri
         },
       });
 
-      // 3. Return Token
-      return this.signToken(user.id, user.email, user.role);
+      // 3. Return Token dengan Claim Lengkap (Role & Unit)
+      return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError) {
+        // Handle Error Duplicate (P2002)
         if (error.code === 'P2002') {
           throw new ForbiddenException('NIP atau Email sudah terdaftar');
         }
@@ -57,26 +60,36 @@ export class AuthService {
     const pwMatches = await argon.verify(user.passwordHash, dto.password);
     if (!pwMatches) throw new ForbiddenException('Kredensial salah (Password salah)');
 
-    // 3. Return Token
-    return this.signToken(user.id, user.email, user.role);
+    // 3. Return Token dengan Claim Lengkap (Role & Unit)
+    return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
   }
 
-  // --- HELPER: SIGN TOKEN ---
-  async signToken(userId: string, email: string, role: string) {
-    const payload = { sub: userId, email, role };
-    const secret = this.config.get('JWT_SECRET');
+  // --- HELPER: SIGN TOKEN (Updated) ---
+  async signToken(userId: string, email: string, role: string, unitKerjaId: string) {
+    // Payload ini akan dibaca oleh Passport Strategy & Frontend (via jwt-decode)
+    const payload = {
+      sub: userId,
+      email,
+      role,
+      unitKerjaId
+    };
 
+    const secret = this.config.get('JWT_SECRET');
+    
+    // Generate Token
     const token = await this.jwt.signAsync(payload, {
-      expiresIn: '1d', // Token berlaku 1 hari
+      expiresIn: '1d', // Token valid 1 hari (Security Best Practice)
       secret: secret,
     });
 
     return {
       access_token: token,
+      // Kembalikan juga data user plain agar FE tidak wajib decode token saat login sukses
       user: {
         id: userId,
-        email: email,
-        role: role
+        email,
+        role,
+        unitKerjaId
       }
     };
   }

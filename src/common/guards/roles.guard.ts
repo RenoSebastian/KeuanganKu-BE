@@ -2,7 +2,7 @@
 
 import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-import { Role } from '@prisma/client';
+import { Role } from '@prisma/client'; // Import Enum Role dari Prisma
 import { ROLES_KEY } from '../decorators/roles.decorator';
 
 @Injectable()
@@ -17,7 +17,7 @@ export class RolesGuard implements CanActivate {
     ]);
 
     // 2. Jika tidak ada decorator @Roles, berarti route ini PUBLIC (dalam konteks role)
-    // Security Note: Tetap butuh JwtAuthGuard jika route ini private.
+    // atau hanya butuh login biasa (Authenticated).
     if (!requiredRoles) {
       return true;
     }
@@ -27,20 +27,21 @@ export class RolesGuard implements CanActivate {
     const { user } = context.switchToHttp().getRequest();
 
     // Safety Check: Jika JwtAuthGuard lupa dipasang tapi RolesGuard dipasang
+    // Mencegah error "Cannot read property 'role' of undefined"
     if (!user) {
       console.error('RolesGuard Error: User not found in request. Did you forget @UseGuards(JwtAuthGuard)?');
-      throw new ForbiddenException('User context missing');
+      throw new ForbiddenException('Akses ditolak: User context tidak ditemukan.');
     }
 
-    // 4. Validasi Role
-    // Cek apakah role user ada di dalam daftar requiredRoles
+    // 4. Validasi Role (Strict Check)
+    // Cek apakah role user saat ini ada di dalam daftar requiredRoles
     const hasRole = requiredRoles.some((role) => user.role === role);
 
     if (!hasRole) {
-      // Optional: Log percobaan akses ilegal
-      // console.warn(`Access Denied: User ${user.email} with role ${user.role} tried to access restricted resource.`);
+      // Jika role tidak cocok, lempar Forbidden (403)
+      throw new ForbiddenException(`Akses ditolak: Anda tidak memiliki izin ${requiredRoles.join(' atau ')}.`);
     }
 
-    return hasRole;
+    return true;
   }
 }
