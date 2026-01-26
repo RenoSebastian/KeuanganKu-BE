@@ -3,8 +3,8 @@ import {
   Get,
   Post,
   Body,
-  Delete, // <--- Tambah ini
-  Param,  // <--- Tambah ini
+  Delete,
+  Param,
   UseGuards,
   Req,
 } from '@nestjs/common';
@@ -53,6 +53,14 @@ export class FinancialController {
   async getCheckupHistory(@Req() req) {
     const userId = req.user.id;
     return this.financialService.getCheckupHistory(userId);
+  }
+
+  // [NEW] Endpoint Detail Checkup (Roadmap Part 1)
+  @Get('checkup/detail/:id')
+  @ApiOperation({ summary: 'Ambil detail checkup spesifik berdasarkan ID' })
+  async getCheckupDetail(@Req() req, @Param('id') id: string) {
+    const userId = req.user.id;
+    return this.financialService.getCheckupDetail(userId, id);
   }
 
   // ===========================================================================
@@ -120,7 +128,6 @@ export class FinancialController {
     return this.financialService.calculateAndSaveEducation(userId, dto);
   }
 
-  // --- TAMBAHKAN KODE DI BAWAH INI ---
   @Get('calculator/education')
   @ApiOperation({ summary: 'Ambil daftar rencana pendidikan user' })
   async getEducationPlans(@Req() req) {

@@ -78,6 +78,34 @@ export class FinancialService {
     });
   }
 
+  // [NEW] Method untuk Mengambil Detail Checkup Spesifik (Roadmap Part 1)
+  async getCheckupDetail(userId: string, checkupId: string) {
+    const checkup = await this.prisma.financialCheckup.findFirst({
+      where: { id: checkupId, userId },
+    });
+
+    if (!checkup) {
+      throw new NotFoundException('Data checkup tidak ditemukan');
+    }
+
+    // Return objek bersih (Clean Object) untuk Frontend
+    // Mapping Decimal ke Number agar aman dikonsumsi JSON
+    return {
+      score: checkup.healthScore,
+      globalStatus: checkup.status,
+      netWorth: Number(checkup.totalNetWorth),
+      surplusDeficit: Number(checkup.surplusDeficit),
+      ratios: checkup.ratiosDetails, // Mengembalikan JSON detail rasio
+      generatedAt: checkup.checkDate.toISOString(),
+      record: {
+        ...checkup,
+        assetCash: Number(checkup.assetCash),
+        totalNetWorth: Number(checkup.totalNetWorth),
+        surplusDeficit: Number(checkup.surplusDeficit),
+      }
+    };
+  }
+
   // ===========================================================================
   // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
   // ===========================================================================
