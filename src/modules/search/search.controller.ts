@@ -3,31 +3,33 @@ import { SearchService } from './search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import { SearchResultResource } from './resources/search-result.resource';
 
 @Controller('search')
 @UseGuards(JwtAuthGuard) // Wajib Login
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  @Get('employees')
+  @Get('employees') // Endpoint ini sekarang melayani Omni Search (Global)
   async searchEmployees(
     @Query() searchQueryDto: SearchQueryDto,
     @GetUser() user: any,
   ) {
-    // Controller bertindak sebagai Proxy yang cerdas
-    // Dia meneruskan data user yang sedang login untuk keperluan filtering
+    // 1. Panggil Service
+    // Service sekarang sudah mengembalikan array format standar: 
+    // [{ title, subtitle, type, redirectId, ... }]
     const results = await this.searchService.searchEmployees(searchQueryDto, user);
 
-    const transformedHits = SearchResultResource.collect(results.hits);
+    // 2. Return Response
+    // Kita tidak perlu lagi mengakses .hits atau .estimatedTotalHits karena 
+    // return dari service bisa jadi berasal dari Database (yang tidak punya properti itu).
     
     return {
       success: true,
-      data: transformedHits,
+      data: results, // Langsung pasang array hasil
       meta: {
-        total: results.estimatedTotalHits,
-        time: results.processingTimeMs,
-        query: searchQueryDto.q
+        total: results.length, // Hitung manual jumlah data yang didapat
+        query: searchQueryDto.q,
+        // timestamp: new Date() // Opsional
       }
     };
   }
