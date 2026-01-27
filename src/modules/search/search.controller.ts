@@ -3,33 +3,35 @@ import { SearchService } from './search.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+// [PHASE 5] Import Resource
+import { SearchResultResource } from './resources/search-result.resource';
 
 @Controller('search')
-@UseGuards(JwtAuthGuard) // Wajib Login
+@UseGuards(JwtAuthGuard)
 export class SearchController {
   constructor(private readonly searchService: SearchService) {}
 
-  @Get('employees') // Endpoint ini sekarang melayani Omni Search (Global)
+  @Get('employees')
   async searchEmployees(
     @Query() searchQueryDto: SearchQueryDto,
     @GetUser() user: any,
   ) {
-    // 1. Panggil Service
-    // Service sekarang sudah mengembalikan array format standar: 
-    // [{ title, subtitle, type, redirectId, ... }]
-    const results = await this.searchService.searchEmployees(searchQueryDto, user);
+    // 1. Dapatkan Raw Data dari Service (Hybrid Result)
+    const rawResults = await this.searchService.searchEmployees(searchQueryDto, user);
 
-    // 2. Return Response
-    // Kita tidak perlu lagi mengakses .hits atau .estimatedTotalHits karena 
-    // return dari service bisa jadi berasal dari Database (yang tidak punya properti itu).
-    
+    // 2. [PHASE 5] Transformasi Data ke Format Standar
+    // Frontend akan menerima struktur JSON yang konsisten
+    const standardizedData = SearchResultResource.collect(rawResults);
+
+    // 3. Return Response dengan Metadata Pagination/Query
     return {
       success: true,
-      data: results, // Langsung pasang array hasil
+      data: standardizedData, 
       meta: {
-        total: results.length, // Hitung manual jumlah data yang didapat
+        total: standardizedData.length,
+        limit: Number(searchQueryDto.limit) || 10,
         query: searchQueryDto.q,
-        // timestamp: new Date() // Opsional
+        timestamp: new Date().toISOString()
       }
     };
   }

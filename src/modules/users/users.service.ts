@@ -5,17 +5,15 @@ import { SearchService } from '../search/search.service';
 
 @Injectable()
 export class UsersService {
-  // 1. Inisialisasi Logger dengan Context khusus 'UsersService'
-  // Ini membuat output log nanti tertulis: [UsersService] ...
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private prisma: PrismaService,
-              private searchService: SearchService
+  constructor(
+    private prisma: PrismaService,
+    private searchService: SearchService // [PHASE 3] Inject Search Service
   ) {}
 
   // Lihat Profil Sendiri
   async getMe(userId: string) {
-    // [LOG INFO] Mencatat aktivitas standar
     this.logger.log(`Fetching profile data for user: ${userId}`);
 
     const user = await this.prisma.user.findUnique({
@@ -23,68 +21,72 @@ export class UsersService {
       include: { unitKerja: true },
     });
 
-    // [LOG WARN] Mencatat anomali (data harusnya ada, tapi tidak ditemukan)
     if (!user) {
       this.logger.warn(`User profile not found for ID: ${userId}`);
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
-    // Logical Trigger: Sync ke Meilisearch secara Async
-    this.syncToSearch(user);
+    // Optional: Kita bisa trigger sync saat get untuk memastikan data consistency (Self-healing)
+    // this.syncToSearch(user); 
+    
     return user;
   }
 
   // Update Profil
   async editUser(userId: string, dto: EditUserDto) {
-    // [LOG INFO] Mencatat payload request (Hati-hati jangan log password!)
-    this.logger.log(`Attempting update for user ${userId} with data: ${JSON.stringify(dto)}`);
+    this.logger.log(`Attempting update for user ${userId}`);
 
     try {
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
         data: {
           ...dto,
-          // Konversi string date ke Object Date jika ada
+          // Konversi string date ke Object Date jika ada (Logic pelengkap)
           dateOfBirth: dto.dateOfBirth ? new Date(dto.dateOfBirth) : undefined,
         },
       });
 
-      // [LOG INFO] Konfirmasi sukses
       this.logger.log(`User ${userId} successfully updated.`);
-      // Logical Trigger: Sync ke Meilisearch secara Async
+
+      // [PHASE 3] TRIGGER SYNC (Fire-and-Forget)
+      // Kita tidak menggunakan 'await' agar user tidak perlu menunggu proses indexing selesai.
       this.syncToSearch(updatedUser);
+
       return updatedUser;
 
     } catch (error) {
-      // [LOG ERROR] Mencatat kegagalan operasi kritis
-      // Parameter ke-2 'error.stack' memastikan stack trace tersimpan di file log error
       this.logger.error(`Failed to update user ${userId}`, error.stack);
-      
-      // Lempar error agar ditangkap oleh Global Exception Filter yang kita buat di Phase 3
-      // dan dikembalikan sebagai response JSON yang rapi ke user.
       throw error;
     }
   }
 
   /**
-   * Private Helper untuk menangani sinkronisasi data.
-   * Dipisahkan agar tidak mengotori logic utama CRUD.
+   * [PHASE 3] INTERNAL HELPER: Sync to Meilisearch
+   * Mengubah data User DB menjadi format standar 'Hybrid Search'
    */
   private async syncToSearch(user: any) {
     try {
-      await this.searchService.addDocuments('users', [
-        {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          unitKerja: user.unitKerja,
-          createdAt: user.createdAt,
-        },
-      ]);
+      // Mapping Data agar sesuai dengan Schema Hybrid Search (Phase 2)
+      // Structure: id, redirectId, type, title, subtitle
+      const searchPayload = {
+        id: user.id,            // Primary Key Meili
+        redirectId: user.id,    // ID referensi ke DB
+        type: 'PERSON',         // Discriminator Type
+        title: user.fullName,   // Main Search Keyword (Nama)
+        subtitle: user.email,   // Secondary Search Keyword (Email)
+        // Metadata tambahan untuk filtering (jika perlu)
+        role: user.role,        
+        unitKerjaId: user.unitKerjaId
+      };
+
+      // Push ke index 'global_search'
+      await this.searchService.addDocuments('global_search', [searchPayload]);
+      
+      this.logger.debug(`🔄 Synced user ${user.id} to Meilisearch index.`);
     } catch (error) {
-      // Kita gunakan logger agar jika search engine mati, transaksi DB tidak rollback
-      console.error(`Failed to sync user ${user.id} to Meilisearch:`, error);
+      // Error handling silent agar transaksi DB utama tidak terganggu
+      // Log level 'error' agar terdeteksi di monitoring
+      this.logger.error(`⚠️ Failed to sync user ${user.id} to Meilisearch: ${error.message}`);
     }
   }
 }

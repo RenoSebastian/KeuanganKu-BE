@@ -1,31 +1,40 @@
+// src/modules/search/resources/search-result.resource.ts
+
 export class SearchResultResource {
   id: string;
-  name: string;
-  email: string;
-  role: string;
-  unitKerja: string;
-  displayTitle: string; // Gabungan Nama & Unit untuk UI
-  matchedHighlight: string; // Mengambil hasil highlight typo dari Meilisearch
+  redirectId: string; // ID asli untuk navigasi (misal: ID User atau ID Unit)
+  type: 'PERSON' | 'UNIT';
+  title: string;      // Nama Orang / Nama Unit
+  subtitle: string;   // Email / Kode Unit
+  
+  // Metadata untuk keperluan debugging atau UI badge di Frontend
+  metadata: {
+    source: string;     // 'MEILI' atau 'DB'
+    isFuzzy: boolean;   // True jika hasil ini tebakan (bukan exact match)
+  };
 
-  constructor(hit: any) {
-    this.id = hit.id;
-    this.name = hit.name;
-    this.email = hit.email;
-    this.role = hit.role;
-    this.unitKerja = hit.unitKerja || 'N/A';
+  constructor(data: any) {
+    this.id = data.id;
+    this.redirectId = data.redirectId;
+    this.type = data.type;
     
-    // Logic untuk mempermudah Frontend menampilkan informasi utama
-    this.displayTitle = `${hit.name} (${this.unitKerja})`;
+    // Pastikan title/subtitle bersih
+    this.title = data.title || 'Unknown';
+    this.subtitle = data.subtitle || '';
 
-    // Meilisearch mengirimkan highlight dalam properti _formatted
-    // Kita ambil nama yang sudah ada tag <em>-nya jika tersedia
-    this.matchedHighlight = hit._formatted?.name || hit.name;
+    // Transformasi Metadata agar lebih manusiawi
+    const isFromMeili = data.source === 'meilisearch';
+    
+    this.metadata = {
+      source: isFromMeili ? 'MEILI_ENGINE' : 'DB_FALLBACK',
+      isFuzzy: !isFromMeili, // Asumsi: jika dari DB trigram, kemungkinan besar itu fuzzy/tebakan
+    };
   }
 
   /**
-   * Static method untuk mentransformasi data dalam bentuk Array (Collection)
+   * Static Method untuk mempermudah transformasi Array
    */
-  static collect(hits: any[]): SearchResultResource[] {
-    return hits.map((hit) => new SearchResultResource(hit));
+  static collect(documents: any[]): SearchResultResource[] {
+    return documents.map((doc) => new SearchResultResource(doc));
   }
 }

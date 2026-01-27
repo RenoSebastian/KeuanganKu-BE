@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { MeiliSearch, Index } from 'meilisearch';
-import { PrismaService } from '..../../prisma/prisma.service';
+import { MeiliSearch } from 'meilisearch';
+import { PrismaService } from '../../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 
 @Injectable()
@@ -8,6 +8,7 @@ export class SearchService implements OnModuleInit {
   private client: MeiliSearch;
   private readonly logger = new Logger(SearchService.name);
   private isMeiliHealthy: boolean = false;
+  private readonly INDEX_NAME = 'global_search';
 
   constructor(private prisma: PrismaService) {}
 
@@ -21,6 +22,7 @@ export class SearchService implements OnModuleInit {
       this.isMeiliHealthy = await this.client.isHealthy();
       if (this.isMeiliHealthy) {
         this.logger.log('✅ Meilisearch Connected. Hybrid Search Engine Ready.');
+        await this.configureMeiliIndex();
       }
     } catch (e) {
       this.logger.error('⚠️ Meilisearch Unreachable. System running on DB-Only mode.');
@@ -28,50 +30,93 @@ export class SearchService implements OnModuleInit {
     }
   }
 
+  // --- [PHASE 2] CONFIGURATION LOGIC ---
+  private async configureMeiliIndex() {
+    if (!this.isMeiliHealthy) return;
+
+    try {
+      const index = this.client.index(this.INDEX_NAME);
+
+      await index.updateTypoTolerance({
+        minWordSizeForTypos: {
+          oneTypo: 3,
+          twoTypos: 8
+        }
+      });
+
+      await index.updateSearchableAttributes(['title', 'subtitle']);
+
+      await index.updateRankingRules([
+        'words',
+        'typo',
+        'proximity',
+        'attribute',
+        'sort',
+        'exactness'
+      ]);
+
+      this.logger.log(`⚙️ Meilisearch Index Configured: Typo Tolerance adjusted (Min 3 chars).`);
+    } catch (error) {
+      this.logger.error(`❌ Failed to configure Meilisearch index: ${error.message}`);
+    }
+  }
+
   // --- UTILITY METHODS ---
   async addDocuments(indexName: string, documents: any[]) {
     if (!this.isMeiliHealthy) return;
-    const index = this.client.index(indexName);
+    const targetIndex = indexName || this.INDEX_NAME;
+    const index = this.client.index(targetIndex);
     return await index.addDocuments(documents);
   }
 
-  // --- CORE: HYBRID SCATTER-GATHER SEARCH ---
+  // --- [PHASE 4] CORE: ADAPTIVE HYBRID SEARCH ---
   
   async searchEmployees(queryDto: SearchQueryDto, userContext?: any) {
-    const { q } = queryDto;
+    const { q, limit = 10 } = queryDto; // Default limit 10 jika tidak ada
     const cleanQuery = q?.trim();
 
     if (!cleanQuery) return [];
 
-    // 1. SCATTER: Jalankan pencarian Meili dan Postgres secara paralel
-    // Kita gunakan allSettled agar jika satu error, yang lain tetap tampil
-    const [meiliResults, dbResults] = await Promise.allSettled([
-      this.executeMeiliSearch(cleanQuery),
-      this.executePgTrigramSearch(cleanQuery)
-    ]);
+    // 1. PRIMARY SEARCH: Meilisearch
+    // Kita jalankan dulu engine utama yang paling cepat dan relevan
+    const meiliHits = await this.executeMeiliSearch(cleanQuery, limit);
 
-    // 2. GATHER: Ambil hasilnya
-    const meiliHits = meiliResults.status === 'fulfilled' ? meiliResults.value : [];
-    const dbHits = dbResults.status === 'fulfilled' ? dbResults.value : [];
+    // 2. CHECK SUFFICIENCY (Optimization)
+    // Jika hasil Meili sudah memenuhi limit yang diminta user, STOP.
+    // Jangan bebani Database jika tidak perlu.
+    if (meiliHits.length >= limit) {
+      return meiliHits.slice(0, limit);
+    }
 
-    // 3. DEDUPLIKASI (Merge Strategy)
-    // Priority: Meilisearch (Relevansi lebih baik) > Postgres (Recall lebih baik untuk typo aneh)
-    
+    // 3. SECONDARY SEARCH: PostgreSQL Trigram (Gap Filler)
+    // Hitung sisa slot yang kosong
+    const remainingLimit = limit - meiliHits.length;
+    let dbHits: any[] = [];
+
+    if (remainingLimit > 0) {
+      this.logger.debug(`🔍 Meili only found ${meiliHits.length} hits. Fetching ${remainingLimit} more from DB...`);
+      // Panggil DB hanya dengan limit sisa
+      dbHits = await this.executePgTrigramSearch(cleanQuery, remainingLimit);
+    }
+
+    // 4. MERGE & DEDUPLICATE (Smart Logic)
     const combinedResults = [...meiliHits];
+    // Gunakan Set untuk mencatat ID yang sudah ada di Meili
     const seenIds = new Set(meiliHits.map(item => item.redirectId));
-
-    // Masukkan hasil DB hanya jika belum ada di hasil Meili
+    
     let appendedCount = 0;
     for (const dbHit of dbHits) {
+      // Hanya masukkan data DB jika ID-nya belum ada di hasil Meili
+      // (Meili menang karena relevansi algoritmanya lebih baik)
       if (!seenIds.has(dbHit.redirectId)) {
         combinedResults.push(dbHit);
-        seenIds.add(dbHit.redirectId); // Tandai sudah ada
+        seenIds.add(dbHit.redirectId); 
         appendedCount++;
       }
     }
 
     if (appendedCount > 0) {
-      this.logger.debug(`🧩 Hybrid Merge: Added ${appendedCount} extra hits from Trigram for "${cleanQuery}"`);
+      this.logger.debug(`🧩 Hybrid Merge: Added ${appendedCount} unique hits from Trigram for "${cleanQuery}"`);
     }
 
     return combinedResults;
@@ -79,17 +124,13 @@ export class SearchService implements OnModuleInit {
 
   // --- PRIVATE SEARCH EXECUTORS ---
 
-  /**
-   * Eksekusi ke Meilisearch (Primary)
-   * Menangani typo standar dan relevansi linguistik
-   */
-  private async executeMeiliSearch(query: string) {
+  private async executeMeiliSearch(query: string, limit: number) {
     if (!this.isMeiliHealthy) return [];
 
     try {
-      const index = this.client.index('global_search');
+      const index = this.client.index(this.INDEX_NAME);
       const searchResult = await index.search(query, {
-        limit: 10,
+        limit: limit, // Gunakan limit sesuai request
         attributesToHighlight: ['title', 'subtitle'],
         showMatchesPosition: true,
       });
@@ -100,7 +141,7 @@ export class SearchService implements OnModuleInit {
         type: hit.type,
         title: hit._formatted?.title || hit.title,
         subtitle: hit._formatted?.subtitle || hit.subtitle,
-        source: 'meilisearch' // Metadata untuk debugging
+        source: 'meilisearch'
       }));
     } catch (error) {
       this.logger.warn(`Meilisearch failed: ${error.message}`);
@@ -109,19 +150,18 @@ export class SearchService implements OnModuleInit {
   }
 
   /**
-   * Eksekusi ke PostgreSQL Trigram (Secondary/Supplement)
-   * Menangani fragment kata aneh (misal: "rno" -> "Reno")
+   * [PHASE 4] Optimized DB Search
+   * Sekarang menerima parameter 'limit' dinamis
    */
-  private async executePgTrigramSearch(query: string) {
-    // Parameter Trigram
-    // Kita gunakan operator <-> (Distance) untuk sorting kemiripan
-    // Kita gunakan operator % (Similarity) untuk filtering (jika set_limit diatur)
-    
-    const param = `%${query}%`; // Untuk ILIKE standard
-    const trgmParam = query;     // Untuk pg_trgm operators
+  private async executePgTrigramSearch(query: string, limit: number) {
+    const param = `%${query}%`; 
+    const trgmParam = query;     
+    // Konversi limit ke integer untuk keamanan
+    const limitParam = Math.max(1, Math.floor(limit)); 
 
-    // Query Union: Users + Unit Kerja
-    // Perhatikan: "ORDER BY ... <-> $2" memaksa hasil paling mirip karakter muncul duluan
+    // Query Union dengan Dynamic Limit
+    // Kita pasang limit di masing-masing subquery untuk efisiensi scan
+    // Lalu kita akan ambil hasil gabungan.
     const sqlQuery = `
       (
         SELECT 
@@ -134,10 +174,10 @@ export class SearchService implements OnModuleInit {
           AND (
             full_name ILIKE $1 
             OR email ILIKE $1
-            OR full_name % $2 -- Trigram Similarity Match
+            OR full_name % $2 
           )
-        ORDER BY full_name <-> $2 ASC -- Urutkan berdasarkan jarak text (terdekat = teratas)
-        LIMIT 5
+        ORDER BY full_name <-> $2 ASC 
+        LIMIT $3 -- Dynamic Limit
       )
       UNION ALL
       (
@@ -152,24 +192,21 @@ export class SearchService implements OnModuleInit {
             OR kode_unit ILIKE $1
             OR nama_unit % $2
         ORDER BY nama_unit <-> $2 ASC
-        LIMIT 5
+        LIMIT $3 -- Dynamic Limit
       )
     `;
 
     try {
-      // Set threshold trigram agar tidak terlalu strict (default 0.3, kita turunkan jika perlu)
-      // await this.prisma.$executeRawUnsafe(`SET pg_trgm.similarity_threshold = 0.2;`); 
-
-      const dbResults: any[] = await this.prisma.$queryRawUnsafe(sqlQuery, param, trgmParam);
+      // Passing 3 parameter: $1 (LIKE), $2 (Trigram), $3 (Limit)
+      const dbResults: any[] = await this.prisma.$queryRawUnsafe(sqlQuery, param, trgmParam, limitParam);
 
       return dbResults.map(row => ({
         id: `db_${row.type}_${row.redirectId}`,
         redirectId: row.redirectId,
         type: row.type,
-        // DB tidak return <em> highlight, kita kirim raw text
         title: row.title, 
         subtitle: row.subtitle,
-        source: 'postgres_trigram' // Metadata: Ini hasil "penyelamatan" DB
+        source: 'postgres_trigram' 
       }));
     } catch (e) {
       this.logger.error(`Postgres Trigram Search failed: ${e.message}`);
