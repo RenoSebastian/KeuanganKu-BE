@@ -1,6 +1,6 @@
 import { Injectable, OnModuleInit, Logger } from '@nestjs/common';
-import { MeiliSearch } from 'meilisearch';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { MeiliSearch, Index } from 'meilisearch';
+import { PrismaService } from '..../../prisma/prisma.service';
 import { SearchQueryDto } from './dto/search-query.dto';
 
 @Injectable()
@@ -12,84 +12,116 @@ export class SearchService implements OnModuleInit {
   constructor(private prisma: PrismaService) {}
 
   async onModuleInit() {
-    // Inisialisasi Client Meilisearch
     this.client = new MeiliSearch({
       host: process.env.MEILI_HOST || 'http://127.0.0.1:7700',
-      apiKey: process.env.MEILI_MASTER_KEY || 'MASTER_KEY_ANDA', // Pastikan sama dengan .env
+      apiKey: process.env.MEILI_MASTER_KEY || 'MASTER_KEY_ANDA',
     });
 
-    // Cek koneksi awal
     try {
       this.isMeiliHealthy = await this.client.isHealthy();
       if (this.isMeiliHealthy) {
-        this.logger.log('✅ Meilisearch Connected. Ready for Unified Search.');
+        this.logger.log('✅ Meilisearch Connected. Hybrid Search Engine Ready.');
       }
     } catch (e) {
-      this.logger.error('❌ Meilisearch Connection Failed. Using Database Fallback.');
+      this.logger.error('⚠️ Meilisearch Unreachable. System running on DB-Only mode.');
       this.isMeiliHealthy = false;
     }
   }
 
-  /**
-   * GLOBAL OMNI SEARCH
-   * Mencari User DAN Unit Kerja sekaligus.
-   * Mengembalikan format standar: { title, subtitle, type, redirectId }
-   */
+  // --- UTILITY METHODS ---
+  async addDocuments(indexName: string, documents: any[]) {
+    if (!this.isMeiliHealthy) return;
+    const index = this.client.index(indexName);
+    return await index.addDocuments(documents);
+  }
+
+  // --- CORE: HYBRID SCATTER-GATHER SEARCH ---
+  
   async searchEmployees(queryDto: SearchQueryDto, userContext?: any) {
     const { q } = queryDto;
-    const cleanQuery = q.trim();
+    const cleanQuery = q?.trim();
 
     if (!cleanQuery) return [];
 
-    // ---------------------------------------------------------
-    // STRATEGI 1: MEILISEARCH (Primary - Ultra Fast & Typo Tolerant)
-    // ---------------------------------------------------------
-    if (this.isMeiliHealthy) {
-      try {
-        const index = this.client.index('global_search'); // Menggunakan index gabungan
+    // 1. SCATTER: Jalankan pencarian Meili dan Postgres secara paralel
+    // Kita gunakan allSettled agar jika satu error, yang lain tetap tampil
+    const [meiliResults, dbResults] = await Promise.allSettled([
+      this.executeMeiliSearch(cleanQuery),
+      this.executePgTrigramSearch(cleanQuery)
+    ]);
 
-        const searchResult = await index.search(cleanQuery, {
-          limit: 10,
-          attributesToHighlight: ['title', 'subtitle'],
-          showMatchesPosition: true,
-          // Filter logic (Opsional): Jika Manager hanya boleh cari Person di unitnya
-          // filter: userContext?.role === 'MANAGER' ? `tag = "${userContext.unitKerjaId}" OR type = "UNIT"` : undefined
-        });
+    // 2. GATHER: Ambil hasilnya
+    const meiliHits = meiliResults.status === 'fulfilled' ? meiliResults.value : [];
+    const dbHits = dbResults.status === 'fulfilled' ? dbResults.value : [];
 
-        if (searchResult.hits.length > 0) {
-          return searchResult.hits.map((hit) => ({
-            id: hit.id, // ID Unik Meili (user_123)
-            redirectId: hit.redirectId, // ID Asli UUID (untuk routing)
-            type: hit.type, // 'PERSON' | 'UNIT'
-            
-            // Highlight Logic: Gunakan teks ber-highlight jika ada, jika tidak pakai plain text
-            title: hit._formatted?.title || hit.title, 
-            subtitle: hit._formatted?.subtitle || hit.subtitle, 
-            
-            source: 'meilisearch'
-          }));
-        }
-      } catch (error) {
-        this.logger.warn(`⚠️ Meilisearch error: ${error.message}. Switching to SQL Fallback.`);
-        // Jangan throw error, lanjut ke Fallback DB
+    // 3. DEDUPLIKASI (Merge Strategy)
+    // Priority: Meilisearch (Relevansi lebih baik) > Postgres (Recall lebih baik untuk typo aneh)
+    
+    const combinedResults = [...meiliHits];
+    const seenIds = new Set(meiliHits.map(item => item.redirectId));
+
+    // Masukkan hasil DB hanya jika belum ada di hasil Meili
+    let appendedCount = 0;
+    for (const dbHit of dbHits) {
+      if (!seenIds.has(dbHit.redirectId)) {
+        combinedResults.push(dbHit);
+        seenIds.add(dbHit.redirectId); // Tandai sudah ada
+        appendedCount++;
       }
     }
 
-    // ---------------------------------------------------------
-    // STRATEGI 2: POSTGRESQL (Fallback - Reliable)
-    // ---------------------------------------------------------
-    return await this.searchFallbackDb(cleanQuery);
+    if (appendedCount > 0) {
+      this.logger.debug(`🧩 Hybrid Merge: Added ${appendedCount} extra hits from Trigram for "${cleanQuery}"`);
+    }
+
+    return combinedResults;
+  }
+
+  // --- PRIVATE SEARCH EXECUTORS ---
+
+  /**
+   * Eksekusi ke Meilisearch (Primary)
+   * Menangani typo standar dan relevansi linguistik
+   */
+  private async executeMeiliSearch(query: string) {
+    if (!this.isMeiliHealthy) return [];
+
+    try {
+      const index = this.client.index('global_search');
+      const searchResult = await index.search(query, {
+        limit: 10,
+        attributesToHighlight: ['title', 'subtitle'],
+        showMatchesPosition: true,
+      });
+
+      return searchResult.hits.map((hit) => ({
+        id: hit.id,
+        redirectId: hit.redirectId,
+        type: hit.type,
+        title: hit._formatted?.title || hit.title,
+        subtitle: hit._formatted?.subtitle || hit.subtitle,
+        source: 'meilisearch' // Metadata untuk debugging
+      }));
+    } catch (error) {
+      this.logger.warn(`Meilisearch failed: ${error.message}`);
+      return [];
+    }
   }
 
   /**
-   * FALLBACK DATABASE QUERY
-   * Menggunakan UNION untuk mencari di tabel User dan UnitKerja secara bersamaan
+   * Eksekusi ke PostgreSQL Trigram (Secondary/Supplement)
+   * Menangani fragment kata aneh (misal: "rno" -> "Reno")
    */
-  private async searchFallbackDb(query: string) {
-    this.logger.log(`🔄 Executing DB Fallback for: ${query}`);
-    const param = `%${query}%`;
+  private async executePgTrigramSearch(query: string) {
+    // Parameter Trigram
+    // Kita gunakan operator <-> (Distance) untuk sorting kemiripan
+    // Kita gunakan operator % (Similarity) untuk filtering (jika set_limit diatur)
+    
+    const param = `%${query}%`; // Untuk ILIKE standard
+    const trgmParam = query;     // Untuk pg_trgm operators
 
-    // Query Union: Cari User (atas) gabung dengan Cari Unit (bawah)
+    // Query Union: Users + Unit Kerja
+    // Perhatikan: "ORDER BY ... <-> $2" memaksa hasil paling mirip karakter muncul duluan
     const sqlQuery = `
       (
         SELECT 
@@ -98,7 +130,13 @@ export class SearchService implements OnModuleInit {
           email as "subtitle", 
           'PERSON' as "type"
         FROM users 
-        WHERE full_name ILIKE $1 OR email ILIKE $1
+        WHERE role = 'USER' 
+          AND (
+            full_name ILIKE $1 
+            OR email ILIKE $1
+            OR full_name % $2 -- Trigram Similarity Match
+          )
+        ORDER BY full_name <-> $2 ASC -- Urutkan berdasarkan jarak text (terdekat = teratas)
         LIMIT 5
       )
       UNION ALL
@@ -109,52 +147,33 @@ export class SearchService implements OnModuleInit {
           kode_unit as "subtitle", 
           'UNIT' as "type"
         FROM unit_kerja 
-        WHERE nama_unit ILIKE $1 OR kode_unit ILIKE $1
+        WHERE 
+            nama_unit ILIKE $1 
+            OR kode_unit ILIKE $1
+            OR nama_unit % $2
+        ORDER BY nama_unit <-> $2 ASC
         LIMIT 5
       )
     `;
 
     try {
-      const dbResults: any[] = await this.prisma.$queryRawUnsafe(sqlQuery, param);
+      // Set threshold trigram agar tidak terlalu strict (default 0.3, kita turunkan jika perlu)
+      // await this.prisma.$executeRawUnsafe(`SET pg_trgm.similarity_threshold = 0.2;`); 
+
+      const dbResults: any[] = await this.prisma.$queryRawUnsafe(sqlQuery, param, trgmParam);
 
       return dbResults.map(row => ({
-        id: `db_${row.type}_${row.redirectId}`, // Fake ID untuk key React
+        id: `db_${row.type}_${row.redirectId}`,
         redirectId: row.redirectId,
         type: row.type,
-        title: row.title, // Di DB tidak ada highlight otomatis
+        // DB tidak return <em> highlight, kita kirim raw text
+        title: row.title, 
         subtitle: row.subtitle,
-        source: 'database'
+        source: 'postgres_trigram' // Metadata: Ini hasil "penyelamatan" DB
       }));
     } catch (e) {
-      this.logger.error(`❌ DB Fallback failed: ${e.message}`);
+      this.logger.error(`Postgres Trigram Search failed: ${e.message}`);
       return [];
-    }
-  }
-
-  async addDocuments(indexName: string, documents: any[]) {
-    if (!this.isMeiliHealthy) {
-      this.logger.warn(`Skipping indexing to '${indexName}' because Meilisearch is down.`);
-      return;
-    }
-
-    try {
-      const index = this.client.index(indexName);
-      const task = await index.addDocuments(documents);
-      this.logger.log(`Document added to ${indexName}. TaskUid: ${task.taskUid}`);
-      return task;
-    } catch (error) {
-      this.logger.error(`Failed to add documents to ${indexName}: ${error.message}`);
-      // Tidak throw error agar flow utama DirectorService tidak putus
-    }
-  }
-
-  // --- Utility Methods ---
-  
-  async checkHealth() {
-    try {
-      return await this.client.isHealthy();
-    } catch (e) {
-      return false;
     }
   }
 }
