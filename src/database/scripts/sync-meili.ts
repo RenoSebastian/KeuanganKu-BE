@@ -15,7 +15,7 @@ export class SearchService implements OnModuleInit {
     // Inisialisasi Client Meilisearch
     this.client = new MeiliSearch({
       host: process.env.MEILI_HOST || 'http://127.0.0.1:7700',
-      apiKey: process.env.MEILI_MASTER_KEY || 'MASTER_KEY_ANDA', // Pastikan sama dengan .env
+      apiKey: process.env.MEILI_MASTER_KEY || 'RAHASIA_KITA_123', // Pastikan sama dengan .env
     });
 
     // Cek koneksi awal
