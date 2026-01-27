@@ -12,7 +12,7 @@ export class SearchService implements OnModuleInit {
     // Menggunakan host default 127.0.0.1:7700 untuk instalasi native
     this.client = new MeiliSearch({
       host: 'http://127.0.0.1:7700',
-      apiKey: 'MASTER_KEY_ANDA', // Ganti dengan Master Key dari terminal Meilisearch
+      apiKey: 'RAHASIA_KITA_123', // Ganti dengan Master Key dari terminal Meilisearch
     });
 
     this.logger.log('Meilisearch client initialized on http://127.0.0.1:7700');

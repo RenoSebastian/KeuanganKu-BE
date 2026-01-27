@@ -398,8 +398,8 @@ export class DirectorService {
     const employee = await this.prisma.user.findUnique({
       where: { id: employeeId },
       include: {
-        financialRecords: {
-          orderBy: { createdAt: 'desc' },
+        financialChecks: {
+          orderBy: { checkDate: 'desc' },
           take: 1,
         },
       },
@@ -413,7 +413,7 @@ export class DirectorService {
           name: employee.fullName,
           unitKerja: employee.unitKerjaId,
           // Menambahkan konteks finansial terakhir agar bisa di-search berdasarkan kondisi
-          lastHealthScore: employee.financialRecords[0]?.score || 0,
+          lastHealthScore: employee.financialChecks[0]?.healthScore || 0,
         },
       ]);
     }

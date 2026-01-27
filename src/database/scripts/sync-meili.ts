@@ -7,7 +7,7 @@ async function syncMeilisearch() {
   // Inisialisasi client Meilisearch secara manual untuk script ini
   const meiliClient = new MeiliSearch({
     host: 'http://127.0.0.1:7700',
-    apiKey: 'MASTER_KEY_ANDA', // Pastikan sesuai dengan Master Key Meilisearch kamu
+    apiKey: 'RAHASIA_KITA_123', // Pastikan sesuai dengan Master Key Meilisearch kamu
   });
 
   console.log('--- Starting Initial Data Sync to Meilisearch ---');
@@ -17,12 +17,20 @@ async function syncMeilisearch() {
     const allUsers = await prisma.user.findMany({
       select: {
         id: true,
-        name: true,
+        fullName: true,
         email: true,
         role: true,
-        unitKerja: true,
+        unitKerjaId: true,
       },
     });
+
+    const mappedUsers = allUsers.map(user => ({
+      id: user.id,
+      name: user.fullName, // Map fullName ke name untuk index search
+      email: user.email,
+      role: user.role,
+      unitKerja: user.unitKerjaId
+    }));
 
     console.log(`Found ${allUsers.length} users in database.`);
 
@@ -45,7 +53,7 @@ async function syncMeilisearch() {
     console.log('Index settings updated (Typo tolerance enabled).');
 
     // 4. Bulk Upload
-    const task = await index.addDocuments(allUsers);
+    const task = await index.addDocuments(mappedUsers);
     
     console.log(`Successfully queued bulk upload task. Task UID: ${task.taskUid}`);
     console.log('Check Meilisearch dashboard or wait a few seconds for processing.');
