@@ -7,6 +7,7 @@ import { HealthStatus } from '@prisma/client';
 // Utility Import (Step 1 Integration)
 import { calculateFinancialHealth } from '../financial/utils/financial-math.util';
 import { CreateFinancialRecordDto } from '../financial/dto/create-financial-record.dto';
+import { SearchService } from '../search/search.service';
 
 // 1. Import DTO Dashboard & Summary
 import { 
@@ -24,7 +25,8 @@ export class DirectorService {
   constructor(
     private prisma: PrismaService,
     private auditService: AuditService,
-    private financialService: FinancialService
+    private financialService: FinancialService,
+    private searchService: SearchService,
   ) {}
 
   // ===========================================================================
@@ -390,5 +392,30 @@ export class DirectorService {
         expenseLifestyle: Number(c.expenseLifestyle),
       }
     };
+  }
+  
+  async syncEmployeeToDirectorIndex(employeeId: string) {
+    const employee = await this.prisma.user.findUnique({
+      where: { id: employeeId },
+      include: {
+        financialRecords: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (employee) {
+      // Indexing untuk kebutuhan Direktur (Omni Search)
+      await this.searchService.addDocuments('director_employees', [
+        {
+          id: employee.id,
+          name: employee.fullName,
+          unitKerja: employee.unitKerjaId,
+          // Menambahkan konteks finansial terakhir agar bisa di-search berdasarkan kondisi
+          lastHealthScore: employee.financialRecords[0]?.score || 0,
+        },
+      ]);
+    }
   }
 }

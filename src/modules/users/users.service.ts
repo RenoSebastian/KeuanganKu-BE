@@ -1,6 +1,7 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { EditUserDto } from './dto/edit-user.dto';
+import { SearchService } from '../search/search.service';
 
 @Injectable()
 export class UsersService {
@@ -8,7 +9,9 @@ export class UsersService {
   // Ini membuat output log nanti tertulis: [UsersService] ...
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService,
+              private searchService: SearchService
+  ) {}
 
   // Lihat Profil Sendiri
   async getMe(userId: string) {
@@ -26,6 +29,8 @@ export class UsersService {
       throw new NotFoundException(`User with ID ${userId} not found`);
     }
 
+    // Logical Trigger: Sync ke Meilisearch secara Async
+    this.syncToSearch(user);
     return user;
   }
 
@@ -46,6 +51,8 @@ export class UsersService {
 
       // [LOG INFO] Konfirmasi sukses
       this.logger.log(`User ${userId} successfully updated.`);
+      // Logical Trigger: Sync ke Meilisearch secara Async
+      this.syncToSearch(updatedUser);
       return updatedUser;
 
     } catch (error) {
@@ -56,6 +63,28 @@ export class UsersService {
       // Lempar error agar ditangkap oleh Global Exception Filter yang kita buat di Phase 3
       // dan dikembalikan sebagai response JSON yang rapi ke user.
       throw error;
+    }
+  }
+
+  /**
+   * Private Helper untuk menangani sinkronisasi data.
+   * Dipisahkan agar tidak mengotori logic utama CRUD.
+   */
+  private async syncToSearch(user: any) {
+    try {
+      await this.searchService.addDocuments('users', [
+        {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          unitKerja: user.unitKerja,
+          createdAt: user.createdAt,
+        },
+      ]);
+    } catch (error) {
+      // Kita gunakan logger agar jika search engine mati, transaksi DB tidak rollback
+      console.error(`Failed to sync user ${user.id} to Meilisearch:`, error);
     }
   }
 }

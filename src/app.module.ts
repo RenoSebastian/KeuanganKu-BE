@@ -13,6 +13,7 @@ import { AuditModule } from './modules/audit/audit.module';
 import { MarketModule } from './modules/market/market.module';
 import { DirectorModule } from './modules/director/director.module';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { SearchModule } from './modules/search/search.module';
 
 // --- ADDED: Logging Imports ---
 import { WinstonModule } from 'nest-winston';
@@ -34,6 +35,7 @@ import { winstonConfig } from './common/configs/winston.config';
     AuditModule,
     MarketModule,
     DirectorModule,
+    SearchModule,
   ],
   controllers: [],
   providers: [
