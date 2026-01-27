@@ -357,21 +357,60 @@ export const calculateFinancialHealth = (
   });
 
   // --- 3. LOGIKA PENENTUAN STATUS AKHIR ---
-  const allColors = ratios.map(r => r.statusColor);
+  // ... (kode perhitungan rasio di atas tetap sama) ...
 
-  let globalStatus: 'SEHAT' | 'WASPADA' | 'BAHAYA' = 'SEHAT';
-  let score = 100;
+  // =================================================================
+  // 3. HITUNG SKOR KESEHATAN (WEIGHTED DISTRIBUTION LOGIC)
+  // =================================================================
+  
+  // A. Definisikan Bobot Nilai (0-100)
+  // Logic: Hijau mengangkat nilai, Merah menjatuhkan nilai secara signifikan
+  const SCORE_WEIGHTS: Record<string, number> = {
+    GREEN_DARK: 100, // Sempurna
+    GREEN_LIGHT: 85, // Sehat
+    YELLOW: 50,      // Waspada (Setengah lulus)
+    RED: 15,         // Bahaya (Nilai sangat rendah)
+  };
 
-  if (allColors.includes('RED')) {
-    globalStatus = 'BAHAYA';
-    score = 25; 
-  } else if (allColors.includes('YELLOW')) {
-    globalStatus = 'WASPADA';
-    score = 60; 
-  } else {
+  // B. Hitung Total Poin dari semua Rasio
+  let totalPoints = 0;
+  const totalRatios = ratios.length;
+
+  // Variabel bantu untuk counting (opsional, untuk debug)
+  let redCount = 0;
+
+  ratios.forEach((r) => {
+    // Ambil bobot berdasarkan warna, default 0 jika error
+    const points = SCORE_WEIGHTS[r.statusColor] || 0;
+    totalPoints += points;
+
+    if (r.statusColor === 'RED') redCount++;
+  });
+
+  // C. Kalkulasi Final Score (Rata-rata)
+  // Rumus: Total Poin / Jumlah Rasio
+  let score = totalRatios > 0 ? Math.round(totalPoints / totalRatios) : 0;
+
+  // D. Tentukan Status Global berdasarkan Range Nilai
+  let globalStatus: 'SEHAT' | 'WASPADA' | 'BAHAYA';
+
+  if (score >= 80) {
+    // Skor >= 80: SEHAT (Mayoritas Hijau)
     globalStatus = 'SEHAT';
-    const allPerfect = allColors.every(c => c === 'GREEN_DARK');
-    score = allPerfect ? 100 : 90; 
+  } else if (score >= 50) {
+    // Skor 50 - 79: WASPADA (Campuran Hijau/Kuning atau ada sedikit Merah)
+    globalStatus = 'WASPADA';
+  } else {
+    // Skor < 50: BAHAYA (Dominan Merah/Kuning)
+    globalStatus = 'BAHAYA';
+  }
+
+  // --- LOGIC TAMBAHAN (SAFETY NET) ---
+  // Jika skor masuk kategori "SEHAT" (misal 81), TAPI ada lebih dari 2 indikator MERAH,
+  // kita paksa turun ke "WASPADA" agar user tidak terlena.
+  if (globalStatus === 'SEHAT' && redCount >= 2) {
+    globalStatus = 'WASPADA';
+    score = 79; // Cap di batas atas Waspada
   }
 
   return {
@@ -383,7 +422,7 @@ export const calculateFinancialHealth = (
     generatedAt: new Date().toISOString(),
     // Feedback data raw untuk Frontend (opsional)
     incomeFixed: val(data.incomeFixed),
-    incomeVariable: val(data.incomeVariable)
+    incomeVariable: val(data.incomeVariable),
   };
 };
 
