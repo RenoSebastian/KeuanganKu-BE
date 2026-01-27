@@ -45,6 +45,27 @@ export class SearchService implements OnModuleInit {
         }
     }
 
+    async addDocuments(indexName: string, documents: any[]) {
+        // Fail-safe: Jika Meili mati, jangan throw error agar flow aplikasi tetap jalan
+        if (!this.isMeiliHealthy) {
+            this.logger.warn(`Skipping indexing to ${indexName}: Meilisearch is offline.`);
+            return;
+        }
+
+        try {
+            // Gunakan indexName dari parameter, atau default ke INDEX_NAME
+            const targetIndex = indexName || this.INDEX_NAME;
+            const index = this.client.index(targetIndex);
+
+            // Execute indexing
+            const task = await index.addDocuments(documents);
+            this.logger.debug(`AddDocuments Task Enqueued: ${task.taskUid}`);
+            return task;
+        } catch (error) {
+            this.logger.error(`Failed to add documents to ${indexName}: ${error.message}`);
+        }
+    }
+
     // --- [PHASE 1] CONFIGURATION LOGIC ---
     private async configureMeiliIndex() {
         if (!this.isMeiliHealthy) return;

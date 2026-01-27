@@ -6,7 +6,7 @@ import { CreatePensionDto } from './dto/create-pension.dto';
 import { CreateInsuranceDto } from './dto/create-insurance.dto';
 import { CreateGoalDto } from './dto/create-goal.dto';
 import { CreateEducationPlanDto } from './dto/create-education.dto';
-import {
+import { 
   calculateFinancialHealth,
   calculatePensionPlan,
   calculateInsurancePlan,
@@ -18,7 +18,7 @@ import { HealthStatus } from '@prisma/client';
 
 @Injectable()
 export class FinancialService {
-  constructor(private prisma: PrismaService) { }
+  constructor(private prisma: PrismaService) {}
 
   // ===========================================================================
   // MODULE 1: FINANCIAL CHECKUP (The "Medical" Check)
@@ -42,7 +42,7 @@ export class FinancialService {
         // Mapping manual karena Prisma tidak otomatis map sub-object JSON
         userProfile: dto.userProfile as any,
         spouseProfile: dto.spouseProfile ? (dto.spouseProfile as any) : undefined,
-
+        
         // Simpan Hasil Analisa (Persistence Optimization)
         totalNetWorth: analysis.netWorth,
         surplusDeficit: analysis.surplusDeficit,
@@ -56,7 +56,7 @@ export class FinancialService {
   // [IMPORTANT] Method ini Public & Exported untuk dipakai DirectorService
   // Refactor: Menambahkan parameter actorRole untuk skalabilitas filtering akses
   async getLatestCheckup(userId: string, actorRole?: string) {
-    // Saat ini logicnya masih mengambil full data  
+    // Saat ini logicnya masih mengambil full data
     // Parameter actorRole disiapkan jika nanti ada kebutuhan filtering field di level database
     return this.prisma.financialCheckup.findFirst({
       where: { userId },
@@ -109,14 +109,14 @@ export class FinancialService {
   // ===========================================================================
   // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
   // ===========================================================================
-
+  
   async createBudget(userId: string, dto: CreateBudgetDto) {
     const totalIncome = dto.fixedIncome + dto.variableIncome;
 
     // --- LOGIKA CERDAS: AUTO-CALCULATE JIKA KOSONG ---
     // Cek jika field utama pengeluaran tidak dikirim atau nol
     const isManualInput = dto.livingCost && dto.livingCost > 0;
-
+    
     let finalAllocation = {
       livingCost: dto.livingCost || 0,
       productiveDebt: dto.productiveDebt || 0,
@@ -136,7 +136,7 @@ export class FinancialService {
       finalAllocation.insurance +
       finalAllocation.saving +
       finalAllocation.livingCost;
-
+    
     const balance = totalIncome - totalExpense;
 
     let cashflowStatus = 'BALANCED';
@@ -169,11 +169,11 @@ export class FinancialService {
         ...dto,
         ...finalAllocation
       });
-
+      
       return { budget, analysis };
     });
   }
-
+  
   async getMyBudgets(userId: string) {
     return this.prisma.budgetPlan.findMany({
       where: { userId },
@@ -181,7 +181,7 @@ export class FinancialService {
       take: 12,
     });
   }
-
+  
   // ===========================================================================
   // MODULE 3: CALCULATOR - PENSION PLAN (UPDATED LOGIC)
   // ===========================================================================
@@ -201,7 +201,7 @@ export class FinancialService {
         currentSaving: dto.currentSaving,
         inflationRate: dto.inflationRate,
         returnRate: dto.returnRate,
-
+        
         // Hasil Perhitungan
         totalFundNeeded: result.totalFundNeeded,
         monthlySaving: result.monthlySaving,
@@ -297,7 +297,7 @@ export class FinancialService {
         costType: stage.costType,
         currentCost: stage.currentCost,
         yearsToStart: stage.yearsToStart,
-
+        
         // FIELD PENTING: Hasil Hitungan Backend
         futureCost: stage.futureCost,        // FV Item Ini
         monthlySaving: stage.monthlySaving,  // Tabungan Item Ini
@@ -318,7 +318,7 @@ export class FinancialService {
   private analyzeBudgetHealth(dto: CreateBudgetDto) {
     let score = 100;
     const violations: string[] = [];
-    const base = Number(dto.fixedIncome);
+    const base = Number(dto.fixedIncome); 
 
     if (base === 0) return { score: 0, status: 'BAHAYA', recommendation: 'Wajib input Gaji Tetap.' };
 
@@ -366,7 +366,7 @@ export class FinancialService {
       const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
 
       return {
-        plan: planData,
+        plan: planData, 
         calculation: {
           totalFutureCost,
           monthlySaving: totalMonthlySaving,
