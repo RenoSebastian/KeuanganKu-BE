@@ -10,9 +10,9 @@ import { CreateFinancialRecordDto } from '../financial/dto/create-financial-reco
 import { SearchService } from '../search/search.service';
 
 // 1. Import DTO Dashboard & Summary
-import { 
-  DashboardStatsDto, 
-  RiskyEmployeeDto, 
+import {
+  DashboardStatsDto,
+  RiskyEmployeeDto,
   UnitRankingDto,
   DashboardSummaryDto
 } from './dto/director-dashboard.dto';
@@ -27,7 +27,7 @@ export class DirectorService {
     private auditService: AuditService,
     private financialService: FinancialService,
     private searchService: SearchService,
-  ) {}
+  ) { }
 
   // ===========================================================================
   // PHASE 5: ORCHESTRATOR (PARALLEL EXECUTION)
@@ -35,7 +35,7 @@ export class DirectorService {
   async getDashboardSummary(): Promise<DashboardSummaryDto> {
     const [stats, riskyAll, rankingsAll] = await Promise.all([
       this.getDashboardStats(),
-      this.getRiskMonitor(), 
+      this.getRiskMonitor(),
       this.getUnitRankings(),
     ]);
 
@@ -93,9 +93,9 @@ export class DirectorService {
   // ===========================================================================
   async getRiskMonitor(): Promise<RiskyEmployeeDto[]> {
     const users = await this.prisma.user.findMany({
-      where: { 
+      where: {
         role: 'USER',
-        financialChecks: { 
+        financialChecks: {
           some: {
             status: { in: [HealthStatus.BAHAYA, HealthStatus.WASPADA] }
           }
@@ -107,12 +107,12 @@ export class DirectorService {
         unitKerja: { select: { namaUnit: true } },
         financialChecks: {
           orderBy: { checkDate: 'desc' },
-          take: 1, 
+          take: 1,
           select: {
             status: true,
             healthScore: true,
             checkDate: true,
-            userProfile: true 
+            userProfile: true
           },
         },
       },
@@ -121,7 +121,7 @@ export class DirectorService {
     const riskyList = users
       .map((u): RiskyEmployeeDto | null => {
         const lastCheck = u.financialChecks[0];
-        
+
         if (!lastCheck) return null;
         if (lastCheck.status === HealthStatus.SEHAT) return null;
 
@@ -131,7 +131,7 @@ export class DirectorService {
           id: u.id,
           fullName: u.fullName,
           unitName: u.unitKerja?.namaUnit || 'Tidak Ada Unit',
-          status: lastCheck.status, 
+          status: lastCheck.status,
           healthScore: lastCheck.healthScore,
           debtToIncomeRatio: debtRatio,
           lastCheckDate: lastCheck.checkDate,
@@ -166,7 +166,7 @@ export class DirectorService {
     return rawRankings.map((row) => {
       const score = Math.round(row.avgScore);
       let status: HealthStatus = HealthStatus.BAHAYA;
-      
+
       if (score >= 80) status = HealthStatus.SEHAT;
       else if (score >= 60) status = HealthStatus.WASPADA;
 
@@ -175,7 +175,7 @@ export class DirectorService {
         unitName: row.unitName,
         employeeCount: row.employeeCount,
         avgScore: score,
-        status, 
+        status,
       };
     });
   }
@@ -187,7 +187,7 @@ export class DirectorService {
     if (!keyword) return [];
 
     const safeKeyword = keyword.trim();
-    
+
     const results: any[] = await this.prisma.$queryRaw`
       SELECT
         u.id,
@@ -217,8 +217,8 @@ export class DirectorService {
       id: row.id,
       fullName: row.fullName,
       email: row.email,
-      unitKerja: { 
-        name: row.unitName || 'Tidak Ada Unit' 
+      unitKerja: {
+        name: row.unitName || 'Tidak Ada Unit'
       },
       financialChecks: row.status ? [{
         status: row.status as HealthStatus,
@@ -241,7 +241,7 @@ export class DirectorService {
     const c = await this.financialService.getLatestCheckup(targetUserId);
 
     if (!c) {
-        return null; 
+      return null;
     }
 
     // [FIX 1] Pass object, bukan multiple arguments
@@ -249,7 +249,7 @@ export class DirectorService {
       actorId: actorId,
       targetUserId: targetUserId,
       action: 'VIEW_EMPLOYEE_DETAIL',
-      metadata: { 
+      metadata: {
         employeeName: user.fullName,
         healthScore: c.healthScore
       }
@@ -260,60 +260,60 @@ export class DirectorService {
 
     // On-the-fly Calculation jika data belum matang
     if (!analysisRatios) {
-        const rawDataForCalc: CreateFinancialRecordDto = {
-            assetCash: Number(c.assetCash),
-            assetHome: Number(c.assetHome),
-            assetVehicle: Number(c.assetVehicle),
-            assetJewelry: Number(c.assetJewelry),
-            assetAntique: Number(c.assetAntique),
-            assetPersonalOther: Number(c.assetPersonalOther),
-            assetInvHome: Number(c.assetInvHome),
-            assetInvVehicle: Number(c.assetInvVehicle),
-            assetGold: Number(c.assetGold),
-            assetInvAntique: Number(c.assetInvAntique),
-            assetStocks: Number(c.assetStocks),
-            assetMutualFund: Number(c.assetMutualFund),
-            assetBonds: Number(c.assetBonds),
-            assetDeposit: Number(c.assetDeposit),
-            assetInvOther: Number(c.assetInvOther),
-            debtKPR: Number(c.debtKPR),
-            debtKPM: Number(c.debtKPM),
-            debtCC: Number(c.debtCC),
-            debtCoop: Number(c.debtCoop),
-            debtConsumptiveOther: Number(c.debtConsumptiveOther),
-            debtBusiness: Number(c.debtBusiness),
-            incomeFixed: Number(c.incomeFixed),
-            incomeVariable: Number(c.incomeVariable),
-            installmentKPR: Number(c.installmentKPR),
-            installmentKPM: Number(c.installmentKPM),
-            installmentCC: Number(c.installmentCC),
-            installmentCoop: Number(c.installmentCoop),
-            installmentConsumptiveOther: Number(c.installmentConsumptiveOther),
-            installmentBusiness: Number(c.installmentBusiness),
-            insuranceLife: Number(c.insuranceLife),
-            insuranceHealth: Number(c.insuranceHealth),
-            insuranceHome: Number(c.insuranceHome),
-            insuranceVehicle: Number(c.insuranceVehicle),
-            insuranceBPJS: Number(c.insuranceBPJS),
-            insuranceOther: Number(c.insuranceOther),
-            savingEducation: Number(c.savingEducation),
-            savingRetirement: Number(c.savingRetirement),
-            savingPilgrimage: Number(c.savingPilgrimage),
-            savingHoliday: Number(c.savingHoliday),
-            savingEmergency: Number(c.savingEmergency),
-            savingOther: Number(c.savingOther),
-            expenseFood: Number(c.expenseFood),
-            expenseSchool: Number(c.expenseSchool),
-            expenseTransport: Number(c.expenseTransport),
-            expenseCommunication: Number(c.expenseCommunication),
-            expenseHelpers: Number(c.expenseHelpers),
-            expenseTax: Number(c.expenseTax),
-            expenseLifestyle: Number(c.expenseLifestyle),
-            userProfile: c.userProfile as any,
-        };
+      const rawDataForCalc: CreateFinancialRecordDto = {
+        assetCash: Number(c.assetCash),
+        assetHome: Number(c.assetHome),
+        assetVehicle: Number(c.assetVehicle),
+        assetJewelry: Number(c.assetJewelry),
+        assetAntique: Number(c.assetAntique),
+        assetPersonalOther: Number(c.assetPersonalOther),
+        assetInvHome: Number(c.assetInvHome),
+        assetInvVehicle: Number(c.assetInvVehicle),
+        assetGold: Number(c.assetGold),
+        assetInvAntique: Number(c.assetInvAntique),
+        assetStocks: Number(c.assetStocks),
+        assetMutualFund: Number(c.assetMutualFund),
+        assetBonds: Number(c.assetBonds),
+        assetDeposit: Number(c.assetDeposit),
+        assetInvOther: Number(c.assetInvOther),
+        debtKPR: Number(c.debtKPR),
+        debtKPM: Number(c.debtKPM),
+        debtCC: Number(c.debtCC),
+        debtCoop: Number(c.debtCoop),
+        debtConsumptiveOther: Number(c.debtConsumptiveOther),
+        debtBusiness: Number(c.debtBusiness),
+        incomeFixed: Number(c.incomeFixed),
+        incomeVariable: Number(c.incomeVariable),
+        installmentKPR: Number(c.installmentKPR),
+        installmentKPM: Number(c.installmentKPM),
+        installmentCC: Number(c.installmentCC),
+        installmentCoop: Number(c.installmentCoop),
+        installmentConsumptiveOther: Number(c.installmentConsumptiveOther),
+        installmentBusiness: Number(c.installmentBusiness),
+        insuranceLife: Number(c.insuranceLife),
+        insuranceHealth: Number(c.insuranceHealth),
+        insuranceHome: Number(c.insuranceHome),
+        insuranceVehicle: Number(c.insuranceVehicle),
+        insuranceBPJS: Number(c.insuranceBPJS),
+        insuranceOther: Number(c.insuranceOther),
+        savingEducation: Number(c.savingEducation),
+        savingRetirement: Number(c.savingRetirement),
+        savingPilgrimage: Number(c.savingPilgrimage),
+        savingHoliday: Number(c.savingHoliday),
+        savingEmergency: Number(c.savingEmergency),
+        savingOther: Number(c.savingOther),
+        expenseFood: Number(c.expenseFood),
+        expenseSchool: Number(c.expenseSchool),
+        expenseTransport: Number(c.expenseTransport),
+        expenseCommunication: Number(c.expenseCommunication),
+        expenseHelpers: Number(c.expenseHelpers),
+        expenseTax: Number(c.expenseTax),
+        expenseLifestyle: Number(c.expenseLifestyle),
+        userProfile: c.userProfile as any,
+      };
 
-        const result = calculateFinancialHealth(rawDataForCalc);
-        analysisRatios = result.ratios;
+      const result = calculateFinancialHealth(rawDataForCalc);
+      analysisRatios = result.ratios;
     }
 
     return {
@@ -331,7 +331,7 @@ export class DirectorService {
         score: c.healthScore,
         globalStatus: c.status,
         netWorth: Number(c.totalNetWorth),
-        surplusDeficit: Number(c.surplusDeficit), 
+        surplusDeficit: Number(c.surplusDeficit),
         generatedAt: c.checkDate,
         ratios: analysisRatios as any // Explicit casting
       },
@@ -340,7 +340,7 @@ export class DirectorService {
         userProfile: {
           name: user.fullName,
           dob: user.dateOfBirth ? user.dateOfBirth.toISOString() : undefined,
-          ...c.userProfile as any 
+          ...c.userProfile as any
         },
         assetCash: Number(c.assetCash),
         assetHome: Number(c.assetHome),
@@ -393,7 +393,7 @@ export class DirectorService {
       }
     };
   }
-  
+
   async syncEmployeeToDirectorIndex(employeeId: string) {
     const employee = await this.prisma.user.findUnique({
       where: { id: employeeId },
