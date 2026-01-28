@@ -7,7 +7,11 @@ import {
   Param,
   UseGuards,
   Req,
+  Res,
+  NotFoundException,
 } from '@nestjs/common';
+import express from 'express';
+import { PdfGeneratorService } from './services/pdf-generator.service';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { FinancialService } from './financial.service';
 
@@ -28,7 +32,8 @@ import { GetUser } from 'src/common/decorators/get-user.decorator';
 @ApiBearerAuth()
 @Controller('financial')
 export class FinancialController {
-  constructor(private readonly financialService: FinancialService) { }
+  constructor(private readonly financialService: FinancialService,
+    private readonly pdfservice: PdfGeneratorService) { }
 
   // ===========================================================================
   // MODULE 1: FINANCIAL CHECKUP (MEDICAL CHECK)
@@ -61,6 +66,33 @@ export class FinancialController {
   async getCheckupDetail(@Req() req, @Param('id') id: string) {
     const userId = req.user.id;
     return this.financialService.getCheckupDetail(userId, id);
+  }
+
+  @Get('checkup/pdf/:id')
+  @ApiOperation({ summary: 'Download PDF Report (Server-Side Generated)' })
+  async downloadCheckupPdf(@Param('id') id: string, @Req() req, @Res() res: express.Response) {
+    const userId = req.user.id;
+
+    // 1. Ambil Data (Reuse logic getCheckupDetail)
+    // Note: Kita butuh method di service yang return raw data lengkap untuk PDF, 
+    // atau kita pakai getCheckupDetail yang sudah ada tapi pastikan fieldnya lengkap.
+    // Untuk amannya, kita query ulang atau pastikan service return format yang pas.
+    const checkupData = await this.financialService.getLatestCheckup(userId);
+    // *Atau getCheckupDetail(userId, id) jika ingin spesifik history*
+
+    if (!checkupData) throw new NotFoundException('Data not found');
+
+    // 2. Generate PDF
+    const buffer = await this.pdfservice.generateCheckupPdf(checkupData);
+
+    // 3. Stream Response
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Financial-Checkup-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
+
+    res.end(buffer);
   }
 
   // ===========================================================================
