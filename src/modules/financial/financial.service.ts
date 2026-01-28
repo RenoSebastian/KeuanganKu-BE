@@ -15,6 +15,7 @@ import {
   calculateBudgetSplit,
 } from './utils/financial-math.util';
 import { HealthStatus } from '@prisma/client';
+import { SchoolLevel } from '@prisma/client';
 
 @Injectable()
 export class FinancialService {
@@ -291,9 +292,19 @@ export class FinancialService {
       // B. Create Detail Stages (TK, SD, SMP...)
       // Kita map hasil perhitungan utils ke struktur database
       // stagesBreakdown sudah berisi futureCost dan monthlySaving per item
-      const stagesData = result.stagesBreakdown.map((stage) => ({
+      const stagesData = result.stagesBreakdown.map((stage) => {
+        // --- DATA TRANSFORMATION LOGIC ---
+        // -- MEMASTIKAN ID DARI FRONTEND (KULIAH/PT) DIPETAKAN SEBAGAI S1 DI DATABASE --
+        let dbLevel: SchoolLevel = stage.level;
+
+        //Cek jika level dikirim sebagai string yang perlu di konversi
+        const levelCheck = String(stage.level).toUpperCase();
+        if (levelCheck === 'KULIAH' || levelCheck === 'PT') {
+          dbLevel = SchoolLevel.S1;
+        }
+          return {
         planId: plan.id,
-        level: stage.level,
+        level: dbLevel,
         costType: stage.costType,
         currentCost: stage.currentCost,
         yearsToStart: stage.yearsToStart,
@@ -301,7 +312,8 @@ export class FinancialService {
         // FIELD PENTING: Hasil Hitungan Backend
         futureCost: stage.futureCost,        // FV Item Ini
         monthlySaving: stage.monthlySaving,  // Tabungan Item Ini
-      }));
+          };
+      });
 
       await tx.educationStage.createMany({
         data: stagesData,

@@ -33,7 +33,8 @@ enum SchoolLevel {
   SD
   SMP
   SMA
-  PT
+  S1
+  S2
 }
 
 enum CostType {

@@ -3,6 +3,8 @@ import { CreatePensionDto } from '../dto/create-pension.dto';
 import { CreateInsuranceDto } from '../dto/create-insurance.dto';
 import { CreateGoalDto } from '../dto/create-goal.dto';
 import { CreateEducationPlanDto } from '../dto/create-education.dto';
+import { CreateBudgetDto } from '../dto/create-budget.dto';
+import { SchoolLevel, CostType } from '@prisma/client';
 
 // --- INTERFACES (Mirroring FE logic) ---
 export interface RatioDetail {
@@ -87,7 +89,7 @@ export const calculateFinancialHealth = (
   const netWorth = totalAssets - totalDebt;
 
   // --- D. ARUS KAS TAHUNAN (FLOW - Wajib Dikali 12) ---
-  
+
   // Total Penghasilan Tahunan (I) -> FIX: Dikali 12
   const totalAnnualIncome = (val(data.incomeFixed) + val(data.incomeVariable)) * 12;
 
@@ -151,7 +153,7 @@ export const calculateFinancialHealth = (
 
   // --- 2. PERHITUNGAN 8 RASIO (LOGIKA TETAP SAMA) ---
   const ratios: RatioDetail[] = [];
-  
+
   // #1. RASIO DANA DARURAT (A / P)
   const r1 = monthlyExpense > 0 ? totalLiquid / monthlyExpense : 0;
   let s1: any = 'RED';
@@ -362,7 +364,7 @@ export const calculateFinancialHealth = (
   // =================================================================
   // 3. HITUNG SKOR KESEHATAN (WEIGHTED DISTRIBUTION LOGIC)
   // =================================================================
-  
+
   // A. Definisikan Bobot Nilai (0-100)
   // Logic: Hijau mengangkat nilai, Merah menjatuhkan nilai secara signifikan
   const SCORE_WEIGHTS: Record<string, number> = {
@@ -439,9 +441,9 @@ export const calculateFinancialHealth = (
  * @param type 0 = akhir periode, 1 = awal periode
  */
 export const calculateFV = (rate: number, nper: number, pmt: number, pv: number, type: 0 | 1 = 0) => {
-    if (rate === 0) return -(pv + pmt * nper);
-    const pow = Math.pow(1 + rate, nper);
-    return -((pv * pow) + (pmt * (1 + rate * type) * (pow - 1) / rate));
+  if (rate === 0) return -(pv + pmt * nper);
+  const pow = Math.pow(1 + rate, nper);
+  return -((pv * pow) + (pmt * (1 + rate * type) * (pow - 1) / rate));
 };
 
 /**
@@ -453,9 +455,9 @@ export const calculateFV = (rate: number, nper: number, pmt: number, pv: number,
  * @param type 0 = akhir periode, 1 = awal periode
  */
 export const calculatePMT = (rate: number, nper: number, pv: number, fv: number = 0, type: 0 | 1 = 0) => {
-    if (rate === 0) return -(pv + fv) / nper;
-    const pvif = Math.pow(1 + rate, nper);
-    return -(rate * (fv + (pv * pvif))) / ((pvif - 1) * (1 + rate * type));
+  if (rate === 0) return -(pv + fv) / nper;
+  const pvif = Math.pow(1 + rate, nper);
+  return -(rate * (fv + (pv * pvif))) / ((pvif - 1) * (1 + rate * type));
 };
 
 // ============================================================================
@@ -469,92 +471,92 @@ export const calculatePMT = (rate: number, nper: number, pv: number, fv: number 
  * - Tabungan bulanan dihitung dari Annual Sinking Fund dibagi 12.
  */
 export const calculatePensionPlan = (data: CreatePensionDto) => {
-    const { 
-        currentAge, 
-        retirementAge, 
-        lifeExpectancy = 80, 
-        currentExpense, 
-        currentSaving = 0, 
-        inflationRate = 5, 
-        returnRate = 8 
-    } = data;
-    
-    // --- 1. SETUP VARIABEL WAKTU ---
-    const yearsToRetire = retirementAge - currentAge;
-    const retirementDuration = lifeExpectancy - retirementAge;
+  const {
+    currentAge,
+    retirementAge,
+    lifeExpectancy = 80,
+    currentExpense,
+    currentSaving = 0,
+    inflationRate = 5,
+    returnRate = 8
+  } = data;
 
-    if (yearsToRetire <= 0) {
-        throw new Error("Usia pensiun harus lebih besar dari usia sekarang");
-    }
-    if (retirementDuration <= 0) {
-        throw new Error("Usia harapan hidup harus lebih besar dari usia pensiun");
-    }
+  // --- 1. SETUP VARIABEL WAKTU ---
+  const yearsToRetire = retirementAge - currentAge;
+  const retirementDuration = lifeExpectancy - retirementAge;
 
-    // --- 2. KONVERSI RATE KE DESIMAL ---
-    const iRate = inflationRate / 100; // Inflasi (ex: 0.04)
-    const rRate = returnRate / 100;    // Return Investasi (ex: 0.08)
-    
-    // Hitung Nett Rate (Selisih bunga) untuk masa pensiun
-    // Sesuai Excel: r_nett = r_invest - r_inflasi
-    const nettRate = rRate - iRate;
+  if (yearsToRetire <= 0) {
+    throw new Error("Usia pensiun harus lebih besar dari usia sekarang");
+  }
+  if (retirementDuration <= 0) {
+    throw new Error("Usia harapan hidup harus lebih besar dari usia pensiun");
+  }
 
-    // --- 3. HITUNG BIAYA HIDUP NANTI (FV Expense) ---
-    // Excel menggunakan basis Tahunan. 
-    // Rumus: BiayaSekarang * (1 + inflasi)^TahunMenujuPensiun
-    const annualExpenseCurrent = currentExpense * 12;
-    const futureAnnualExpense = annualExpenseCurrent * Math.pow(1 + iRate, yearsToRetire);
+  // --- 2. KONVERSI RATE KE DESIMAL ---
+  const iRate = inflationRate / 100; // Inflasi (ex: 0.04)
+  const rRate = returnRate / 100;    // Return Investasi (ex: 0.08)
 
-    // --- 4. HITUNG TOTAL DANA YANG DIBUTUHKAN (NEST EGG / TOTAL FUND) ---
-    // Menggunakan Rumus "Present Value of Annuity Due" (PVAD)
-    // Dana ini dibutuhkan di awal masa pensiun untuk membiayai hidup selama X tahun (retirementDuration)
-    // dengan asumsi uang sisa tetap tumbuh sebesar nettRate.
-    // Rumus: PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
-    // Note: Jika nettRate 0, gunakan rumus simplifikasi (PMT * n)
-    
-    let totalFundNeeded = 0;
-    if (nettRate === 0) {
-        totalFundNeeded = futureAnnualExpense * retirementDuration;
+  // Hitung Nett Rate (Selisih bunga) untuk masa pensiun
+  // Sesuai Excel: r_nett = r_invest - r_inflasi
+  const nettRate = rRate - iRate;
+
+  // --- 3. HITUNG BIAYA HIDUP NANTI (FV Expense) ---
+  // Excel menggunakan basis Tahunan. 
+  // Rumus: BiayaSekarang * (1 + inflasi)^TahunMenujuPensiun
+  const annualExpenseCurrent = currentExpense * 12;
+  const futureAnnualExpense = annualExpenseCurrent * Math.pow(1 + iRate, yearsToRetire);
+
+  // --- 4. HITUNG TOTAL DANA YANG DIBUTUHKAN (NEST EGG / TOTAL FUND) ---
+  // Menggunakan Rumus "Present Value of Annuity Due" (PVAD)
+  // Dana ini dibutuhkan di awal masa pensiun untuk membiayai hidup selama X tahun (retirementDuration)
+  // dengan asumsi uang sisa tetap tumbuh sebesar nettRate.
+  // Rumus: PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
+  // Note: Jika nettRate 0, gunakan rumus simplifikasi (PMT * n)
+
+  let totalFundNeeded = 0;
+  if (nettRate === 0) {
+    totalFundNeeded = futureAnnualExpense * retirementDuration;
+  } else {
+    const pvadFactor = (1 - Math.pow(1 + nettRate, -retirementDuration)) / nettRate;
+    totalFundNeeded = futureAnnualExpense * pvadFactor * (1 + nettRate);
+  }
+
+  // --- 5. HITUNG NILAI MASA DEPAN ASET SAAT INI (FV Existing Fund) ---
+  // Rumus: ModalAwal * (1 + Return)^Tahun
+  const fvExistingFund = currentSaving * Math.pow(1 + rRate, yearsToRetire);
+
+  // --- 6. HITUNG KEKURANGAN DANA (SHORTFALL) ---
+  // Ini target dana bersih yang harus dikumpulkan lewat tabungan baru
+  // Pastikan tidak negatif (kalau aset sudah cukup, shortfall 0)
+  const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
+
+  // --- 7. HITUNG TABUNGAN RUTIN (PMT) ---
+  // Menggunakan rumus Sinking Fund Tahunan lalu dibagi 12
+  // Rumus PMT: FV * r / ((1+r)^n - 1)
+
+  let annualSaving = 0;
+  if (shortfall > 0) {
+    if (rRate === 0) {
+      annualSaving = shortfall / yearsToRetire;
     } else {
-        const pvadFactor = (1 - Math.pow(1 + nettRate, -retirementDuration)) / nettRate;
-        totalFundNeeded = futureAnnualExpense * pvadFactor * (1 + nettRate);
+      const sinkingFundFactor = Math.pow(1 + rRate, yearsToRetire) - 1;
+      annualSaving = (shortfall * rRate) / sinkingFundFactor;
     }
+  }
 
-    // --- 5. HITUNG NILAI MASA DEPAN ASET SAAT INI (FV Existing Fund) ---
-    // Rumus: ModalAwal * (1 + Return)^Tahun
-    const fvExistingFund = currentSaving * Math.pow(1 + rRate, yearsToRetire);
+  const monthlySaving = annualSaving / 12;
 
-    // --- 6. HITUNG KEKURANGAN DANA (SHORTFALL) ---
-    // Ini target dana bersih yang harus dikumpulkan lewat tabungan baru
-    // Pastikan tidak negatif (kalau aset sudah cukup, shortfall 0)
-    const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
-
-    // --- 7. HITUNG TABUNGAN RUTIN (PMT) ---
-    // Menggunakan rumus Sinking Fund Tahunan lalu dibagi 12
-    // Rumus PMT: FV * r / ((1+r)^n - 1)
-    
-    let annualSaving = 0;
-    if (shortfall > 0) {
-        if (rRate === 0) {
-            annualSaving = shortfall / yearsToRetire;
-        } else {
-            const sinkingFundFactor = Math.pow(1 + rRate, yearsToRetire) - 1;
-            annualSaving = (shortfall * rRate) / sinkingFundFactor;
-        }
-    }
-
-    const monthlySaving = annualSaving / 12;
-
-    // --- RETURN HASIL ---
-    return {
-        yearsToRetire,
-        retirementDuration,
-        // Return monthly untuk konsistensi UI, tapi dihitung dari annual logic
-        futureMonthlyExpense: futureAnnualExpense / 12, 
-        totalFundNeeded, // Ini Gross Need (PVAD) sesuai Excel cell 1.2
-        fvExistingFund,  // Nilai aset nanti (Excel 1.3)
-        shortfall,       // Kekurangan (Excel "Dana Hari Tua" di sheet Calc)
-        monthlySaving    // Hasil akhir (Excel "Tabungan bulanan")
-    };
+  // --- RETURN HASIL ---
+  return {
+    yearsToRetire,
+    retirementDuration,
+    // Return monthly untuk konsistensi UI, tapi dihitung dari annual logic
+    futureMonthlyExpense: futureAnnualExpense / 12,
+    totalFundNeeded, // Ini Gross Need (PVAD) sesuai Excel cell 1.2
+    fvExistingFund,  // Nilai aset nanti (Excel 1.3)
+    shortfall,       // Kekurangan (Excel "Dana Hari Tua" di sheet Calc)
+    monthlySaving    // Hasil akhir (Excel "Tabungan bulanan")
+  };
 };
 
 /**
@@ -564,82 +566,82 @@ export const calculatePensionPlan = (data: CreatePensionDto) => {
  * Dimana r = Nett Rate (Investasi - Inflasi).
  */
 export const calculateInsurancePlan = (data: CreateInsuranceDto) => { // Pastikan nama fungsi konsisten
-    const { 
-        monthlyExpense, 
-        existingDebt = 0, 
-        existingCoverage = 0, 
-        protectionDuration = 10,
-        // Default value jika user tidak isi (bisa disesuaikan dengan global setting)
-        inflationRate = 5, 
-        returnRate = 7,
-        // Opsional: Biaya Duka (sesuai dokumen Poin 4.C), default 0 atau bisa diset misal 50jt
-        // Pastikan DTO juga update jika ingin field ini dinamis dari FE
-        funeralCost = 0 
-    } = data as any; // Cast as any sementara jika DTO belum update
+  const {
+    monthlyExpense,
+    existingDebt = 0,
+    existingCoverage = 0,
+    protectionDuration = 10,
+    // Default value jika user tidak isi (bisa disesuaikan dengan global setting)
+    inflationRate = 5,
+    returnRate = 7,
+    // Opsional: Biaya Duka (sesuai dokumen Poin 4.C), default 0 atau bisa diset misal 50jt
+    // Pastikan DTO juga update jika ingin field ini dinamis dari FE
+    funeralCost = 0
+  } = data as any; // Cast as any sementara jika DTO belum update
 
-    // 1. Hitung Bunga Riil / Nett Rate (r)
-    // Dokumen Poin 4.B.5: Nett interest = Target investasi - Inflasi
-    const iRate = inflationRate / 100;
-    const rRate = returnRate / 100;
-    const nettRate = rRate - iRate;
+  // 1. Hitung Bunga Riil / Nett Rate (r)
+  // Dokumen Poin 4.B.5: Nett interest = Target investasi - Inflasi
+  const iRate = inflationRate / 100;
+  const rRate = returnRate / 100;
+  const nettRate = rRate - iRate;
 
-    // 2. Hitung Income Replacement (PVAD)
-    // Dokumen Poin 4.B.1: PMT harus Tahunan
-    const annualExpense = monthlyExpense * 12; 
-    const n = protectionDuration;
+  // 2. Hitung Income Replacement (PVAD)
+  // Dokumen Poin 4.B.1: PMT harus Tahunan
+  const annualExpense = monthlyExpense * 12;
+  const n = protectionDuration;
 
-    let incomeReplacementValue = 0;
+  let incomeReplacementValue = 0;
 
-    if (nettRate === 0) {
-        // KASUS KHUSUS: Jika Investasi == Inflasi, atau keduanya 0
-        // Maka hitungannya linear (Bunga impas dengan kenaikan harga)
-        incomeReplacementValue = annualExpense * n;
-    } else {
-        // RUMUS UTAMA (PVAD)
-        // PVAD = PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
-        // Faktor Diskonto Anuitas
-        const discountFactor = (1 - Math.pow(1 + nettRate, -n)) / nettRate;
-        
-        // Dikali (1+r) karena asumsi penarikan di AWAL tahun (Due)
-        incomeReplacementValue = annualExpense * discountFactor * (1 + nettRate);
-    }
+  if (nettRate === 0) {
+    // KASUS KHUSUS: Jika Investasi == Inflasi, atau keduanya 0
+    // Maka hitungannya linear (Bunga impas dengan kenaikan harga)
+    incomeReplacementValue = annualExpense * n;
+  } else {
+    // RUMUS UTAMA (PVAD)
+    // PVAD = PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
+    // Faktor Diskonto Anuitas
+    const discountFactor = (1 - Math.pow(1 + nettRate, -n)) / nettRate;
 
-    // 3. Debt Clearance (Pelunasan Hutang)
-    const debtClearanceValue = existingDebt;
+    // Dikali (1+r) karena asumsi penarikan di AWAL tahun (Due)
+    incomeReplacementValue = annualExpense * discountFactor * (1 + nettRate);
+  }
 
-    // 4. Biaya Duka & Lainnya
-    // (Jika ada input dari FE, akan dihitung disini)
-    const otherNeeds = funeralCost; 
+  // 3. Debt Clearance (Pelunasan Hutang)
+  const debtClearanceValue = existingDebt;
 
-    // 5. Total Kebutuhan UP (Gross)
-    const totalNeeded = incomeReplacementValue + debtClearanceValue + otherNeeds;
+  // 4. Biaya Duka & Lainnya
+  // (Jika ada input dari FE, akan dihitung disini)
+  const otherNeeds = funeralCost;
 
-    // 6. Hitung Gap (Kekurangan)
-    // Dikurangi asuransi yang sudah ada (Poin 4.D)
-    const coverageGap = Math.max(0, totalNeeded - existingCoverage);
+  // 5. Total Kebutuhan UP (Gross)
+  const totalNeeded = incomeReplacementValue + debtClearanceValue + otherNeeds;
 
-    // 7. Rekomendasi
-    let recommendation = "";
-    if (coverageGap <= 0) {
-        recommendation = "Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Income Replacement & Pelunasan Hutang).";
-    } else {
-        const formattedGap = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(coverageGap);
-        recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk bertahan hidup selama ${n} tahun dan melunasi hutang jika terjadi risiko. Disarankan menambah UP Asuransi Jiwa Berjangka (Term Life).`;
-    }
+  // 6. Hitung Gap (Kekurangan)
+  // Dikurangi asuransi yang sudah ada (Poin 4.D)
+  const coverageGap = Math.max(0, totalNeeded - existingCoverage);
 
-    return {
-        // Detail Rincian untuk ditampilkan di FE
-        annualExpense,      // PMT
-        nettRatePercentage: (nettRate * 100).toFixed(2), // r dalam %
-        incomeReplacementValue, // Hasil PVAD (Dana Warisan Hidup)
-        debtClearanceValue,
-        otherNeeds,
-        
-        // Hasil Akhir
-        totalNeeded,
-        coverageGap,
-        recommendation
-    };
+  // 7. Rekomendasi
+  let recommendation = "";
+  if (coverageGap <= 0) {
+    recommendation = "Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Income Replacement & Pelunasan Hutang).";
+  } else {
+    const formattedGap = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(coverageGap);
+    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk bertahan hidup selama ${n} tahun dan melunasi hutang jika terjadi risiko. Disarankan menambah UP Asuransi Jiwa Berjangka (Term Life).`;
+  }
+
+  return {
+    // Detail Rincian untuk ditampilkan di FE
+    annualExpense,      // PMT
+    nettRatePercentage: (nettRate * 100).toFixed(2), // r dalam %
+    incomeReplacementValue, // Hasil PVAD (Dana Warisan Hidup)
+    debtClearanceValue,
+    otherNeeds,
+
+    // Hasil Akhir
+    totalNeeded,
+    coverageGap,
+    recommendation
+  };
 };
 
 /**
@@ -647,40 +649,40 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto) => { // Pastika
  * Menghitung kebutuhan menabung bulanan untuk mencapai target dana di masa depan.
  */
 export const calculateGoalPlan = (data: CreateGoalDto) => {
-    const { targetAmount, targetDate, inflationRate = 5, returnRate = 6 } = data;
+  const { targetAmount, targetDate, inflationRate = 5, returnRate = 6 } = data;
 
-    const now = new Date();
-    const target = new Date(targetDate);
-    
-    // 1. Hitung durasi bulan (nper)
-    const monthsDuration = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
+  const now = new Date();
+  const target = new Date(targetDate);
 
-    if (monthsDuration <= 0) {
-        throw new Error("Target waktu harus di masa depan");
-    }
+  // 1. Hitung durasi bulan (nper)
+  const monthsDuration = (target.getFullYear() - now.getFullYear()) * 12 + (target.getMonth() - now.getMonth());
 
-    const yearsDuration = monthsDuration / 12;
+  if (monthsDuration <= 0) {
+    throw new Error("Target waktu harus di masa depan");
+  }
 
-    // 2. Hitung Nilai Masa Depan Target (FV akibat Inflasi)
-    // Jika beli rumah 5 tahun lagi, harganya pasti naik kena inflasi
-    const futureTargetAmount = targetAmount * Math.pow(1 + (inflationRate / 100), yearsDuration);
+  const yearsDuration = monthsDuration / 12;
 
-    // 3. Hitung Tabungan Bulanan (PMT)
-    const monthlyRate = (returnRate / 100) / 12;
-    
-    // REVISI DISINI: Tambahkan Math.abs() agar output positif
-    const monthlySaving = Math.abs(calculatePMT(
-        monthlyRate, 
-        monthsDuration, 
-        0, // Mulai dari 0
-        futureTargetAmount
-    ));
+  // 2. Hitung Nilai Masa Depan Target (FV akibat Inflasi)
+  // Jika beli rumah 5 tahun lagi, harganya pasti naik kena inflasi
+  const futureTargetAmount = targetAmount * Math.pow(1 + (inflationRate / 100), yearsDuration);
 
-    return {
-        monthsDuration,
-        futureTargetAmount, // Nilai target setelah inflasi
-        monthlySaving
-    };
+  // 3. Hitung Tabungan Bulanan (PMT)
+  const monthlyRate = (returnRate / 100) / 12;
+
+  // REVISI DISINI: Tambahkan Math.abs() agar output positif
+  const monthlySaving = Math.abs(calculatePMT(
+    monthlyRate,
+    monthsDuration,
+    0, // Mulai dari 0
+    futureTargetAmount
+  ));
+
+  return {
+    monthsDuration,
+    futureTargetAmount, // Nilai target setelah inflasi
+    monthlySaving
+  };
 };
 
 /**
@@ -690,65 +692,83 @@ export const calculateGoalPlan = (data: CreateGoalDto) => {
  * Menggunakan metode "Cashflow Matching" sesuai Dokumen Referensi.
  * Setiap jenjang dihitung mandiri (Sinking Fund terpisah), lalu dijumlahkan.
  */
-export const calculateEducationPlan = (data: CreateEducationPlanDto) => {
-    const { inflationRate = 10, returnRate = 12, stages } = data;
-    
-    let totalFutureCost = 0;
-    let totalMonthlySaving = 0; 
+export function calculateEducationPlan(dto: CreateEducationPlanDto) {
+  const inflationRate = (dto.inflationRate || 10) / 100;
+  const returnRate = (dto.returnRate || 12) / 100;
 
-    const stagesBreakdown: Array<typeof stages[0] & { futureCost: number; monthlySaving: number }> = [];
+  // Rate investasi bulanan untuk rumus PMT
+  const rRateMonthly = returnRate / 12;
 
-    // --- LOOPING SETIAP ITEM BIAYA (GRANULAR) ---
-    for (const stage of stages) {
-        // [GUARD CLAUSE] Validasi jika cost 0 (misal S2 tanpa SPP bulanan), langsung return 0
-        if (stage.currentCost <= 0) {
-            stagesBreakdown.push({
-                ...stage,
-                futureCost: 0,
-                monthlySaving: 0
-            });
-            continue; // Skip perhitungan TVM
-        }
+  const stagesBreakdown = dto.stages.map((stage) => {
+    let futureCost = 0;
 
-        // 1. Tentukan Jarak Waktu (Years To Start)
-        const years = Math.max(0, stage.yearsToStart); 
-        const months = years * 12;
+    // --- CORE LOGIC UPDATE START ---
 
-        // 2. Hitung Future Value (FV) akibat Inflasi
-        const iRate = inflationRate / 100;
-        const futureCost = stage.currentCost * Math.pow(1 + iRate, years);
+    // 1. LOGIC S2 (MAGISTER) - SINGLE COST RULE
+    // User Requirement: "S2 hanya menghitung satu kali biaya kuliah dari awal masuk"
+    if (stage.level === SchoolLevel.S2) {
+      // Rumus: FV = PV * (1 + inflasi)^tahun
+      // Tidak peduli apakah user input ANNUAL/ENTRY, S2 dianggap Lump Sum 1x.
+      futureCost = Number(stage.currentCost) * Math.pow(1 + inflationRate, stage.yearsToStart);
+    }
 
-        // 3. Hitung Tabungan Bulanan (PMT) Khusus Item Ini
-        let monthlySavingItem = 0;
+    // 2. LOGIC S1 (SARJANA) - 4 YEARS / 8 SEMESTERS RULE
+    // User Requirement: "S1 menghitung dari semester 1 hingga 8"
+    else if (stage.level === SchoolLevel.S1 && stage.costType === CostType.ANNUAL) {
+      // Asumsi: Input currentCost adalah "Biaya Per Tahun".
+      // Kita harus mengakumulasi biaya selama 4 tahun kuliah.
+      // Tahun ke-1: Kena inflasi selama (yearsToStart) tahun
+      // Tahun ke-2: Kena inflasi selama (yearsToStart + 1) tahun
+      // dst...
 
-        if (months > 0) {
-            const rRateMonthly = (returnRate / 100) / 12; 
-            
-            // Rumus PMT untuk target FV
-            monthlySavingItem = Math.abs(calculatePMT(rRateMonthly, months, 0, futureCost));
-        } else {
-            // Jika waktunya 0 (harus bayar sekarang), tidak bisa ditabung
-            monthlySavingItem = 0; 
-        }
+      const durationS1 = 4; // 4 Tahun (8 Semester)
+      let totalS1Cost = 0;
 
-        // 4. Akumulasi ke Total Global
-        totalFutureCost += futureCost;
-        totalMonthlySaving += monthlySavingItem;
+      for (let i = 0; i < durationS1; i++) {
+        const yearInflation = stage.yearsToStart + i;
+        const costPerYear = Number(stage.currentCost) * Math.pow(1 + inflationRate, yearInflation);
+        totalS1Cost += costPerYear;
+      }
 
-        // 5. Simpan Rincian
-        stagesBreakdown.push({
-            ...stage,
-            futureCost: futureCost,
-            monthlySaving: monthlySavingItem
-        });
+      futureCost = totalS1Cost;
+    }
+
+    // 3. LOGIC UMUM (TK, SD, SMP, SMA, atau Uang Pangkal S1)
+    else {
+      // Perhitungan standar Single FV
+      futureCost = Number(stage.currentCost) * Math.pow(1 + inflationRate, stage.yearsToStart);
+    }
+
+    // --- CORE LOGIC UPDATE END ---
+
+    // Hitung Tabungan Bulanan (PMT)
+    // Jika yearsToStart 0 (masuk tahun ini), PMT = 0 (karena butuh dana tunai sekarang)
+    // Sebaiknya UI menangani ini sebagai "Dana Darurat", tapi disini kita return 0 saving.
+    let monthlySavingItem = 0;
+    const months = stage.yearsToStart * 12;
+
+    if (months > 0) {
+      // Menggunakan Math.abs agar hasil positif
+      monthlySavingItem = Math.abs(calculatePMT(rRateMonthly, months, 0, futureCost));
     }
 
     return {
-        totalFutureCost,
-        monthlySaving: totalMonthlySaving, 
-        stagesBreakdown 
+      ...stage,
+      futureCost,   // Nilai masa depan yang sudah disesuaikan logic S1/S2
+      monthlySaving: monthlySavingItem,
     };
-};
+  });
+
+  // Agregasi Total
+  const totalFutureCost = stagesBreakdown.reduce((acc, item) => acc + item.futureCost, 0);
+  const totalMonthlySaving = stagesBreakdown.reduce((acc, item) => acc + item.monthlySaving, 0);
+
+  return {
+    totalFutureCost,
+    monthlySaving: totalMonthlySaving,
+    stagesBreakdown,
+  };
+}
 
 // ============================================================================
 // 4. BUDGETING ENGINE

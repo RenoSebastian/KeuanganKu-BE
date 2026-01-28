@@ -1,13 +1,13 @@
-import { 
-  IsString, 
-  IsNumber, 
-  IsDateString, 
-  IsOptional, 
-  IsEnum, 
-  ValidateNested, 
-  IsArray, 
-  Min, 
-  Max 
+import {
+  IsString,
+  IsNumber,
+  IsDateString,
+  IsOptional,
+  IsEnum,
+  ValidateNested,
+  IsArray,
+  Min,
+  Max
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -15,8 +15,15 @@ import { SchoolLevel, CostType, EducationMethod } from '@prisma/client';
 
 // --- SUB-DTO: TAHAPAN SEKOLAH (Child Object) ---
 export class CreateEducationStageDto {
-  @ApiProperty({ enum: SchoolLevel, example: 'TK', description: 'Jenjang sekolah (TK/SD/SMP/SMA/PT)' })
-  @IsEnum(SchoolLevel, { message: 'Jenjang sekolah tidak valid (TK, SD, SMP, SMA, PT)' })
+  // [CHANGE] Update deskripsi dan pesan error untuk mencakup S1 dan S2
+  @ApiProperty({
+    enum: SchoolLevel,
+    example: 'TK',
+    description: 'Jenjang sekolah (TK, SD, SMP, SMA, S1, S2)'
+  })
+  @IsEnum(SchoolLevel, {
+    message: 'Jenjang sekolah tidak valid. Gunakan: TK, SD, SMP, SMA, S1, atau S2'
+  })
   level: SchoolLevel;
 
   @ApiProperty({ enum: CostType, example: 'ENTRY', description: 'Tipe biaya: Uang Pangkal (ENTRY) atau SPP (ANNUAL)' })
@@ -25,7 +32,7 @@ export class CreateEducationStageDto {
 
   @ApiProperty({ example: 15000000, description: 'Biaya saat ini (Present Value). Boleh 0 untuk skema khusus (misal S2 tanpa SPP).' })
   @IsNumber()
-  @Min(0, { message: 'Biaya tidak boleh negatif' }) // CRITICAL: Mengizinkan 0 agar S2 bisa tanpa biaya bulanan
+  @Min(0, { message: 'Biaya tidak boleh negatif' })
   @Type(() => Number)
   currentCost: number;
 
@@ -33,9 +40,7 @@ export class CreateEducationStageDto {
   @IsNumber()
   @Min(0, { message: 'Tahun mulai tidak boleh negatif' })
   @Type(() => Number)
-  yearsToStart: number; 
-  
-  // Catatan: futureCost (FV) dan monthlySaving (PMT) akan dihitung otomatis di Backend Logic.
+  yearsToStart: number;
 }
 
 // --- MAIN DTO: RENCANA PENDIDIKAN (Parent Object) ---
@@ -61,7 +66,7 @@ export class CreateEducationPlanDto {
   @Min(0)
   @Max(50)
   @Type(() => Number)
-  inflationRate?: number = 10; // Default inflasi tinggi untuk pendidikan
+  inflationRate?: number = 10;
 
   @ApiPropertyOptional({ example: 12, description: 'Target Return Investasi (%)', default: 12 })
   @IsOptional()
@@ -74,7 +79,7 @@ export class CreateEducationPlanDto {
   // 3. DETAIL TAHAPAN (ARRAY)
   @ApiProperty({ type: [CreateEducationStageDto], description: 'Daftar rincian biaya pendidikan' })
   @IsArray()
-  @ValidateNested({ each: true }) // Validasi deep untuk setiap item dalam array
-  @Type(() => CreateEducationStageDto) // Transformasi JSON ke Class Instance
+  @ValidateNested({ each: true })
+  @Type(() => CreateEducationStageDto)
   stages: CreateEducationStageDto[];
 }
