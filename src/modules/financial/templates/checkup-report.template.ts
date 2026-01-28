@@ -87,12 +87,6 @@ export const checkupReportTemplate = `
 
     /* --- UTILS --- */
     .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .flex { display: flex; }
-    .justify-between { justify-content: space-between; }
-    .items-center { align-items: center; }
-    .text-right { text-align: right; }
-    .font-bold { font-weight: 700; }
-    .text-secondary { color: var(--secondary); }
     
     /* --- HEADER GRID 2x2 --- */
     .header-grid {
@@ -156,6 +150,7 @@ export const checkupReportTemplate = `
       border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
       margin-bottom: 15px; page-break-inside: avoid;
     }
+    
     .review-header {
       padding: 10px 15px; color: white; font-weight: 700; font-size: 11px; text-transform: uppercase;
       display: flex; justify-content: space-between;
@@ -164,26 +159,59 @@ export const checkupReportTemplate = `
     .bg-arus { background: #0284c7; }
     
     .review-body { padding: 12px 15px; font-size: 10px; }
-    .r-col-title { font-weight: 800; color: var(--secondary); margin-bottom: 8px; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+    
+    .r-col-title { 
+      font-weight: 800; color: var(--secondary); 
+      margin-bottom: 10px; 
+      text-transform: uppercase; 
+      display: flex; align-items: center; gap: 6px;
+      border-bottom: 2px solid #f1f5f9;
+      padding-bottom: 5px;
+    }
     .dot { width: 6px; height: 6px; border-radius: 50%; }
     .dot-green { background: var(--success); }
     .dot-red { background: var(--danger); }
 
-    .r-item { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 2px; }
+    /* --- LOGIC RATA KANAN KIRI (FLEXBOX) --- */
+    .r-item { 
+      display: flex; 
+      justify-content: space-between; /* Kunci: Rata Kanan Kiri */
+      align-items: center;
+      margin-bottom: 6px; 
+      border-bottom: 1px dashed #f1f5f9; /* Garis panduan halus */
+      padding-bottom: 2px; 
+    }
     .r-item:last-child { border-bottom: none; }
-    .r-val { font-family: monospace; font-weight: 600; color: var(--dark); }
+
+    .r-val { 
+      font-family: 'Courier New', Courier, monospace; /* Monospace untuk alignment angka */
+      font-weight: 700; 
+      color: var(--dark); 
+      text-align: right; /* Redundansi aman */
+    }
 
     .r-subtotal {
-      margin-top: 8px; padding-top: 6px; border-top: 2px solid var(--border);
-      display: flex; justify-content: space-between; font-weight: 800; color: var(--dark);
+      margin-top: 10px; 
+      padding-top: 8px; 
+      border-top: 2px solid var(--border);
+      display: flex; 
+      justify-content: space-between; /* Kunci: Rata Kanan Kiri untuk Total */
+      align-items: center;
+      font-weight: 800; 
+      color: var(--dark);
     }
 
     .card-footer {
-      background: #f8fafc; border-top: 1px solid var(--border);
-      padding: 8px 15px; text-align: center;
+      background: #f8fafc; 
+      border-top: 1px solid var(--border);
+      padding: 10px 15px; 
+      display: flex;
+      justify-content: space-between; /* Kunci: Rata Kanan Kiri untuk Footer */
+      align-items: center;
     }
+
     .footer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--secondary); letter-spacing: 1px; }
-    .footer-val { font-size: 16px; font-weight: 800; font-family: monospace; color: var(--dark); margin-top: 2px; }
+    .footer-val { font-size: 16px; font-weight: 800; font-family: 'Courier New', monospace; color: var(--dark); margin-top: 2px; }
     .val-green { color: var(--success); }
     .val-red { color: var(--danger); }
 
@@ -276,13 +304,16 @@ export const checkupReportTemplate = `
         <span style="opacity:0.9; font-size:9px;">POSISI ASET & UTANG</span>
       </div>
       <div class="grid-2 review-body">
+        
         <div>
           <div class="r-col-title"><span class="dot dot-green"></span> Aset (Harta)</div>
           <div class="r-item"><span>Aset Likuid (Cash)</span> <span class="r-val">{{fin.assetCash}}</span></div>
           <div class="r-item"><span>Aset Personal</span> <span class="r-val">{{fin.assetPersonal}}</span></div>
           <div class="r-item"><span>Aset Investasi</span> <span class="r-val">{{fin.assetInvest}}</span></div>
+          <div class="r-item"><span>----</span></div>
           <div class="r-subtotal"><span>TOTAL ASET</span> <span style="color:var(--success)">{{fin.totalAsset}}</span></div>
         </div>
+        
         <div>
           <div class="r-col-title"><span class="dot dot-red"></span> Kewajiban (Utang)</div>
           <div class="r-item"><span>KPR (Rumah)</span> <span class="r-val">{{fin.debtKPR}}</span></div>
@@ -291,6 +322,7 @@ export const checkupReportTemplate = `
           <div class="r-item"><span>Utang Produktif</span> <span class="r-val">{{fin.debtProductive}}</span></div>
           <div class="r-subtotal"><span>TOTAL UTANG</span> <span style="color:var(--danger)">{{fin.totalDebt}}</span></div>
         </div>
+
       </div>
       <div class="card-footer">
         <div class="footer-label">Kekayaan Bersih (Net Worth)</div>
@@ -304,12 +336,16 @@ export const checkupReportTemplate = `
         <span style="opacity:0.9; font-size:9px;">ESTIMASI TAHUNAN</span>
       </div>
       <div class="grid-2 review-body">
+        
         <div>
           <div class="r-col-title"><span class="dot dot-green"></span> Pemasukan</div>
           <div class="r-item"><span>Pemasukan Tetap</span> <span class="r-val">{{fin.incomeFixed}}</span></div>
           <div class="r-item"><span>Pemasukan Variabel</span> <span class="r-val">{{fin.incomeVariable}}</span></div>
+          <div class="r-item"><span>----</span></div>
+          <div class="r-item"><span>----</span></div>
           <div class="r-subtotal"><span>TOTAL MASUK</span> <span style="color:var(--primary)">{{fin.totalIncome}}</span></div>
         </div>
+        
         <div>
           <div class="r-col-title"><span class="dot dot-red"></span> Pengeluaran</div>
           <div class="r-item"><span>Cicilan Utang</span> <span class="r-val">{{fin.expenseDebt}}</span></div>
@@ -318,6 +354,7 @@ export const checkupReportTemplate = `
           <div class="r-item"><span>Biaya Hidup</span> <span class="r-val">{{fin.expenseLiving}}</span></div>
           <div class="r-subtotal"><span>TOTAL KELUAR</span> <span style="color:var(--danger)">{{fin.totalExpense}}</span></div>
         </div>
+
       </div>
       <div class="card-footer">
         <div class="footer-label">Sisa Uang (Surplus / Defisit)</div>

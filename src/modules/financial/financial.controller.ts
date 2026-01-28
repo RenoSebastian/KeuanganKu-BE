@@ -10,17 +10,18 @@ import {
   Res,
   NotFoundException,
 } from '@nestjs/common';
-import express from 'express';
+import * as express from 'express'; // [FIXED] Import express secara eksplisit
 import { PdfGeneratorService } from './services/pdf-generator.service';
 import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { FinancialService } from './financial.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 // --- IMPORT DTOs ---
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
 import { CreateInsuranceDto } from './dto/create-insurance.dto';
-import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto'; // [UPDATED] Import SimulateGoalDto
+import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto';
 import { CreateEducationPlanDto } from './dto/create-education.dto';
 
 // --- GUARDS ---
@@ -32,8 +33,11 @@ import { GetUser } from 'src/common/decorators/get-user.decorator';
 @ApiBearerAuth()
 @Controller('financial')
 export class FinancialController {
-  constructor(private readonly financialService: FinancialService,
-    private readonly pdfservice: PdfGeneratorService) { }
+  constructor(
+    private readonly financialService: FinancialService,
+    private readonly pdfservice: PdfGeneratorService,
+    private readonly prisma: PrismaService
+  ) { }
 
   // ===========================================================================
   // MODULE 1: FINANCIAL CHECKUP (MEDICAL CHECK)
@@ -74,9 +78,6 @@ export class FinancialController {
     const userId = req.user.id;
 
     // 1. Ambil Data (Reuse logic getCheckupDetail)
-    // Note: Kita butuh method di service yang return raw data lengkap untuk PDF, 
-    // atau kita pakai getCheckupDetail yang sudah ada tapi pastikan fieldnya lengkap.
-    // Untuk amannya, kita query ulang atau pastikan service return format yang pas.
     const checkupData = await this.financialService.getLatestCheckup(userId);
     // *Atau getCheckupDetail(userId, id) jika ingin spesifik history*
 
@@ -92,6 +93,33 @@ export class FinancialController {
       'Content-Length': buffer.length,
     });
 
+    res.end(buffer);
+  }
+
+  // [UPDATED] Endpoint Download Budget PDF
+  @Get('budget/pdf/:id')
+  @ApiOperation({ summary: 'Download Budget PDF Report' })
+  async downloadBudgetPdf(@Param('id') id: string, @Res() res: express.Response) {
+    // 1. Ambil Data Budget + User Profile
+    // [FIX] Hapus include 'userProfile', cukup include 'user' karena fullName & dateOfBirth ada di tabel User
+    const budgetData = await this.prisma.budgetPlan.findUnique({
+      where: { id },
+      include: {
+        user: true
+      }
+    });
+
+    if (!budgetData) throw new NotFoundException('Data budget tidak ditemukan');
+
+    // 2. Generate PDF
+    const buffer = await this.pdfservice.generateBudgetPdf(budgetData);
+
+    // 3. Return Stream
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Budget-Report-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
     res.end(buffer);
   }
 
