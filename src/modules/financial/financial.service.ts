@@ -4,7 +4,7 @@ import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
 import { CreateInsuranceDto } from './dto/create-insurance.dto';
-import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto'; // [UPDATED] Import SimulateGoalDto
+import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto';
 import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { SchoolLevel, CostType, HealthStatus } from '@prisma/client';
 import {
@@ -12,7 +12,7 @@ import {
   calculatePensionPlan,
   calculateInsurancePlan,
   calculateGoalPlan,
-  calculateGoalSimulation, // [UPDATED] Import helper simulasi
+  calculateGoalSimulation,
   calculateEducationPlan,
   calculateBudgetSplit,
 } from './utils/financial-math.util';
@@ -27,7 +27,6 @@ export class FinancialService {
 
   async createCheckup(userId: string, dto: CreateFinancialRecordDto) {
     // 1. Hitung Ulang (Re-calculate) menggunakan Math Utility
-    // Ini menjamin data yang masuk DB sudah "matang" (ada score, status, rasio)
     const analysis = calculateFinancialHealth(dto);
 
     // 2. Mapping Status String dari Utility ke Enum Prisma
@@ -54,15 +53,97 @@ export class FinancialService {
     });
   }
 
-  // [IMPORTANT] Method ini Public & Exported untuk dipakai DirectorService
-  // Refactor: Menambahkan parameter actorRole untuk skalabilitas filtering akses
+  // [UPDATED] Method ini Public & Exported untuk dipakai DirectorService
+  // Phase 1 Fix: Mapping ratiosDetails -> ratios & Kalkulasi Agregat
   async getLatestCheckup(userId: string, actorRole?: string) {
-    // Saat ini logicnya masih mengambil full data
-    // Parameter actorRole disiapkan jika nanti ada kebutuhan filtering field di level database
-    return this.prisma.financialCheckup.findFirst({
+    const checkup = await this.prisma.financialCheckup.findFirst({
       where: { userId },
       orderBy: { checkDate: 'desc' },
     });
+
+    if (!checkup) return null;
+
+    // --- AGGREGATION LOGIC (Hitung ulang total kategori) ---
+    // Helper untuk konversi Decimal/null ke Number
+    const val = (n: any) => Number(n) || 0;
+
+    // 1. Total Asset Investasi
+    const assetInvestment =
+      val(checkup.assetInvHome) +
+      val(checkup.assetInvVehicle) +
+      val(checkup.assetGold) +
+      val(checkup.assetInvAntique) +
+      val(checkup.assetStocks) +
+      val(checkup.assetMutualFund) +
+      val(checkup.assetBonds) +
+      val(checkup.assetDeposit) +
+      val(checkup.assetInvOther);
+
+    // 2. Total Hutang Konsumtif
+    const debtConsumptive =
+      val(checkup.debtKPR) +
+      val(checkup.debtKPM) +
+      val(checkup.debtCC) +
+      val(checkup.debtCoop) +
+      val(checkup.debtConsumptiveOther);
+
+    // 3. Total Hutang Produktif
+    const debtProductive = val(checkup.debtBusiness);
+
+    // 4. Total Pemasukan Bulanan
+    const incomeMonthly = val(checkup.incomeFixed) + val(checkup.incomeVariable);
+
+    // 5. Total Pengeluaran Bulanan (Cicilan + Asuransi + Tabungan + Biaya Hidup)
+    const expenseMonthly =
+      // Installments
+      val(checkup.installmentKPR) +
+      val(checkup.installmentKPM) +
+      val(checkup.installmentCC) +
+      val(checkup.installmentCoop) +
+      val(checkup.installmentConsumptiveOther) +
+      val(checkup.installmentBusiness) +
+      // Insurance
+      val(checkup.insuranceLife) +
+      val(checkup.insuranceHealth) +
+      val(checkup.insuranceHome) +
+      val(checkup.insuranceVehicle) +
+      val(checkup.insuranceBPJS) +
+      val(checkup.insuranceOther) +
+      // Savings
+      val(checkup.savingEducation) +
+      val(checkup.savingRetirement) +
+      val(checkup.savingPilgrimage) +
+      val(checkup.savingHoliday) +
+      val(checkup.savingEmergency) +
+      val(checkup.savingOther) +
+      // Living Cost
+      val(checkup.expenseFood) +
+      val(checkup.expenseSchool) +
+      val(checkup.expenseTransport) +
+      val(checkup.expenseCommunication) +
+      val(checkup.expenseHelpers) +
+      val(checkup.expenseTax) +
+      val(checkup.expenseLifestyle);
+
+    // Transformasi Data Manual (Data Mapping Layer)
+    return {
+      ...checkup,
+
+      // [CRITICAL FIX] Mapping field DB 'ratiosDetails' ke field FE 'ratios'
+      ratios: checkup.ratiosDetails,
+
+      // [CRITICAL FIX] Mengirimkan data agregat yang dihitung di atas
+      assetInvestment,
+      debtConsumptive,
+      debtProductive,
+      incomeMonthly,
+      expenseMonthly,
+
+      // Data Cleaning: Convert Decimal (Prisma) ke Number (JS)
+      totalNetWorth: val(checkup.totalNetWorth),
+      surplusDeficit: val(checkup.surplusDeficit),
+      assetCash: val(checkup.assetCash),
+    };
   }
 
   async getCheckupHistory(userId: string) {
@@ -90,7 +171,6 @@ export class FinancialService {
     }
 
     // Return objek bersih (Clean Object) untuk Frontend
-    // Mapping Decimal ke Number agar aman dikonsumsi JSON
     return {
       score: checkup.healthScore,
       globalStatus: checkup.status,
@@ -115,7 +195,6 @@ export class FinancialService {
     const totalIncome = dto.fixedIncome + dto.variableIncome;
 
     // --- LOGIKA CERDAS: AUTO-CALCULATE JIKA KOSONG ---
-    // Cek jika field utama pengeluaran tidak dikirim atau nol
     const isManualInput = dto.livingCost && dto.livingCost > 0;
 
     let finalAllocation = {
@@ -302,11 +381,8 @@ export class FinancialService {
       });
 
       // B. Create Detail Stages (TK, SD, SMP...)
-      // Kita map hasil perhitungan utils ke struktur database
-      // stagesBreakdown sudah berisi futureCost dan monthlySaving per item
       const stagesData = result.stagesBreakdown.map((stage) => {
         // --- DATA TRANSFORMATION LOGIC ---
-        // -- MEMASTIKAN ID DARI FRONTEND (KULIAH/PT) DIPETAKAN SEBAGAI S1 DI DATABASE --
         let dbLevel: SchoolLevel = stage.level;
 
         //Cek jika level dikirim sebagai string yang perlu di konversi
@@ -373,20 +449,17 @@ export class FinancialService {
   // --- METHODS UNTUK MANAJEMEN RENCANA PENDIDIKAN ---
 
   async getEducationPlans(userId: string) {
-    // 1. Ambil data mentah dari DB (Header + Detail Stages)
     const plans = await this.prisma.educationPlan.findMany({
       where: { userId },
       include: {
-        stages: true, // Ambil relation stages
+        stages: true,
       },
       orderBy: { createdAt: 'desc' },
     });
 
-    // 2. Transformasi ke format Response yang diharapkan Frontend
     return plans.map((p) => {
       const { stages, ...planData } = p;
 
-      // Hitung total untuk kelengkapan data calculation
       const totalFutureCost = stages.reduce((acc, s) => acc + Number(s.futureCost), 0);
       const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
 
@@ -402,7 +475,6 @@ export class FinancialService {
   }
 
   async deleteEducationPlan(userId: string, planId: string) {
-    // Cek kepemilikan
     const plan = await this.prisma.educationPlan.findFirst({
       where: { id: planId, userId },
     });
@@ -411,7 +483,6 @@ export class FinancialService {
       throw new NotFoundException('Rencana pendidikan tidak ditemukan');
     }
 
-    // Hapus Plan
     return this.prisma.educationPlan.delete({
       where: { id: planId },
     });
