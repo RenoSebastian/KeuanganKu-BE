@@ -1,5 +1,3 @@
-// src/modules/financial/templates/checkup-report.template.ts
-
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -8,39 +6,28 @@ import * as path from 'path';
  * 1. LOGIC LAYER: ASSET HANDLING
  * ------------------------------------------------------------------
  */
-
-/**
- * Helper untuk mengonversi file gambar lokal menjadi string Base64.
- * Ini memastikan gambar tetap muncul di PDF tanpa tergantung path server.
- */
 function getImageBase64(filePath: string): string {
-    try {
-        // Cek apakah file ada sebelum dibaca
-        if (!fs.existsSync(filePath)) {
-            console.warn(`[Template Warning] Image not found at: ${filePath}`);
-            return ''; // Return empty string agar tidak error, hanya gambar blank
-        }
-
-        const bitmap = fs.readFileSync(filePath);
-        const extension = path.extname(filePath).replace('.', '');
-        // Handle svg jika ada, sisanya default
-        const mimeType = extension === 'svg' ? 'svg+xml' : extension;
-
-        return `data:image/${mimeType};base64,${bitmap.toString('base64')}`;
-    } catch (error) {
-        console.error(`[Template Error] Failed to load image: ${filePath}`, error);
-        return '';
+  try {
+    if (!fs.existsSync(filePath)) {
+      return '';
     }
+    const bitmap = fs.readFileSync(filePath);
+    const extension = path.extname(filePath).replace('.', '');
+    const mimeType = extension === 'svg' ? 'svg+xml' : extension;
+    return `data:image/${mimeType};base64,${bitmap.toString('base64')}`;
+  } catch (error) {
+    console.error(`[Template Error] Failed to load image: ${filePath}`, error);
+    return '';
+  }
 }
 
-// Konfigurasi Path Aset (Sesuaikan base path jika deploy ke server berbeda)
-const ASSET_BASE_PATH = "C:\\Users\\PC\\Documents\\KeuanganKu\\Backend\\keuanganku-be\\src\\assets\\images";
+// Sesuaikan path ini dengan server environment Anda (Docker/Local)
+const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 
-// Load Assets ke Memory sebagai Base64
 const assets = {
-    logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
-    checkupImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')), // Untuk Kanan Atas
-    checkupImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))  // Untuk Kiri Bawah
+  logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
+  checkupImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')), // Kanan Atas
+  checkupImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))  // Kiri Bawah
 };
 
 /**
@@ -55,7 +42,6 @@ export const checkupReportTemplate = `
   <meta charset="UTF-8">
   <title>Financial Health Report</title>
   <style>
-    /* --- FONTS & RESET --- */
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
     
     :root {
@@ -64,6 +50,9 @@ export const checkupReportTemplate = `
       --secondary: #64748b;    /* Slate 500 */
       --dark: #0f172a;         /* Slate 900 */
       --border: #e2e8f0;       /* Slate 200 */
+      --bg-soft: #f8fafc;
+      --success: #15803d;      /* Green 700 */
+      --danger: #b91c1c;       /* Red 700 */
       --page-width: 210mm;
       --page-height: 297mm;
       --page-padding: 15mm;
@@ -75,192 +64,172 @@ export const checkupReportTemplate = `
       margin: 0; padding: 0;
       font-family: 'Plus Jakarta Sans', sans-serif;
       color: var(--dark);
-      background-color: #525252; /* Warna background browser preview */
+      background-color: #525252;
     }
 
-    /* --- PAGE CONTAINER SETUP --- */
+    /* --- PAGE CONTAINER --- */
     .page {
       width: var(--page-width);
       min-height: var(--page-height);
       background: #ffffff;
       margin: 20px auto;
       padding: var(--page-padding);
-      /* Padding bawah ekstra untuk footer safety area */
       padding-bottom: 20mm; 
       position: relative;
       overflow: hidden;
-      display: flex;
-      flex-direction: column;
+      display: flex; flex-direction: column;
     }
 
     @media print {
       body { background: none; }
-      .page { 
-        margin: 0; 
-        box-shadow: none; 
-        page-break-after: always;
-        height: auto; 
-        min-height: var(--page-height);
-        overflow: visible;
-      }
+      .page { margin: 0; box-shadow: none; page-break-after: always; height: auto; min-height: var(--page-height); }
     }
 
-    /* --- UTILITIES --- */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    /* --- UTILS --- */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .flex { display: flex; }
     .justify-between { justify-content: space-between; }
     .items-center { align-items: center; }
-    .mb-4 { margin-bottom: 16px; }
-    .mb-8 { margin-bottom: 32px; }
+    .text-right { text-align: right; }
+    .font-bold { font-weight: 700; }
+    .text-secondary { color: var(--secondary); }
     
-    /* Smart Break Logic */
-    .no-break { page-break-inside: avoid; break-inside: avoid; }
-    .force-break { page-break-before: always; }
-
-    /* --- HEADER GRID (2x2) --- */
+    /* --- HEADER GRID 2x2 --- */
     .header-grid {
       display: grid;
       grid-template-columns: 2fr 1fr;
       grid-template-rows: 110px 70px;
       gap: 8px;
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
-
-    /* Q1: Title */
     .h-title-box {
       background-color: var(--primary);
       color: white;
-      padding: 24px 30px;
+      padding: 20px 30px;
       border-top-left-radius: 20px;
       display: flex; flex-direction: column; justify-content: center;
     }
-
-    /* Q2: Image Kanan Atas */
     .h-image-right-top {
       background-image: url('${assets.checkupImg1}');
-      background-size: cover;
-      background-position: center;
+      background-size: cover; background-position: center;
       border-top-right-radius: 20px;
       background-color: var(--dark);
     }
-
-    /* Q3: Image Kiri Bawah */
     .h-image-left-bottom {
       background-image: url('${assets.checkupImg2}');
-      background-size: cover;
-      background-position: center;
+      background-size: cover; background-position: center;
       border-bottom-left-radius: 20px;
       background-color: var(--secondary);
     }
-
-    /* Q4: Brand & Logo */
     .h-brand-box {
       background-color: var(--primary-dark);
       color: white;
       display: flex; align-items: center; justify-content: center;
-      gap: 12px;
+      gap: 10px;
       border-bottom-right-radius: 20px;
-      padding: 0 20px;
     }
+    .logo-maxipro { height: 24px; width: auto; filter: brightness(0) invert(1); }
+    .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; }
+    .main-heading { font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1; margin: 0; }
+    .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
 
-    .logo-maxipro {
-      height: 28px; width: auto; object-fit: contain;
-      filter: brightness(0) invert(1); /* Logo jadi putih */
+    /* --- SECTION TITLE --- */
+    .section-title {
+      font-size: 12px; font-weight: 800; color: var(--secondary);
+      text-transform: uppercase; letter-spacing: 1px;
+      border-bottom: 2px solid var(--border); padding-bottom: 6px; margin-bottom: 12px; margin-top: 20px;
     }
+    .section-title:first-of-type { margin-top: 0; }
 
-    .brand-text {
-      font-weight: 800; letter-spacing: 0.15em; font-size: 13px; text-transform: uppercase;
+    /* --- PROFILE BOX --- */
+    .profile-box {
+      background: var(--bg-soft); border: 1px solid var(--border);
+      border-radius: 12px; padding: 15px 20px;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 20px;
     }
+    .profile-row { display: flex; justify-content: space-between; margin-bottom: 4px; font-size: 11px; }
+    .profile-row label { color: var(--secondary); }
+    .profile-row span { font-weight: 600; color: var(--dark); }
 
-    .main-heading { font-family: 'Playfair Display', serif; font-size: 36px; line-height: 1; margin: 4px 0 0 0; }
-    .sub-heading { text-transform: uppercase; font-size: 11px; letter-spacing: 2px; opacity: 0.9; font-weight: 600; }
-
-    /* --- METADATA STRIP --- */
-    .meta-strip {
+    /* --- FINANCIAL REVIEW CARDS --- */
+    .review-card {
+      border: 1px solid var(--border); border-radius: 12px; overflow: hidden;
+      margin-bottom: 15px; page-break-inside: avoid;
+    }
+    .review-header {
+      padding: 10px 15px; color: white; font-weight: 700; font-size: 11px; text-transform: uppercase;
       display: flex; justify-content: space-between;
-      border-bottom: 2px solid var(--border);
-      padding-bottom: 16px; margin-bottom: 32px;
     }
-    .meta-item label { display: block; font-size: 9px; color: var(--secondary); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
-    .meta-item div { font-size: 13px; font-weight: 600; color: var(--dark); }
+    .bg-neraca { background: #059669; }
+    .bg-arus { background: #0284c7; }
+    
+    .review-body { padding: 12px 15px; font-size: 10px; }
+    .r-col-title { font-weight: 800; color: var(--secondary); margin-bottom: 8px; text-transform: uppercase; display: flex; align-items: center; gap: 6px; }
+    .dot { width: 6px; height: 6px; border-radius: 50%; }
+    .dot-green { background: var(--success); }
+    .dot-red { background: var(--danger); }
 
-    /* --- PROFILE SECTION --- */
-    .profile-container {
-      background: white; border: 1px solid var(--border); border-radius: 16px;
-      padding: 20px 24px;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
-    }
-    .profile-header {
-      font-size: 11px; font-weight: 700; color: var(--primary); text-transform: uppercase; letter-spacing: 1px;
-      border-bottom: 1px solid var(--border); padding-bottom: 8px; margin-bottom: 12px;
-    }
-    .data-point { margin-bottom: 6px; font-size: 12px; display: flex; justify-content: space-between; }
-    .data-point span:first-child { color: var(--secondary); }
-    .data-point span:last-child { font-weight: 600; color: var(--dark); text-align: right; }
+    .r-item { display: flex; justify-content: space-between; margin-bottom: 4px; border-bottom: 1px dashed #f1f5f9; padding-bottom: 2px; }
+    .r-item:last-child { border-bottom: none; }
+    .r-val { font-family: monospace; font-weight: 600; color: var(--dark); }
 
-    /* --- HERO SCORE CARD --- */
-    .hero-card {
+    .r-subtotal {
+      margin-top: 8px; padding-top: 6px; border-top: 2px solid var(--border);
+      display: flex; justify-content: space-between; font-weight: 800; color: var(--dark);
+    }
+
+    .card-footer {
+      background: #f8fafc; border-top: 1px solid var(--border);
+      padding: 8px 15px; text-align: center;
+    }
+    .footer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--secondary); letter-spacing: 1px; }
+    .footer-val { font-size: 16px; font-weight: 800; font-family: monospace; color: var(--dark); margin-top: 2px; }
+    .val-green { color: var(--success); }
+    .val-red { color: var(--danger); }
+
+    /* --- PAGE 2 STYLES --- */
+    .hero-score {
       background: linear-gradient(135deg, #0f172a 0%, #334155 100%);
-      border-radius: 20px; padding: 32px; color: white;
-      position: relative; overflow: hidden; margin-bottom: 32px;
-      box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.3);
+      border-radius: 16px; padding: 20px 25px; color: white;
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 20px; box-shadow: 0 10px 20px -5px rgba(0,0,0,0.2);
     }
-    .hero-card::after {
-      content: ""; position: absolute; top: 0; right: 0; width: 200px; height: 100%;
-      background: linear-gradient(to left, rgba(255,255,255,0.05), transparent);
-    }
-    .score-ring {
-      width: 80px; height: 80px; border-radius: 50%;
-      border: 6px solid {{scoreColor}};
+    .score-circle {
+      width: 70px; height: 70px; border-radius: 50%;
+      border: 5px solid {{scoreColor}};
       display: flex; align-items: center; justify-content: center;
-      font-size: 28px; font-weight: 800; background: rgba(0,0,0,0.2);
+      font-size: 24px; font-weight: 800; background: rgba(255,255,255,0.1);
+    }
+    
+    .summary-box {
+      background: #fff7ed; border-left: 4px solid #f97316;
+      padding: 15px; border-radius: 6px; margin-bottom: 20px;
+      font-size: 11px; line-height: 1.6; color: #7c2d12; text-align: justify;
     }
 
-    /* --- SUMMARY BOX --- */
-    .summary-section {
-      background-color: #fff7ed; border-left: 6px solid #f97316;
-      border-radius: 0 12px 12px 0; padding: 24px; margin-bottom: 20px;
-    }
-    .summary-title { color: #9a3412; font-weight: 700; font-size: 12px; text-transform: uppercase; margin-bottom: 8px; }
-    .summary-content { font-size: 13px; line-height: 1.8; color: #431407; text-align: justify; }
-
-    /* --- RATIO GRID (Page 2) --- */
-    .page-title {
-      font-size: 18px; font-weight: 800; color: var(--dark);
-      margin-bottom: 24px; padding-left: 16px; border-left: 4px solid var(--primary);
-    }
-    .ratio-grid {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 24px;
-    }
+    .ratio-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
     .ratio-card {
-      background: white; border: 1px solid var(--border); border-radius: 16px;
-      padding: 20px; display: flex; flex-direction: column;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-      page-break-inside: avoid; /* KUNCI: Mencegah kartu terpotong */
+      border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+      background: white; page-break-inside: avoid;
     }
-    .ratio-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-    .ratio-label { font-size: 11px; font-weight: 700; color: var(--secondary); text-transform: uppercase; letter-spacing: 0.5px; }
-    .ratio-tag { font-size: 9px; font-weight: 700; padding: 4px 10px; border-radius: 20px; text-transform: uppercase; }
-    .ratio-val { font-size: 24px; font-weight: 800; color: var(--dark); letter-spacing: -0.5px; margin-bottom: 4px; }
-    .ratio-sub { font-size: 11px; color: var(--secondary); font-weight: 500; }
-    .ratio-desc {
-      margin-top: 16px; padding-top: 16px; border-top: 1px dashed var(--border);
-      font-size: 11px; line-height: 1.6; color: #475569;
-    }
+    .ratio-head { display: flex; justify-content: space-between; margin-bottom: 6px; }
+    .ratio-title { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--secondary); }
+    .ratio-badge { font-size: 8px; padding: 2px 6px; border-radius: 6px; font-weight: 700; text-transform: uppercase; }
+    .bg-green { background: #dcfce7; color: #166534; }
+    .bg-yellow { background: #fef9c3; color: #854d0e; }
+    .bg-red { background: #fee2e2; color: #991b1b; }
+    
+    .ratio-val { font-size: 18px; font-weight: 800; color: var(--dark); margin-bottom: 2px; }
+    .ratio-target { font-size: 9px; color: var(--secondary); }
+    .ratio-rec { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--border); font-size: 9px; color: #475569; line-height: 1.4; }
 
-    /* Status Colors */
-    .bg-green { background: #dcfce7; color: #15803d; border: 1px solid #86efac; }
-    .bg-yellow { background: #fef9c3; color: #a16207; border: 1px solid #fde047; }
-    .bg-red { background: #fee2e2; color: #b91c1c; border: 1px solid #fca5a5; }
-
-    /* --- FOOTER --- */
-    .footer {
+    /* --- PAGE FOOTER --- */
+    .page-footer {
       position: absolute; bottom: 0; left: 0; right: 0;
       height: 15mm; padding: 0 15mm;
       border-top: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
-      background: white;
-      font-size: 9px; color: var(--secondary); font-weight: 500; letter-spacing: 0.5px;
+      font-size: 9px; color: var(--secondary); background: white;
     }
   </style>
 </head>
@@ -271,121 +240,147 @@ export const checkupReportTemplate = `
     <div class="header-grid">
       <div class="h-title-box">
         <div class="sub-heading">PamJaya Financial</div>
-        <h1 class="main-heading">Health Checkup</h1>
+        <h1 class="main-heading">Checkup Report</h1>
       </div>
       <div class="h-image-right-top"></div>
       <div class="h-image-left-bottom"></div>
       <div class="h-brand-box">
-        <img src="${assets.logoMaxiPro}" class="logo-maxipro" alt="MaxiPro">
+        <img src="${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
         <span class="brand-text">KEUANGANKU</span>
       </div>
     </div>
 
-    <div class="meta-strip">
-      <div class="meta-item">
-        <label>Report Date</label>
-        <div>{{checkDate}}</div>
+    <div class="section-title">01. Profil Pemohon</div>
+    <div class="profile-box">
+      <div>
+        <div class="profile-row"><label>Nama Lengkap</label> <span>{{user.name}}</span></div>
+        <div class="profile-row"><label>Usia</label> <span>{{user.age}} Tahun</span></div>
+        <div class="profile-row"><label>Pekerjaan</label> <span>{{user.job}}</span></div>
+        <div class="profile-row"><label>Kota Domisili</label> <span>{{user.domicile}}</span></div>
       </div>
-      <div class="meta-item">
-        <label>Client Name</label>
-        <div>{{user.name}}</div>
-      </div>
-      <div class="meta-item">
-        <label>Prepared By</label>
-        <div>{{preparedBy}}</div>
-      </div>
-      <div class="meta-item" style="text-align: right;">
-        <label>Store Manager</label>
-        <div>{{managerName}}</div>
-      </div>
-    </div>
-
-    <div class="grid-2 mb-8">
-      <div class="profile-container no-break">
-        <div class="profile-header">Primary Applicant</div>
-        <div class="data-point"><span>Name</span> <span>{{user.name}}</span></div>
-        <div class="data-point"><span>Age</span> <span>{{user.age}} Years</span></div>
-        <div class="data-point"><span>Occupation</span> <span>{{user.job}}</span></div>
-        <div class="data-point"><span>Domicile</span> <span>{{user.domicile}}</span></div>
-        <div class="data-point"><span>Dependents</span> <span>{{user.dependents}} Person(s)</span></div>
-      </div>
-
-      <div class="profile-container no-break">
-        <div class="profile-header">Spouse / Partner</div>
+      <div>
+        <div class="profile-row"><label>Status</label> <span>{{user.maritalStatus}}</span></div>
+        <div class="profile-row"><label>Tanggungan</label> <span>{{user.dependents}} Orang</span></div>
+        <div class="profile-row"><label>Tgl Laporan</label> <span>{{checkDate}}</span></div>
         {{#if spouse}}
-        <div class="data-point"><span>Name</span> <span>{{spouse.name}}</span></div>
-        <div class="data-point"><span>Age</span> <span>{{spouse.age}} Years</span></div>
-        <div class="data-point"><span>Occupation</span> <span>{{spouse.job}}</span></div>
-        <div class="data-point"><span>Domicile</span> <span>{{spouse.domicile}}</span></div>
-        {{else}}
-        <div style="height: 100px; display: flex; align-items: center; justify-content: center; color: var(--border); font-style: italic; font-size: 12px;">
-          No Spouse Data
-        </div>
+        <div class="profile-row"><label>Pasangan</label> <span>{{spouse.name}} ({{spouse.age}} Th)</span></div>
         {{/if}}
       </div>
     </div>
 
-    <div class="hero-card no-break">
-      <div class="flex justify-between items-center">
+    <div class="section-title">02. Ringkasan Keuangan (Snapshot)</div>
+
+    <div class="review-card">
+      <div class="review-header bg-neraca">
+        <span>Laporan Neraca (Balance Sheet)</span>
+        <span style="opacity:0.9; font-size:9px;">POSISI ASET & UTANG</span>
+      </div>
+      <div class="grid-2 review-body">
         <div>
-          <div style="font-size: 12px; opacity: 0.8; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px;">Overall Financial Status</div>
-          <div style="font-size: 42px; font-weight: 800; line-height: 1; margin-bottom: 8px;">{{globalStatus}}</div>
-          <div style="background: rgba(255,255,255,0.15); display: inline-block; padding: 6px 12px; border-radius: 8px; font-size: 12px;">
-            Total Net Worth: <strong>{{netWorth}}</strong>
-          </div>
+          <div class="r-col-title"><span class="dot dot-green"></span> Aset (Harta)</div>
+          <div class="r-item"><span>Aset Likuid (Cash)</span> <span class="r-val">{{fin.assetCash}}</span></div>
+          <div class="r-item"><span>Aset Personal</span> <span class="r-val">{{fin.assetPersonal}}</span></div>
+          <div class="r-item"><span>Aset Investasi</span> <span class="r-val">{{fin.assetInvest}}</span></div>
+          <div class="r-subtotal"><span>TOTAL ASET</span> <span style="color:var(--success)">{{fin.totalAsset}}</span></div>
         </div>
-        <div class="score-ring">
-          {{score}}
+        <div>
+          <div class="r-col-title"><span class="dot dot-red"></span> Kewajiban (Utang)</div>
+          <div class="r-item"><span>KPR (Rumah)</span> <span class="r-val">{{fin.debtKPR}}</span></div>
+          <div class="r-item"><span>KPM (Kendaraan)</span> <span class="r-val">{{fin.debtKPM}}</span></div>
+          <div class="r-item"><span>Utang Konsumtif Lain</span> <span class="r-val">{{fin.debtOther}}</span></div>
+          <div class="r-item"><span>Utang Produktif</span> <span class="r-val">{{fin.debtProductive}}</span></div>
+          <div class="r-subtotal"><span>TOTAL UTANG</span> <span style="color:var(--danger)">{{fin.totalDebt}}</span></div>
         </div>
+      </div>
+      <div class="card-footer">
+        <div class="footer-label">Kekayaan Bersih (Net Worth)</div>
+        <div class="footer-val {{fin.netWorthColor}}">{{fin.netWorth}}</div>
       </div>
     </div>
 
-    <div class="summary-section no-break">
-      <div class="summary-title">Executive Summary & Recommendation</div>
-      <div class="summary-content">
-        Berdasarkan analisis algoritma kami, kesehatan keuangan Anda saat ini berada pada level <strong>{{globalStatus}}</strong>. 
-        Terdapat surplus arus kas sebesar <strong>{{monthlySurplus}}</strong> yang idealnya dapat dialokasikan untuk percepatan dana pensiun. 
-        Kami menyarankan untuk meninjau kembali <strong>{{warningCount}} indikator</strong> yang berada di zona merah pada halaman berikutnya untuk mitigasi risiko jangka panjang.
+    <div class="review-card">
+      <div class="review-header bg-arus">
+        <span>Laporan Arus Kas (Cashflow)</span>
+        <span style="opacity:0.9; font-size:9px;">ESTIMASI TAHUNAN</span>
+      </div>
+      <div class="grid-2 review-body">
+        <div>
+          <div class="r-col-title"><span class="dot dot-green"></span> Pemasukan</div>
+          <div class="r-item"><span>Pemasukan Tetap</span> <span class="r-val">{{fin.incomeFixed}}</span></div>
+          <div class="r-item"><span>Pemasukan Variabel</span> <span class="r-val">{{fin.incomeVariable}}</span></div>
+          <div class="r-subtotal"><span>TOTAL MASUK</span> <span style="color:var(--primary)">{{fin.totalIncome}}</span></div>
+        </div>
+        <div>
+          <div class="r-col-title"><span class="dot dot-red"></span> Pengeluaran</div>
+          <div class="r-item"><span>Cicilan Utang</span> <span class="r-val">{{fin.expenseDebt}}</span></div>
+          <div class="r-item"><span>Premi Asuransi</span> <span class="r-val">{{fin.expenseInsurance}}</span></div>
+          <div class="r-item"><span>Tabungan & Inv.</span> <span class="r-val">{{fin.expenseSaving}}</span></div>
+          <div class="r-item"><span>Biaya Hidup</span> <span class="r-val">{{fin.expenseLiving}}</span></div>
+          <div class="r-subtotal"><span>TOTAL KELUAR</span> <span style="color:var(--danger)">{{fin.totalExpense}}</span></div>
+        </div>
+      </div>
+      <div class="card-footer">
+        <div class="footer-label">Sisa Uang (Surplus / Defisit)</div>
+        <div class="footer-val {{fin.surplusColor}}">{{fin.surplusDeficit}}</div>
       </div>
     </div>
 
-    <div class="footer">
+    <div class="page-footer">
       <div>Generated by KeuanganKu System</div>
-      <div>CONFIDENTIAL DOCUMENT • Page 1 of 2</div>
+      <div>CONFIDENTIAL • Page 1 of 2</div>
+    </div>
+  </div>
+
+  <div class="page" style="page-break-before: always;">
+
+    <div class="hero-score">
+      <div>
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px; opacity: 0.8;">Status Kesehatan</div>
+        <div style="font-size: 36px; font-weight: 800; margin-bottom: 5px;">{{globalStatus}}</div>
+        <div style="font-size: 12px; font-weight: 500;">
+          Skor Anda: <strong style="font-size: 14px;">{{score}}</strong> / 100
+        </div>
+      </div>
+      <div class="score-circle">
+        {{score}}
+      </div>
     </div>
 
-  </div> 
-  
-  <div class="page force-break">
-    
-    <div class="page-title">Detailed Ratio Analysis</div>
-    
+    <div class="section-title">
+      03. Ringkasan Eksekutif
+    </div>
+    <div class="summary-box">
+      Berdasarkan data yang Anda berikan, kondisi keuangan Anda saat ini berstatus <strong>{{globalStatus}}</strong>. 
+      Sistem mendeteksi <strong>{{healthyCount}} indikator Sehat</strong> dan <strong>{{warningCount}} indikator yang perlu perhatian</strong>. 
+      Disarankan untuk memprioritaskan perbaikan pada rasio yang berwarna merah di bawah ini.
+    </div>
+
+    <div class="section-title">
+      04. Analisa 8 Indikator Vital
+    </div>
+
     <div class="ratio-grid">
       {{#each ratios}}
       <div class="ratio-card">
         <div class="ratio-head">
-          <div class="ratio-label">{{this.label}}</div>
-          <div class="ratio-tag {{this.cssClass}}">{{this.statusLabel}}</div>
+          <div class="ratio-title">{{this.label}}</div>
+          <div class="ratio-badge {{this.cssClass}}">{{this.statusLabel}}</div>
         </div>
-        
-        <div>
-          <div class="ratio-val">{{this.valueDisplay}}</div>
-          <div class="ratio-sub">Target Benchmark: {{this.benchmark}}</div>
-        </div>
-
-        <div class="ratio-desc">
+        <div class="ratio-val">{{this.valueDisplay}}</div>
+        <div class="ratio-target">Target: {{this.benchmark}}</div>
+        <div class="ratio-rec">
           {{this.recommendation}}
         </div>
       </div>
       {{/each}}
     </div>
 
-    <div class="footer">
+    <div class="page-footer">
       <div>Generated by KeuanganKu System</div>
-      <div>CONFIDENTIAL DOCUMENT • Page 2 of 2</div>
+      <div>CONFIDENTIAL • Page 2 of 2</div>
     </div>
 
-  </div> 
+  </div>
 
 </body>
 </html>
