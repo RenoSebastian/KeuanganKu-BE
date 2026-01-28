@@ -1,7 +1,7 @@
 import { CreateFinancialRecordDto } from '../dto/create-financial-record.dto';
 import { CreatePensionDto } from '../dto/create-pension.dto';
 import { CreateInsuranceDto } from '../dto/create-insurance.dto';
-import { CreateGoalDto } from '../dto/create-goal.dto';
+import { CreateGoalDto, SimulateGoalDto } from '../dto/create-goal.dto'; // [UPDATED] Import SimulateGoalDto
 import { CreateEducationPlanDto } from '../dto/create-education.dto';
 import { CreateBudgetDto } from '../dto/create-budget.dto';
 import { SchoolLevel, CostType } from '@prisma/client';
@@ -359,7 +359,6 @@ export const calculateFinancialHealth = (
   });
 
   // --- 3. LOGIKA PENENTUAN STATUS AKHIR ---
-  // ... (kode perhitungan rasio di atas tetap sama) ...
 
   // =================================================================
   // 3. HITUNG SKOR KESEHATAN (WEIGHTED DISTRIBUTION LOGIC)
@@ -645,7 +644,7 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto) => { // Pastika
 };
 
 /**
- * LOGIKA: GOALS (TUJUAN KEUANGAN)
+ * LOGIKA: GOALS (TUJUAN KEUANGAN) - Create (Simpan)
  * Menghitung kebutuhan menabung bulanan untuk mencapai target dana di masa depan.
  */
 export const calculateGoalPlan = (data: CreateGoalDto) => {
@@ -681,6 +680,40 @@ export const calculateGoalPlan = (data: CreateGoalDto) => {
   return {
     monthsDuration,
     futureTargetAmount, // Nilai target setelah inflasi
+    monthlySaving
+  };
+};
+
+/**
+ * LOGIKA: GOALS (SIMULASI)
+ * Menghitung FV dan PMT berdasarkan Current Cost dan Tenor.
+ * Digunakan untuk endpoint /financial/goals/simulate
+ */
+export const calculateGoalSimulation = (data: SimulateGoalDto) => {
+  const { currentCost, years, inflationRate = 5, returnRate = 6 } = data;
+
+  // 1. Hitung Future Value (FV)
+  // Rumus: FV = PV * (1 + i)^n
+  const iRate = inflationRate / 100;
+  const futureValue = currentCost * Math.pow(1 + iRate, years);
+
+  // 2. Hitung Monthly Saving (PMT)
+  // Rumus PMT Annuity
+  const monthlyRate = (returnRate / 100) / 12;
+  const months = years * 12;
+
+  // calculatePMT(rate, nper, pv, fv)
+  // pv = 0 (asumsi mulai dari nol)
+  // fv = target dana masa depan
+  const monthlySaving = Math.abs(calculatePMT(
+    monthlyRate,
+    months,
+    0,
+    futureValue
+  ));
+
+  return {
+    futureValue,
     monthlySaving
   };
 };

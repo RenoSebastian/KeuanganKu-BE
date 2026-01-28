@@ -4,22 +4,22 @@ import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
 import { CreateInsuranceDto } from './dto/create-insurance.dto';
-import { CreateGoalDto } from './dto/create-goal.dto';
+import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto'; // [UPDATED] Import SimulateGoalDto
 import { CreateEducationPlanDto } from './dto/create-education.dto';
-import { 
+import { SchoolLevel, CostType, HealthStatus } from '@prisma/client';
+import {
   calculateFinancialHealth,
   calculatePensionPlan,
   calculateInsurancePlan,
   calculateGoalPlan,
+  calculateGoalSimulation, // [UPDATED] Import helper simulasi
   calculateEducationPlan,
   calculateBudgetSplit,
 } from './utils/financial-math.util';
-import { HealthStatus } from '@prisma/client';
-import { SchoolLevel } from '@prisma/client';
 
 @Injectable()
 export class FinancialService {
-  constructor(private prisma: PrismaService) {}
+  constructor(private prisma: PrismaService) { }
 
   // ===========================================================================
   // MODULE 1: FINANCIAL CHECKUP (The "Medical" Check)
@@ -43,7 +43,7 @@ export class FinancialService {
         // Mapping manual karena Prisma tidak otomatis map sub-object JSON
         userProfile: dto.userProfile as any,
         spouseProfile: dto.spouseProfile ? (dto.spouseProfile as any) : undefined,
-        
+
         // Simpan Hasil Analisa (Persistence Optimization)
         totalNetWorth: analysis.netWorth,
         surplusDeficit: analysis.surplusDeficit,
@@ -110,14 +110,14 @@ export class FinancialService {
   // ===========================================================================
   // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
   // ===========================================================================
-  
+
   async createBudget(userId: string, dto: CreateBudgetDto) {
     const totalIncome = dto.fixedIncome + dto.variableIncome;
 
     // --- LOGIKA CERDAS: AUTO-CALCULATE JIKA KOSONG ---
     // Cek jika field utama pengeluaran tidak dikirim atau nol
     const isManualInput = dto.livingCost && dto.livingCost > 0;
-    
+
     let finalAllocation = {
       livingCost: dto.livingCost || 0,
       productiveDebt: dto.productiveDebt || 0,
@@ -137,7 +137,7 @@ export class FinancialService {
       finalAllocation.insurance +
       finalAllocation.saving +
       finalAllocation.livingCost;
-    
+
     const balance = totalIncome - totalExpense;
 
     let cashflowStatus = 'BALANCED';
@@ -170,11 +170,11 @@ export class FinancialService {
         ...dto,
         ...finalAllocation
       });
-      
+
       return { budget, analysis };
     });
   }
-  
+
   async getMyBudgets(userId: string) {
     return this.prisma.budgetPlan.findMany({
       where: { userId },
@@ -182,7 +182,7 @@ export class FinancialService {
       take: 12,
     });
   }
-  
+
   // ===========================================================================
   // MODULE 3: CALCULATOR - PENSION PLAN (UPDATED LOGIC)
   // ===========================================================================
@@ -202,7 +202,7 @@ export class FinancialService {
         currentSaving: dto.currentSaving,
         inflationRate: dto.inflationRate,
         returnRate: dto.returnRate,
-        
+
         // Hasil Perhitungan
         totalFundNeeded: result.totalFundNeeded,
         monthlySaving: result.monthlySaving,
@@ -244,8 +244,20 @@ export class FinancialService {
   // MODULE 5: CALCULATOR - GOAL PLAN (NEW)
   // ===========================================================================
 
+  // Method 1: CALCULATE ONLY (Simulasi Cepat) - Tidak Masuk DB
+  simulateGoal(userId: string, dto: SimulateGoalDto) {
+    // Panggil utility math murni
+    const result = calculateGoalSimulation(dto);
+
+    return {
+      status: 'success',
+      data: result // { futureValue, monthlySaving }
+    };
+  }
+
+  // Method 2: CALCULATE & SAVE (Simpan Rencana)
   async calculateAndSaveGoal(userId: string, dto: CreateGoalDto) {
-    // 1. Hitung PMT Goal
+    // 1. Hitung PMT Goal (Logic CreateGoalDto basis targetAmount)
     const result = calculateGoalPlan(dto);
 
     // 2. Simpan Rencana
@@ -302,17 +314,18 @@ export class FinancialService {
         if (levelCheck === 'KULIAH' || levelCheck === 'PT') {
           dbLevel = SchoolLevel.S1;
         }
-          return {
-        planId: plan.id,
-        level: dbLevel,
-        costType: stage.costType,
-        currentCost: stage.currentCost,
-        yearsToStart: stage.yearsToStart,
-        
-        // FIELD PENTING: Hasil Hitungan Backend
-        futureCost: stage.futureCost,        // FV Item Ini
-        monthlySaving: stage.monthlySaving,  // Tabungan Item Ini
-          };
+
+        return {
+          planId: plan.id,
+          level: dbLevel,
+          costType: stage.costType,
+          currentCost: stage.currentCost,
+          yearsToStart: stage.yearsToStart,
+
+          // FIELD PENTING: Hasil Hitungan Backend
+          futureCost: stage.futureCost,        // FV Item Ini
+          monthlySaving: stage.monthlySaving,  // Tabungan Item Ini
+        };
       });
 
       await tx.educationStage.createMany({
@@ -330,7 +343,7 @@ export class FinancialService {
   private analyzeBudgetHealth(dto: CreateBudgetDto) {
     let score = 100;
     const violations: string[] = [];
-    const base = Number(dto.fixedIncome); 
+    const base = Number(dto.fixedIncome);
 
     if (base === 0) return { score: 0, status: 'BAHAYA', recommendation: 'Wajib input Gaji Tetap.' };
 
@@ -378,7 +391,7 @@ export class FinancialService {
       const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
 
       return {
-        plan: planData, 
+        plan: planData,
         calculation: {
           totalFutureCost,
           monthlySaving: totalMonthlySaving,

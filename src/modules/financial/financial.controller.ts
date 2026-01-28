@@ -16,7 +16,7 @@ import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
 import { CreateInsuranceDto } from './dto/create-insurance.dto';
-import { CreateGoalDto } from './dto/create-goal.dto';
+import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto'; // [UPDATED] Import SimulateGoalDto
 import { CreateEducationPlanDto } from './dto/create-education.dto';
 
 // --- GUARDS ---
@@ -28,7 +28,7 @@ import { GetUser } from 'src/common/decorators/get-user.decorator';
 @ApiBearerAuth()
 @Controller('financial')
 export class FinancialController {
-  constructor(private readonly financialService: FinancialService) {}
+  constructor(private readonly financialService: FinancialService) { }
 
   // ===========================================================================
   // MODULE 1: FINANCIAL CHECKUP (MEDICAL CHECK)
@@ -107,6 +107,15 @@ export class FinancialController {
   // ===========================================================================
   // MODULE 5: CALCULATOR - GOALS PLAN (NEW)
   // ===========================================================================
+
+  // [NEW] Endpoint Simulasi Goals (Calculator Only)
+  // Frontend harus hit: POST /financial/goals/simulate
+  @Post('goals/simulate')
+  @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (FV & PMT) - Tidak Simpan DB' })
+  async simulateGoal(@Req() req, @Body() dto: SimulateGoalDto) {
+    const userId = req.user.id;
+    return this.financialService.simulateGoal(userId, dto);
+  }
 
   @Post('calculator/goals')
   @ApiOperation({ summary: 'Hitung & Simpan Tujuan Keuangan' })
