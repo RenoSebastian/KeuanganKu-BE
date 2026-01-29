@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, OnModuleInit, OnModuleDestroy, Logger } from '@nestjs/common';
 import * as puppeteer from 'puppeteer';
 import * as handlebars from 'handlebars';
 import { checkupReportTemplate } from '../templates/checkup-report.template';
@@ -10,39 +10,194 @@ import { educationReportTemplate } from '../templates/education-report.template'
 import { historyCheckupReportTemplate } from '../templates/history-checkup-report.template';
 
 @Injectable()
-export class PdfGeneratorService {
+export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
+    private browser: puppeteer.Browser | null = null;
+    private readonly logger = new Logger(PdfGeneratorService.name);
+
+    // --- LIFECYCLE ---
+
+    async onModuleInit() {
+        await this.initBrowser();
+    }
+
+    async onModuleDestroy() {
+        await this.closeBrowser();
+    }
+
+    // Inisialisasi Browser dengan Config Stabil
+    private async initBrowser() {
+        if (this.browser) return;
+
+        this.logger.log('Initializing Puppeteer Browser...');
+        try {
+            this.browser = await puppeteer.launch({
+                headless: true, // Mode tanpa UI (Wajib untuk server)
+                args: [
+                    '--no-sandbox',
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage', // Mencegah crash memori di Docker/Linux
+                    '--disable-gpu',           // Hemat resource GPU
+                    '--no-first-run',
+                    '--no-zygote',
+                    // [REMOVED] '--single-process', // JANGAN PAKAI INI DI WINDOWS -> Bikin Crash!
+                    '--disable-extensions',
+                    '--disable-features=site-per-process', // Hemat RAM
+                ],
+            });
+            this.logger.log('Puppeteer Browser Ready.');
+        } catch (error) {
+            this.logger.error('Failed to launch Puppeteer:', error);
+        }
+    }
+
+    // Tutup browser dengan aman
+    private async closeBrowser() {
+        if (this.browser) {
+            try {
+                await this.browser.close();
+            } catch (e) {
+                // Ignore error if already closed
+            }
+            this.browser = null;
+            this.logger.log('Puppeteer Browser Closed/Reset.');
+        }
+    }
+
+    // Helper: Pastikan browser hidup, kalau mati nyalakan lagi
+    private async getBrowser() {
+        if (!this.browser || !this.browser.isConnected()) {
+            this.logger.warn('Browser disconnected. Restarting instance...');
+            await this.closeBrowser();
+            await this.initBrowser();
+        }
+        return this.browser;
+    }
+
+    // --- CORE GENERATOR DENGAN AUTO-RETRY ---
+
+    private async generatePdfCore(templateHtml: string, data: any, attempt = 1): Promise<Buffer> {
+        const MAX_RETRIES = 2; // Coba maksimal 2 kali jika crash
+        let page: puppeteer.Page | null = null;
+
+        try {
+            const browser = await this.getBrowser();
+            if (!browser) throw new Error("Browser failed to initialize");
+
+            page = await browser.newPage();
+
+            // 1. Optimasi Resource: Blokir Gambar/Font Eksternal biar cepat
+            await page.setRequestInterception(true);
+            page.on('request', (req) => {
+                const type = req.resourceType();
+                if (['font', 'stylesheet', 'media', 'image'].includes(type)) {
+                    // Abort request berat (gambar sudah base64 di template, jadi aman)
+                    req.abort();
+                } else {
+                    req.continue();
+                }
+            });
+
+            // 2. Render HTML
+            await page.setContent(templateHtml, {
+                waitUntil: 'domcontentloaded', // Lebih cepat dari networkidle0
+                timeout: 30000 // 30 detik timeout
+            });
+
+            // 3. Cetak PDF
+            const pdfBuffer = await page.pdf({
+                format: 'A4',
+                printBackground: true,
+                margin: { top: '0', right: '0', bottom: '0', left: '0' },
+            });
+
+            return Buffer.from(pdfBuffer);
+
+        } catch (error: any) {
+            this.logger.error(`Error generating PDF (Attempt ${attempt}): ${error.message}`);
+
+            // Deteksi Crash Browser
+            const isCrash = error.message.includes('TargetCloseError') ||
+                error.message.includes('Protocol error') ||
+                error.message.includes('Session closed') ||
+                error.message.includes('Connection closed');
+
+            // Jika Crash & masih punya kuota retry -> RESTART BROWSER & COBA LAGI
+            if (isCrash && attempt <= MAX_RETRIES) {
+                this.logger.warn(`Browser crashed. Resetting and retrying... (Attempt ${attempt}/${MAX_RETRIES})`);
+                await this.closeBrowser(); // Matikan browser rusak
+                return this.generatePdfCore(templateHtml, data, attempt + 1); // Rekursif call
+            }
+
+            throw error; // Lempar error jika bukan crash atau sudah habis retry
+        } finally {
+            // Selalu tutup tab (page) untuk membebaskan RAM
+            if (page) {
+                try {
+                    await page.close();
+                } catch (e) {
+                    // Swallow error if page is already closed/crashed
+                }
+            }
+        }
+    }
+
+    // --- PUBLIC METHODS ---
 
     async generateCheckupPdf(data: any): Promise<Buffer> {
         const template = handlebars.compile(checkupReportTemplate);
-        const context = this.mapDataToContext(data);
+        const context = this.mapCheckupData(data);
         const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        await page.setContent(html, { 
-            waitUntil: 'domcontentloaded',
-            timeout: 60000 
-        });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' },
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
+        return this.generatePdfCore(html, context);
     }
 
-    private mapDataToContext(data: any) {
+    async generateBudgetPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(budgetReportTemplate);
+        const context = this.mapBudgetData(data);
+        const html = template(context);
+        return this.generatePdfCore(html, context);
+    }
+
+    async generatePensionPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(pensionReportTemplate);
+        const context = this.mapPensionData(data);
+        const html = template(context);
+        return this.generatePdfCore(html, context);
+    }
+
+    async generateInsurancePdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(insuranceReportTemplate);
+        const context = this.mapInsuranceData(data);
+        const html = template(context);
+        return this.generatePdfCore(html, context);
+    }
+
+    async generateGoalPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(goalReportTemplate);
+        const context = this.mapGoalData(data);
+        const html = template(context);
+        return this.generatePdfCore(html, context);
+    }
+
+    async generateEducationPdf(dataArray: any[]): Promise<Buffer> {
+        const template = handlebars.compile(educationReportTemplate);
+        const context = this.mapEducationData(dataArray);
+        const html = template(context);
+        return this.generatePdfCore(html, context);
+    }
+
+    async generateHistoryCheckupPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(historyCheckupReportTemplate);
+        const context = this.mapHistoryCheckupData(data);
+        const html = template(context);
+        return this.generatePdfCore(html, context);
+    }
+
+    // --- DATA MAPPERS ---
+
+    private mapCheckupData(data: any) {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // --- Grouping Neraca ---
         const assetCash = num(data.assetCash);
         const assetPersonal = num(data.assetHome) + num(data.assetVehicle) + num(data.assetJewelry) + num(data.assetAntique) + num(data.assetPersonalOther);
         const assetInvest = num(data.assetInvHome) + num(data.assetInvVehicle) + num(data.assetGold) + num(data.assetInvAntique) + num(data.assetStocks) + num(data.assetMutualFund) + num(data.assetBonds) + num(data.assetDeposit) + num(data.assetInvOther);
@@ -54,7 +209,6 @@ export class PdfGeneratorService {
         const debtProductive = num(data.debtBusiness);
         const totalDebt = debtKPR + debtKPM + debtOther + debtProductive;
 
-        // --- Grouping Arus Kas ---
         const incomeFixed = num(data.incomeFixed);
         const incomeVariable = num(data.incomeVariable);
         const totalIncome = incomeFixed + incomeVariable;
@@ -65,7 +219,6 @@ export class PdfGeneratorService {
         const expenseLiving = num(data.expenseFood) + num(data.expenseSchool) + num(data.expenseTransport) + num(data.expenseCommunication) + num(data.expenseHelpers) + num(data.expenseTax) + num(data.expenseLifestyle);
         const totalExpense = expenseDebt + expenseInsurance + expenseSaving + expenseLiving;
 
-        // --- Calculate Age ---
         const dob = data.userProfile?.dob ? new Date(data.userProfile.dob) : new Date();
         const age = new Date().getFullYear() - dob.getFullYear();
 
@@ -122,41 +275,7 @@ export class PdfGeneratorService {
         };
     }
 
-    // [NEW] Method untuk Budgeting PDF
-    async generateBudgetPdf(data: any): Promise<Buffer> {
-        const template = handlebars.compile(budgetReportTemplate);
-        
-        // Gunakan mapper yang sudah diperbaiki
-        const context = this.mapBudgetData(data);
-        
-        const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        
-        await page.setContent(html, { 
-            waitUntil: 'domcontentloaded',
-            timeout: 60000 
-        });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' },
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
-    }
-
-    // [UPDATED & FIXED] Mapper untuk Budgeting
     private mapBudgetData(data: any) {
-        // [CRITICAL FIX] Deteksi apakah data terbungkus dalam properti 'budget'
-        // Ini menangani kasus jika controller mengirim { budget: {...}, analysis: {...} }
         const source = data.budget ? data.budget : data;
 
         const fmt = (n: any) => {
@@ -166,48 +285,28 @@ export class PdfGeneratorService {
         };
         const num = (n: any) => Number(n) || 0;
 
-        // 1. Data Diri & Tanggal
-        // Ambil user dari source atau data root (tergantung struktur)
         const user = source.user || data.user || {};
         const dob = user.dateOfBirth ? new Date(user.dateOfBirth) : null;
         const age = dob ? new Date().getFullYear() - dob.getFullYear() : '-';
 
-        // 2. Data Penghasilan
         const fixedIncome = num(source.fixedIncome);
         const variableIncome = num(source.variableIncome);
         const totalIncome = fixedIncome + variableIncome;
 
-        // 3. Alokasi (GUNAKAN DATA DATABASE)
-        // Ambil langsung dari field DB jika ada, jika tidak (fallback) baru hitung manual.
-        // Ini menjamin angka PDF sama dengan angka yang tersimpan.
         const allocProductiveDebt = source.productiveDebt !== undefined ? num(source.productiveDebt) : (fixedIncome * 0.20);
         const allocConsumptiveDebt = source.consumptiveDebt !== undefined ? num(source.consumptiveDebt) : (fixedIncome * 0.15);
         const allocInsurance = source.insurance !== undefined ? num(source.insurance) : (fixedIncome * 0.10);
         const allocSaving = source.saving !== undefined ? num(source.saving) : (fixedIncome * 0.10);
         const allocLiving = source.livingCost !== undefined ? num(source.livingCost) : (fixedIncome * 0.45);
 
-        // 4. Kesimpulan
         const totalBudget = num(source.totalExpense) || (allocProductiveDebt + allocConsumptiveDebt + allocInsurance + allocSaving + allocLiving);
         const totalSurplus = variableIncome;
 
         return {
             period: `${source.month}/${source.year}`,
             createdAt: new Date(source.createdAt || new Date()).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-
-            user: {
-                name: user.fullName || 'User',
-                age: age
-            },
-
-            // Penghasilan
-            income: {
-                fixed: fmt(fixedIncome),
-                variable: fmt(variableIncome),
-                total: fmt(totalIncome)
-            },
-
-            // Anggaran Disarankan
-            // Struktur ini PASTI sesuai dengan template: {{allocations.productive.value}}
+            user: { name: user.fullName || 'User', age: age },
+            income: { fixed: fmt(fixedIncome), variable: fmt(variableIncome), total: fmt(totalIncome) },
             allocations: {
                 productive: { label: 'Utang Produktif (20%)', value: fmt(allocProductiveDebt) },
                 consumptive: { label: 'Utang Konsumtif (15%)', value: fmt(allocConsumptiveDebt) },
@@ -215,40 +314,10 @@ export class PdfGeneratorService {
                 saving: { label: 'Tabungan & Investasi (10%)', value: fmt(allocSaving) },
                 living: { label: 'Biaya Hidup (45%)', value: fmt(allocLiving) },
             },
-
-            // Kesimpulan
-            summary: {
-                totalBudget: fmt(totalBudget),
-                totalSurplus: fmt(totalSurplus)
-            }
+            summary: { totalBudget: fmt(totalBudget), totalSurplus: fmt(totalSurplus) }
         };
     }
 
-    // [NEW] Generate Pension PDF
-    async generatePensionPdf(data: any): Promise<Buffer> {
-        const template = handlebars.compile(pensionReportTemplate);
-        const context = this.mapPensionData(data); // Panggil mapper khusus pensiun
-        const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' },
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
-    }
-
-    // Mapper for Pension Data
     private mapPensionData(data: any) {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
@@ -258,8 +327,8 @@ export class PdfGeneratorService {
         const lifeExpectancy = num(data.lifeExpectancy);
         const currentExpense = num(data.currentExpense);
         const currentSaving = num(data.currentSaving);
-        const inflationRate = num(data.inflationRate) / 100; 
-        const returnRate = num(data.returnRate) / 100; 
+        const inflationRate = num(data.inflationRate) / 100;
+        const returnRate = num(data.returnRate) / 100;
 
         const yearsToRetire = retirementAge - currentAge;
         const retirementDuration = lifeExpectancy - retirementAge;
@@ -272,9 +341,7 @@ export class PdfGeneratorService {
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-            user: {
-                name: userProfile.fullName || 'User',
-            },
+            user: { name: userProfile.fullName || 'User' },
             plan: {
                 currentAge: currentAge,
                 retirementAge: retirementAge,
@@ -296,29 +363,6 @@ export class PdfGeneratorService {
         };
     }
 
-    async generateInsurancePdf(data: any): Promise<Buffer> {
-        const template = handlebars.compile(insuranceReportTemplate);
-        const context = this.mapInsuranceData(data);
-        const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' },
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
-    }
-
     private mapInsuranceData(data: any) {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
@@ -333,17 +377,11 @@ export class PdfGeneratorService {
         const totalNeeded = num(data.calculation?.totalNeeded) || (incomeReplacement + debt);
         const gap = num(data.calculation?.coverageGap) || (totalNeeded - existingCov);
 
-        const typeMap = {
-            'LIFE': 'Asuransi Jiwa (Life)',
-            'HEALTH': 'Asuransi Kesehatan',
-            'CRITICAL_ILLNESS': 'Sakit Kritis'
-        };
+        const typeMap = { 'LIFE': 'Asuransi Jiwa (Life)', 'HEALTH': 'Asuransi Kesehatan', 'CRITICAL_ILLNESS': 'Sakit Kritis' };
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-            user: {
-                name: data.user?.fullName || 'User',
-            },
+            user: { name: data.user?.fullName || 'User' },
             plan: {
                 typeLabel: typeMap[data.type] || data.type,
                 dependentCount: data.dependentCount,
@@ -364,31 +402,6 @@ export class PdfGeneratorService {
         };
     }
 
-    // [NEW] Generate Goal PDF
-    async generateGoalPdf(data: any): Promise<Buffer> {
-        const template = handlebars.compile(goalReportTemplate);
-        const context = this.mapGoalData(data); // Mapper baru
-        const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' },
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
-    }
-
-    // [UPDATED] Mapper for Goal Data
     private mapGoalData(data: any) {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
@@ -405,17 +418,14 @@ export class PdfGeneratorService {
         years = Math.max(1, years);
 
         const currentCost = targetAmount / Math.pow(1 + inflationRate, years);
-        const futureValue = targetAmount; 
+        const futureValue = targetAmount;
 
         let monthlySaving = num(data.monthlySaving);
         if (monthlySaving === 0) {
             const r = returnRate / 12;
             const n = years * 12;
-            if (r === 0) {
-                monthlySaving = futureValue / n;
-            } else {
-                monthlySaving = (futureValue * r) / (Math.pow(1 + r, n) - 1);
-            }
+            if (r === 0) { monthlySaving = futureValue / n; }
+            else { monthlySaving = (futureValue * r) / (Math.pow(1 + r, n) - 1); }
         }
 
         const inflationEffect = futureValue - currentCost;
@@ -423,12 +433,10 @@ export class PdfGeneratorService {
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-            user: {
-                name: userProfile.fullName || 'User', 
-            },
+            user: { name: userProfile.fullName || 'User' },
             goal: {
                 name: data.goalName || 'Tujuan Keuangan',
-                currentCost: fmt(currentCost), 
+                currentCost: fmt(currentCost),
                 years: years,
                 inflationRate: (inflationRate * 100).toFixed(1),
                 returnRate: (returnRate * 100).toFixed(1),
@@ -442,31 +450,6 @@ export class PdfGeneratorService {
         };
     }
 
-    // [NEW] Generate Education PDF (Family Report)
-    async generateEducationPdf(dataArray: any[]): Promise<Buffer> {
-        const template = handlebars.compile(educationReportTemplate);
-        const context = this.mapEducationData(dataArray);
-        const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' }, 
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
-    }
-
-    // [NEW] Mapper for Education (Array Input)
     private mapEducationData(dataArray: any[]) {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
@@ -488,34 +471,24 @@ export class PdfGeneratorService {
 
             (calc.stagesBreakdown || []).forEach((stage: any) => {
                 const level = stage.level;
-                if (!stagesMap.has(level)) {
-                    stagesMap.set(level, []);
-                }
+                if (!stagesMap.has(level)) { stagesMap.set(level, []); }
                 stagesMap.get(level)?.push({
                     costType: stage.costType === 'ENTRY' ? 'Uang Pangkal' : 'SPP Tahunan',
                     yearsToStart: stage.yearsToStart,
                     currentCost: fmt(stage.currentCost),
                     futureCost: fmt(stage.futureCost),
                     monthlySaving: fmt(stage.monthlySaving),
-                    rawFutureCost: Number(stage.futureCost) 
+                    rawFutureCost: Number(stage.futureCost)
                 });
             });
 
             const groupedStages = Array.from(stagesMap.entries())
                 .map(([levelName, items]) => {
                     const subTotalRaw = items.reduce((sum, i) => sum + i.rawFutureCost, 0);
-                    const minYears = Math.min(...items.map(i => i.yearsToStart)); 
-
-                    return {
-                        levelName,
-                        items,
-                        subTotalCost: fmt(subTotalRaw),
-                        startIn: minYears
-                    };
+                    const minYears = Math.min(...items.map(i => i.yearsToStart));
+                    return { levelName, items, subTotalCost: fmt(subTotalRaw), startIn: minYears };
                 })
-                .sort((a, b) => {
-                    return levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName);
-                });
+                .sort((a, b) => levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName));
 
             return {
                 childName: plan.childName,
@@ -526,40 +499,13 @@ export class PdfGeneratorService {
                 method: plan.method === 'GEOMETRIC' ? 'Geometrik (Bertahap)' : 'Statik',
                 totalFutureCost: fmt(calc.totalFutureCost),
                 monthlySaving: fmt(calc.monthlySaving),
-                groupedStages: groupedStages 
+                groupedStages: groupedStages
             };
         });
 
-        return {
-            plans: plans
-        };
+        return { plans: plans };
     }
 
-    // [NEW] Generate PDF from History Detail
-    async generateHistoryCheckupPdf(data: any): Promise<Buffer> {
-        const template = handlebars.compile(historyCheckupReportTemplate);
-        const context = this.mapHistoryCheckupData(data); // Mapper khusus
-        const html = template(context);
-
-        const browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox'],
-        });
-
-        const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
-
-        const pdfBuffer = await page.pdf({
-            format: 'A4',
-            printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' },
-        });
-
-        await browser.close();
-        return Buffer.from(pdfBuffer);
-    }
-
-    // [UPDATED] Mapper for History Checkup - Full Page Ratio Logic
     private mapHistoryCheckupData(fullData: any) {
         const data = fullData.record || {};
         const analysis = fullData;
@@ -567,7 +513,6 @@ export class PdfGeneratorService {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // --- 1. GROUPING NERACA ---
         const assetCash = num(data.assetCash);
         const assetPersonal = num(data.assetHome) + num(data.assetVehicle) + num(data.assetJewelry) + num(data.assetAntique) + num(data.assetPersonalOther);
         const assetInvest = num(data.assetInvHome) + num(data.assetInvVehicle) + num(data.assetGold) + num(data.assetInvAntique) + num(data.assetStocks) + num(data.assetMutualFund) + num(data.assetBonds) + num(data.assetDeposit) + num(data.assetInvOther);
@@ -579,7 +524,6 @@ export class PdfGeneratorService {
         const debtProductive = num(data.debtBusiness);
         const totalDebt = debtKPR + debtKPM + debtOther + debtProductive;
 
-        // --- 2. GROUPING ARUS KAS ---
         const incomeFixed = num(data.incomeFixed);
         const incomeVariable = num(data.incomeVariable);
         const totalIncome = incomeFixed + incomeVariable;
@@ -590,7 +534,6 @@ export class PdfGeneratorService {
         const expenseLiving = num(data.expenseFood) + num(data.expenseSchool) + num(data.expenseTransport) + num(data.expenseCommunication) + num(data.expenseHelpers) + num(data.expenseTax) + num(data.expenseLifestyle);
         const totalExpense = expenseDebt + expenseInsurance + expenseSaving + expenseLiving;
 
-        // --- 3. LOGIC SMART PAGINATION ---
         const allRatios = (analysis.ratios || []).map((r: any) => ({
             ...r,
             valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
@@ -600,27 +543,18 @@ export class PdfGeneratorService {
 
         const ratioPages: any[] = [];
         const remainingRatios = [...allRatios];
-
         const FIRST_RATIO_PAGE_CAPACITY = 8;
-        const NEXT_RATIO_PAGE_CAPACITY = 10; 
+        const NEXT_RATIO_PAGE_CAPACITY = 10;
 
         if (remainingRatios.length > 0) {
             const page2Items = remainingRatios.splice(0, FIRST_RATIO_PAGE_CAPACITY);
-            ratioPages.push({
-                isFirstPage: true,
-                pageNumber: 2,
-                items: page2Items
-            });
+            ratioPages.push({ isFirstPage: true, pageNumber: 2, items: page2Items });
         }
 
         let pageCounter = 3;
         while (remainingRatios.length > 0) {
             const chunk = remainingRatios.splice(0, NEXT_RATIO_PAGE_CAPACITY);
-            ratioPages.push({
-                isFirstPage: false,
-                pageNumber: pageCounter++,
-                items: chunk
-            });
+            ratioPages.push({ isFirstPage: false, pageNumber: pageCounter++, items: chunk });
         }
 
         const dob = data.userProfile?.dob ? new Date(data.userProfile.dob) : new Date();

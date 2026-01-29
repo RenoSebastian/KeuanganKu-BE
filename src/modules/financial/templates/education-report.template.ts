@@ -1,40 +1,51 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
+/**
+ * ------------------------------------------------------------------
+ * 1. LOGIC LAYER: ASSET HANDLING
+ * ------------------------------------------------------------------
+ */
 function getImageBase64(filePath: string): string {
-    try {
-        if (!fs.existsSync(filePath)) {
-            console.error(`[PDF] File not found: ${filePath}`);
-            return '';
-        }
-        const bitmap = fs.readFileSync(filePath);
-        const extension = path.extname(filePath).toLowerCase().replace('.', '');
-
-        // Mapping mime type yang lebih akurat
-        let mimeType = '';
-        switch (extension) {
-            case 'webp': mimeType = 'image/webp'; break;
-            case 'png': mimeType = 'image/png'; break;
-            case 'jpg':
-            case 'jpeg': mimeType = 'image/jpeg'; break;
-            case 'svg': mimeType = 'image/svg+xml'; break;
-            default: mimeType = 'image/png';
-        }
-
-        return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-    } catch (error) {
-        console.error(`[PDF] Error base64: ${error.message}`);
-        return '';
+  try {
+    if (!fs.existsSync(filePath)) {
+      console.error(`[PDF] File not found: ${filePath}`);
+      return '';
     }
+    const bitmap = fs.readFileSync(filePath);
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+
+    let mimeType = '';
+    switch (extension) {
+      case 'webp': mimeType = 'image/webp'; break;
+      case 'png': mimeType = 'image/png'; break;
+      case 'jpg':
+      case 'jpeg': mimeType = 'image/jpeg'; break;
+      case 'svg': mimeType = 'image/svg+xml'; break;
+      default: mimeType = 'image/png';
+    }
+
+    return `data:${mimeType};base64,${bitmap.toString('base64')}`;
+  } catch (error: any) {
+    console.error(`[PDF] Error base64: ${error.message}`);
+    return '';
+  }
 }
 
+// Sesuaikan path ini dengan server environment Anda (Docker/Local)
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
+
 const assets = {
-    logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
-    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendidikan1.webp')),
-    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendidikan2.webp'))
+  logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
+  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendidikan1.webp')),
+  headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendidikan2.webp'))
 };
 
+/**
+ * ------------------------------------------------------------------
+ * 2. VIEW LAYER: HTML TEMPLATE
+ * ------------------------------------------------------------------
+ */
 export const educationReportTemplate = `
 <!DOCTYPE html>
 <html lang="en">
@@ -42,7 +53,8 @@ export const educationReportTemplate = `
   <meta charset="UTF-8">
   <title>Education Plan Report</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+    /* [OPTIMISASI] Hapus font eksternal */
+    /* @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans...'); */
     
     :root {
       --primary: #0e7490;
@@ -58,7 +70,8 @@ export const educationReportTemplate = `
 
     body {
       margin: 0; padding: 0;
-      font-family: 'Plus Jakarta Sans', sans-serif;
+      /* [OPTIMISASI] Gunakan System Font */
+      font-family: Helvetica, Arial, sans-serif;
       color: var(--dark);
       background-color: #fff;
     }
@@ -92,17 +105,20 @@ export const educationReportTemplate = `
         justify-content: center;
         gap: 12px;
         border-bottom-right-radius: 20px;
-        padding: 10px; /* Tambah padding agar logo tidak mepet */
+        padding: 10px;
     }
    
     .logo-maxipro { 
-    height: 88px; /* Sesuaikan ukuran */
-    width: auto; 
-    display: block;
+      height: 88px; 
+      width: auto; 
+      display: block;
     }
 
     .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; }
-    .main-heading { font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1; margin: 0; }
+    .main-heading { 
+      font-family: 'Times New Roman', serif; /* Fallback serif */
+      font-size: 32px; line-height: 1; margin: 0; 
+    }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
 
     /* FOOTER */
@@ -170,7 +186,7 @@ export const educationReportTemplate = `
     .level-table tr:last-child td { border-bottom: none; }
     
     .col-money { text-align: right; font-family: monospace; font-weight: 600; }
-    .text-fv { color: var(--primary-dark); }
+    .text-fv { color: var(--primary); }
     .text-save { color: var(--accent); font-weight: 700; }
 
   </style>

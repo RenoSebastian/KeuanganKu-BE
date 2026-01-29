@@ -10,7 +10,6 @@ function getImageBase64(filePath: string): string {
     const bitmap = fs.readFileSync(filePath);
     const extension = path.extname(filePath).toLowerCase().replace('.', '');
 
-    // Mapping mime type yang lebih akurat
     let mimeType = '';
     switch (extension) {
       case 'webp': mimeType = 'image/webp'; break;
@@ -22,7 +21,7 @@ function getImageBase64(filePath: string): string {
     }
 
     return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[PDF] Error base64: ${error.message}`);
     return '';
   }
@@ -31,7 +30,6 @@ function getImageBase64(filePath: string): string {
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 const assets = {
   logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
-  // Menggunakan gambar default yang tersedia (bisa diganti dengan gambar spesifik pensiun jika ada)
   headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanaharitua1.webp')),
   headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanaharitua2.webp'))
 };
@@ -43,7 +41,8 @@ export const pensionReportTemplate = `
   <meta charset="UTF-8">
   <title>Pension Plan Report</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+    /* [OPTIMISASI] Hapus font eksternal */
+    /* @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans...'); */
     
     :root {
       --white: #ffffff;
@@ -60,7 +59,14 @@ export const pensionReportTemplate = `
     }
 
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
-    body { margin: 0; padding: 0; font-family: 'Plus Jakarta Sans', sans-serif; color: var(--dark); background-color: #525252; }
+    
+    body { 
+      margin: 0; padding: 0; 
+      /* [OPTIMISASI] Gunakan system font */
+      font-family: Helvetica, Arial, sans-serif; 
+      color: var(--dark); 
+      background-color: #525252; 
+    }
 
     .page {
       width: var(--page-width); min-height: var(--page-height);
@@ -101,17 +107,20 @@ export const pensionReportTemplate = `
         justify-content: center;
         gap: 12px;
         border-bottom-right-radius: 20px;
-        padding: 10px; /* Tambah padding agar logo tidak mepet */
+        padding: 10px;
     }
    
     .logo-maxipro { 
-    height: 88px; /* Sesuaikan ukuran */
-    width: auto; 
-    display: block;
+      height: 88px; 
+      width: auto; 
+      display: block;
     }
 
     .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; }
-    .main-heading { font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1; margin: 0; }
+    .main-heading { 
+      font-family: 'Times New Roman', serif; 
+      font-size: 32px; line-height: 1; margin: 0; 
+    }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
 
     /* --- SECTION TITLE --- */

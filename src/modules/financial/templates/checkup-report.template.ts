@@ -15,7 +15,6 @@ function getImageBase64(filePath: string): string {
     const bitmap = fs.readFileSync(filePath);
     const extension = path.extname(filePath).toLowerCase().replace('.', '');
 
-    // Mapping mime type yang lebih akurat
     let mimeType = '';
     switch (extension) {
       case 'webp': mimeType = 'image/webp'; break;
@@ -27,7 +26,7 @@ function getImageBase64(filePath: string): string {
     }
 
     return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[PDF] Error base64: ${error.message}`);
     return '';
   }
@@ -54,7 +53,8 @@ export const checkupReportTemplate = `
   <meta charset="UTF-8">
   <title>Financial Health Report</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+    /* [OPTIMISASI] Hapus font eksternal */
+    /* @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans...'); */
     
     :root {
       --primary: #0e7490;      /* Cyan 700 */
@@ -74,7 +74,8 @@ export const checkupReportTemplate = `
 
     body {
       margin: 0; padding: 0;
-      font-family: 'Plus Jakarta Sans', sans-serif;
+      /* [OPTIMISASI] Gunakan system font */
+      font-family: Helvetica, Arial, sans-serif;
       color: var(--dark);
       background-color: #525252;
     }
@@ -135,17 +136,20 @@ export const checkupReportTemplate = `
         justify-content: center;
         gap: 12px;
         border-bottom-right-radius: 20px;
-        padding: 10px; /* Tambah padding agar logo tidak mepet */
+        padding: 10px;
     }
    
     .logo-maxipro { 
-    height: 88px; /* Sesuaikan ukuran */
-    width: auto; 
-    display: block;
+      height: 88px; 
+      width: auto; 
+      display: block;
     }
 
     .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; }
-    .main-heading { font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1; margin: 0; }
+    .main-heading { 
+      font-family: 'Times New Roman', serif; /* Fallback serif */
+      font-size: 32px; line-height: 1; margin: 0; 
+    }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
 
     /* --- SECTION TITLE --- */
@@ -193,22 +197,22 @@ export const checkupReportTemplate = `
     .dot-green { background: var(--success); }
     .dot-red { background: var(--danger); }
 
-    /* --- LOGIC RATA KANAN KIRI (FLEXBOX) --- */
+    /* --- LOGIC RATA KANAN KIRI --- */
     .r-item { 
       display: flex; 
-      justify-content: space-between; /* Kunci: Rata Kanan Kiri */
+      justify-content: space-between; 
       align-items: center;
       margin-bottom: 6px; 
-      border-bottom: 1px dashed #f1f5f9; /* Garis panduan halus */
+      border-bottom: 1px dashed #f1f5f9; 
       padding-bottom: 2px; 
     }
     .r-item:last-child { border-bottom: none; }
 
     .r-val { 
-      font-family: 'Courier New', Courier, monospace; /* Monospace untuk alignment angka */
+      font-family: monospace; /* Monospace for numbers */
       font-weight: 700; 
       color: var(--dark); 
-      text-align: right; /* Redundansi aman */
+      text-align: right; 
     }
 
     .r-subtotal {
@@ -216,7 +220,7 @@ export const checkupReportTemplate = `
       padding-top: 8px; 
       border-top: 2px solid var(--border);
       display: flex; 
-      justify-content: space-between; /* Kunci: Rata Kanan Kiri untuk Total */
+      justify-content: space-between; 
       align-items: center;
       font-weight: 800; 
       color: var(--dark);
@@ -227,12 +231,12 @@ export const checkupReportTemplate = `
       border-top: 1px solid var(--border);
       padding: 10px 15px; 
       display: flex;
-      justify-content: space-between; /* Kunci: Rata Kanan Kiri untuk Footer */
+      justify-content: space-between; 
       align-items: center;
     }
 
     .footer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--secondary); letter-spacing: 1px; }
-    .footer-val { font-size: 16px; font-weight: 800; font-family: 'Courier New', monospace; color: var(--dark); margin-top: 2px; }
+    .footer-val { font-size: 16px; font-weight: 800; font-family: monospace; color: var(--dark); margin-top: 2px; }
     .val-green { color: var(--success); }
     .val-red { color: var(--danger); }
 

@@ -15,7 +15,6 @@ function getImageBase64(filePath: string): string {
     const bitmap = fs.readFileSync(filePath);
     const extension = path.extname(filePath).toLowerCase().replace('.', '');
 
-    // Mapping mime type yang lebih akurat
     let mimeType = '';
     switch (extension) {
       case 'webp': mimeType = 'image/webp'; break;
@@ -27,7 +26,7 @@ function getImageBase64(filePath: string): string {
     }
 
     return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-  } catch (error) {
+  } catch (error: any) {
     console.error(`[PDF] Error base64: ${error.message}`);
     return '';
   }
@@ -54,7 +53,8 @@ export const budgetReportTemplate = `
   <meta charset="UTF-8">
   <title>Budget Plan Report</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
+    /* [OPTIMISASI] Hapus @import font eksternal untuk mempercepat loading & mencegah timeout */
+    /* @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans...'); */
     
     :root {
       --item: #000000;
@@ -75,7 +75,8 @@ export const budgetReportTemplate = `
 
     body {
       margin: 0; padding: 0;
-      font-family: 'Plus Jakarta Sans', sans-serif;
+      /* [OPTIMISASI] Gunakan System Font agar tidak perlu download font */
+      font-family: Helvetica, Arial, sans-serif;
       color: var(--dark);
       background-color: #525252;
     }
@@ -87,7 +88,6 @@ export const budgetReportTemplate = `
       background: #ffffff;
       margin: 20px auto;
       padding: var(--page-padding);
-      /* Padding bawah ekstra agar footer tidak tertimpa konten */
       padding-bottom: 25mm; 
       position: relative;
       overflow: hidden;
@@ -143,17 +143,21 @@ export const budgetReportTemplate = `
         justify-content: center;
         gap: 12px;
         border-bottom-right-radius: 20px;
-        padding: 10px; /* Tambah padding agar logo tidak mepet */
+        padding: 10px;
     }
    
     .logo-maxipro { 
-    height: 88px; /* Sesuaikan ukuran */
-    width: auto; 
-    display: block;
+      height: 88px; 
+      width: auto; 
+      display: block;
     }
 
     .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; color: var(--dark); }
-    .main-heading { font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1; margin: 0; }
+    .main-heading { 
+      /* [OPTIMISASI] Fallback font serif */
+      font-family: 'Times New Roman', serif; 
+      font-size: 32px; line-height: 1; margin: 0; 
+    }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
 
     /* --- SECTION TITLE --- */
@@ -201,12 +205,11 @@ export const budgetReportTemplate = `
       page-break-inside: avoid;
     }
     
-    /* Warna border variasi (looping nth-child simulation via style inline di body nanti jika perlu, atau hardcode class) */
-    .allocation-item:nth-child(1) { border-left-color: #3b82f6; } /* Blue - Utang Prod */
-    .allocation-item:nth-child(2) { border-left-color: #ef4444; } /* Red - Utang Kons */
-    .allocation-item:nth-child(3) { border-left-color: #f59e0b; } /* Amber - Asuransi */
-    .allocation-item:nth-child(4) { border-left-color: #10b981; } /* Emerald - Saving */
-    .allocation-item:nth-child(5) { border-left-color: #6366f1; } /* Indigo - Living */
+    .allocation-item:nth-child(1) { border-left-color: #3b82f6; } 
+    .allocation-item:nth-child(2) { border-left-color: #ef4444; } 
+    .allocation-item:nth-child(3) { border-left-color: #f59e0b; } 
+    .allocation-item:nth-child(4) { border-left-color: #10b981; } 
+    .allocation-item:nth-child(5) { border-left-color: #6366f1; } 
 
     .alloc-label { font-size: 10px; font-weight: 700; color: var(--dark); text-transform: uppercase; letter-spacing: 0.5px; }
     .alloc-val { font-size: 13px; font-weight: 700; font-family: monospace; color: var(--item); }
@@ -235,35 +238,20 @@ export const budgetReportTemplate = `
     .sum-val { font-size: 16px; font-weight: 800; color: #14532d; font-family: monospace; }
     .sum-val.highlight { color: #0ea5e9; font-size: 20px; }
 
-    /* --- FOOTER NOTE --- */
-    .footer-note {
-      margin-top: 24px; padding: 16px; background: #fff7ed; 
-      border: 1px solid #fed7aa; border-radius: 8px;
-      color: #9a3412; font-size: 10px; line-height: 1.6;
-    }
-    .footer-note strong { color: #c2410c; }
-
-    /* --- PAGE FOOTER (Absolute Bottom) --- */
+    /* --- PAGE FOOTER --- */
     .page-footer {
       position: absolute; 
-      bottom: 0; 
-      left: 0; 
-      right: 0;
-      height: 15mm; 
-      padding: 0 15mm;
+      bottom: 0; left: 0; right: 0;
+      height: 15mm; padding: 0 15mm;
       border-top: 1px solid var(--border);
-      display: flex; 
-      justify-content: space-between; 
-      align-items: center;
+      display: flex; justify-content: space-between; align-items: center;
       background: white;
     }
     .footer-text { font-size: 9px; color: var(--secondary); font-weight: 500; letter-spacing: 0.5px; }
   </style>
 </head>
 <body>
-
   <div class="page">
-    
     <div class="header-grid">
       <div class="h-title-box">
         <div class="sub-heading">PamJaya Financial</div>
@@ -277,47 +265,23 @@ export const budgetReportTemplate = `
     </div>
 
     <div class="info-container">
-      
       <div>
         <div class="section-title">01. Data Diri</div>
         <div class="info-card">
-          <div class="info-row">
-            <span class="label">Nama Lengkap</span>
-            <span class="value">{{user.name}}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Usia</span>
-            <span class="value">{{user.age}} Tahun</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Periode Anggaran</span>
-            <span class="value">{{period}}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">Tanggal Dibuat</span>
-            <span class="value">{{createdAt}}</span>
-          </div>
+          <div class="info-row"><span class="label">Nama Lengkap</span><span class="value">{{user.name}}</span></div>
+          <div class="info-row"><span class="label">Usia</span><span class="value">{{user.age}} Tahun</span></div>
+          <div class="info-row"><span class="label">Periode Anggaran</span><span class="value">{{period}}</span></div>
+          <div class="info-row"><span class="label">Tanggal Dibuat</span><span class="value">{{createdAt}}</span></div>
         </div>
       </div>
-
       <div>
         <div class="section-title">02. Penghasilan Per Bulan</div>
         <div class="info-card">
-          <div class="info-row">
-            <span class="label">• Penghasilan Tetap</span>
-            <span class="value">{{income.fixed}}</span>
-          </div>
-          <div class="info-row">
-            <span class="label">• Penghasilan Tidak Tetap</span>
-            <span class="value">{{income.variable}}</span>
-          </div>
-          <div class="info-row total-highlight">
-            <span class="label">TOTAL PENGHASILAN</span>
-            <span class="value">{{income.total}}</span>
-          </div>
+          <div class="info-row"><span class="label">• Penghasilan Tetap</span><span class="value">{{income.fixed}}</span></div>
+          <div class="info-row"><span class="label">• Penghasilan Tidak Tetap</span><span class="value">{{income.variable}}</span></div>
+          <div class="info-row total-highlight"><span class="label">TOTAL PENGHASILAN</span><span class="value">{{income.total}}</span></div>
         </div>
       </div>
-
     </div>
 
     <div class="section-title">03. Anggaran Yang Disarankan</div>
@@ -364,7 +328,6 @@ export const budgetReportTemplate = `
       <div class="footer-text">Generated by KeuanganKu System</div>
       <div class="footer-text">CONFIDENTIAL • Page 1 of 1</div>
     </div>
-
   </div>
 </body>
 </html>
