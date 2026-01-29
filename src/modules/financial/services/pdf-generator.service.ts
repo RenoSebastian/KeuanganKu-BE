@@ -131,13 +131,16 @@ export class PdfGeneratorService {
         };
     }
 
-    // [NEW] Method untuk Budgeting PDF
+    // [UPDATED] Method untuk Budgeting PDF
     async generateBudgetPdf(data: any): Promise<Buffer> {
         const template = handlebars.compile(budgetReportTemplate);
+
+        // Mapping data dengan struktur yang benar
         const context = this.mapBudgetData(data);
+
+        // Render HTML dengan data
         const html = template(context);
 
-        // Reuse logic Puppeteer yang sama agar konsisten
         const browser = await puppeteer.launch({
             headless: true,
             args: ['--no-sandbox', '--disable-setuid-sandbox'],
@@ -145,10 +148,10 @@ export class PdfGeneratorService {
 
         const page = await browser.newPage();
 
-        // [OPTIMIZED]
+        // [OPTIMIZED] Strategi loading agar tidak timeout
         await page.setContent(html, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
+            waitUntil: 'domcontentloaded', // Lebih cepat daripada networkidle0
+            timeout: 60000 // 60 detik timeout
         });
 
         const pdfBuffer = await page.pdf({
@@ -161,13 +164,26 @@ export class PdfGeneratorService {
         return Buffer.from(pdfBuffer);
     }
 
-    // [UPDATED] Mapper untuk Budgeting sesuai Schema User yang benar
+    // [CRITICAL FIX] Mapper untuk Budgeting
+    // Memastikan struktur object sesuai dengan {{allocations.xx.value}} di template
     private mapBudgetData(data: any) {
-        const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+
+        // Helper formatting yang aman (mencegah NaN/Undefined)
+        const fmt = (n: any) => {
+            const val = Number(n);
+            if (isNaN(val)) return 'Rp 0';
+            return new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(val);
+        };
+
+        // Helper konversi ke number
         const num = (n: any) => Number(n) || 0;
 
         // 1. Data Diri & Tanggal
-        // [FIX] Ambil dari data.user.dateOfBirth, bukan data.user.userProfile.dob
+        // Mengambil data user dari relasi (pastikan include di controller/service)
         const dob = data.user?.dateOfBirth ? new Date(data.user.dateOfBirth) : null;
         const age = dob ? new Date().getFullYear() - dob.getFullYear() : '-';
 
@@ -177,6 +193,7 @@ export class PdfGeneratorService {
         const totalIncome = fixedIncome + variableIncome;
 
         // 3. Perhitungan Alokasi (Berdasarkan FIXED INCOME)
+        // Logika 10-20-15-10-45
         const allocProductiveDebt = fixedIncome * 0.20;
         const allocConsumptiveDebt = fixedIncome * 0.15;
         const allocInsurance = fixedIncome * 0.10;
@@ -185,35 +202,53 @@ export class PdfGeneratorService {
 
         // 4. Kesimpulan
         const totalBudget = allocProductiveDebt + allocConsumptiveDebt + allocInsurance + allocSaving + allocLiving;
-        const totalSurplus = variableIncome;
+        const totalSurplus = variableIncome; // Variable income dianggap surplus murni
+
+        // [DEBUG LOG] - Cek di terminal backend saat generate
+        // console.log('[PDF GENERATOR] Fixed Income:', fixedIncome);
+        // console.log('[PDF GENERATOR] Alloc Living:', allocLiving);
 
         return {
             period: `${data.month}/${data.year}`,
-            createdAt: new Date(data.createdAt).toLocaleDateString('id-ID'),
+            createdAt: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
 
-            // [FIX] Ambil dari data.user.fullName
             user: {
                 name: data.user?.fullName || 'User',
                 age: age
             },
 
-            // Penghasilan
+            // Bagian Income
             income: {
                 fixed: fmt(fixedIncome),
                 variable: fmt(variableIncome),
                 total: fmt(totalIncome)
             },
 
-            // Anggaran Disarankan
+            // Bagian Alokasi (Struktur Wajib Sama dengan Template)
             allocations: {
-                productive: { label: 'Utang Produktif (20%)', value: fmt(allocProductiveDebt) },
-                consumptive: { label: 'Utang Konsumtif (15%)', value: fmt(allocConsumptiveDebt) },
-                insurance: { label: 'Premi Asuransi (10%)', value: fmt(allocInsurance) },
-                saving: { label: 'Tabungan & Investasi (10%)', value: fmt(allocSaving) },
-                living: { label: 'Biaya Hidup (45%)', value: fmt(allocLiving) },
+                productive: {
+                    label: 'Utang Produktif (20%)',
+                    value: fmt(allocProductiveDebt)
+                },
+                consumptive: {
+                    label: 'Utang Konsumtif (15%)',
+                    value: fmt(allocConsumptiveDebt)
+                },
+                insurance: {
+                    label: 'Premi Asuransi (10%)',
+                    value: fmt(allocInsurance)
+                },
+                saving: {
+                    label: 'Tabungan & Investasi (10%)',
+                    value: fmt(allocSaving)
+                },
+                living: {
+                    label: 'Biaya Hidup (45%)',
+                    value: fmt(allocLiving)
+                },
             },
 
-            // Kesimpulan
+            // Bagian Kesimpulan
             summary: {
                 totalBudget: fmt(totalBudget),
                 totalSurplus: fmt(totalSurplus)

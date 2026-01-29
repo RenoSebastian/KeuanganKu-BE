@@ -7,39 +7,38 @@ import * as path from 'path';
  * ------------------------------------------------------------------
  */
 function getImageBase64(filePath: string): string {
-    try {
-        if (!fs.existsSync(filePath)) {
-            console.error(`[PDF] File not found: ${filePath}`);
-            return '';
-        }
-        const bitmap = fs.readFileSync(filePath);
-        const extension = path.extname(filePath).toLowerCase().replace('.', '');
-
-        // Mapping mime type yang lebih akurat
-        let mimeType = '';
-        switch (extension) {
-            case 'webp': mimeType = 'image/webp'; break;
-            case 'png': mimeType = 'image/png'; break;
-            case 'jpg':
-            case 'jpeg': mimeType = 'image/jpeg'; break;
-            case 'svg': mimeType = 'image/svg+xml'; break;
-            default: mimeType = 'image/png';
-        }
-
-        return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-    } catch (error) {
-        console.error(`[PDF] Error base64: ${error.message}`);
-        return '';
+  try {
+    if (!fs.existsSync(filePath)) {
+      console.error(`[PDF] File not found: ${filePath}`);
+      return '';
     }
+    const bitmap = fs.readFileSync(filePath);
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+
+    let mimeType = '';
+    switch (extension) {
+      case 'webp': mimeType = 'image/webp'; break;
+      case 'png': mimeType = 'image/png'; break;
+      case 'jpg':
+      case 'jpeg': mimeType = 'image/jpeg'; break;
+      case 'svg': mimeType = 'image/svg+xml'; break;
+      default: mimeType = 'image/png';
+    }
+
+    return `data:${mimeType};base64,${bitmap.toString('base64')}`;
+  } catch (error: any) {
+    console.error(`[PDF] Error base64: ${error.message}`);
+    return '';
+  }
 }
 
 // Sesuaikan path ini dengan server environment Anda (Docker/Local)
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 
 const assets = {
-    logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
-    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancanganggaran1.webp')),
-    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancanganggaran2.webp'))
+  logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
+  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancanganggaran1.webp')),
+  headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancanganggaran2.webp'))
 };
 
 /**
@@ -76,7 +75,7 @@ export const budgetReportTemplate = `
       margin: 0; padding: 0;
       font-family: 'Plus Jakarta Sans', sans-serif;
       color: var(--dark);
-      background-color: #525252;
+      background-color: #525252; /* Dark background for preview only */
     }
 
     /* --- PAGE CONTAINER --- */
@@ -200,7 +199,7 @@ export const budgetReportTemplate = `
       page-break-inside: avoid;
     }
     
-    /* Warna border variasi (looping nth-child simulation via style inline di body nanti jika perlu, atau hardcode class) */
+    /* Warna border variasi */
     .allocation-item:nth-child(1) { border-left-color: #3b82f6; } /* Blue - Utang Prod */
     .allocation-item:nth-child(2) { border-left-color: #ef4444; } /* Red - Utang Kons */
     .allocation-item:nth-child(3) { border-left-color: #f59e0b; } /* Amber - Asuransi */
@@ -271,7 +270,7 @@ export const budgetReportTemplate = `
       <div class="h-image-right-top"></div>
       <div class="h-image-left-bottom"></div>
       <div class="h-brand-box">
-        <img src="${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
+        <img src="\${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
       </div>
     </div>
 
