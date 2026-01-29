@@ -235,7 +235,7 @@ export const checkupReportTemplate = `
       align-items: center;
     }
 
-    .footer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--secondary); letter-spacing: 1px; }
+    .footer-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--dark); letter-spacing: 1px;  font-weight: 800; }
     .footer-val { font-size: 16px; font-weight: 800; font-family: monospace; color: var(--dark); margin-top: 2px; }
     .val-green { color: var(--success); }
     .val-red { color: var(--danger); }
