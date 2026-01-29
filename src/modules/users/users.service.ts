@@ -87,32 +87,26 @@ export class UsersService {
 
   // 2. Create User (Admin)
   async createUser(dto: CreateUserDto) {
-    // 1. Cek duplikat Email atau NIP
+    // Cek duplikat
     const existing = await this.prisma.user.findFirst({
       where: {
         OR: [{ email: dto.email }, { nip: dto.nip }],
       },
     });
-    if (existing) {
-      throw new BadRequestException('Email atau NIP sudah terdaftar');
-    }
+    if (existing) throw new BadRequestException('Email atau NIP sudah terdaftar');
 
-    // 2. Hash Password
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    // 3. Prepare Data
-    // Exclude field yang tidak ada di schema User (jobTitle)
+    // [FIX] Exclude jobTitle yang tidak ada di DB User
     const { password, dateOfBirth, jobTitle, ...rest } = dto;
 
     const data: any = {
-      ...rest, // Ini sudah membawa 'unitKerjaId' dan 'nip'
+      ...rest,
       passwordHash: hashedPassword,
+      // [FIX 500 ERROR] Pastikan dateOfBirth selalu ada
+      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : new Date('1990-01-01'),
     };
-
-    if (dateOfBirth) {
-      data.dateOfBirth = new Date(dateOfBirth);
-    }
 
     try {
       const newUser = await this.prisma.user.create({ data });
@@ -123,10 +117,12 @@ export class UsersService {
       if (error.code === 'P2003') {
         throw new BadRequestException('Unit Kerja ID tidak valid');
       }
+      this.logger.error(`Create user failed: ${error.message}`);
       throw error;
     }
   }
 
+  // 3. Get Detail
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
@@ -137,26 +133,15 @@ export class UsersService {
     return result;
   }
 
-  // 4. Update User (Admin)
+  // 4. Update User
   async updateUser(id: string, dto: UpdateUserDto) {
-    this.logger.log(`Admin updating user ${id}`);
     return this.processUpdate(id, dto);
   }
 
-  // 5. Delete User (Admin)
+  // 5. Delete User
   async deleteUser(id: string) {
-    // Cek existensi
     await this.findOne(id);
-
-    // Delete DB
-    const deleted = await this.prisma.user.delete({
-      where: { id },
-    });
-
-    // Hapus dari Search Index (Optional)
-    // this.searchService.deleteDocument('global_search', id); 
-
-    this.logger.log(`User ${id} deleted by Admin`);
+    const deleted = await this.prisma.user.delete({ where: { id } });
     return { message: 'User deleted successfully', id: deleted.id };
   }
 
@@ -167,14 +152,24 @@ export class UsersService {
   private async processUpdate(userId: string, dto: any) {
     try {
       const { password, dateOfBirth, dependentCount, jobTitle, ...restData } = dto;
-      const updatePayload: any = { ...restData };
+
+      // Bersihkan undefined/empty values dari restData
+      const updatePayload: any = {};
+
+      Object.keys(restData).forEach(key => {
+        if (restData[key] !== undefined && restData[key] !== '') {
+          updatePayload[key] = restData[key];
+        }
+      });
 
       if (dependentCount !== undefined) {
         updatePayload.dependentCount = Number(dependentCount);
       }
+
       if (dateOfBirth) {
         updatePayload.dateOfBirth = new Date(dateOfBirth);
       }
+
       if (password) {
         const salt = await bcrypt.genSalt();
         updatePayload.passwordHash = await bcrypt.hash(password, salt);

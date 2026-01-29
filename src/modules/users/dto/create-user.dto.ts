@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
+import { Transform } from 'class-transformer';
 import {
     IsDateString,
     IsEmail,
@@ -21,14 +22,15 @@ export class CreateUserDto {
     @ApiProperty({ example: 'john@kantor.com', description: 'Email unik pegawai' })
     @IsEmail()
     @IsNotEmpty()
+    @Transform(({ value }) => value?.toLowerCase().trim()) // Auto lowercase email
     email: string;
 
-    @ApiProperty({ example: '12345678', description: 'NIP Pegawai (Harus Unik)' })
+    @ApiProperty({ example: '12345678', description: 'NIP Pegawai' })
     @IsString()
     @IsNotEmpty()
     nip: string;
 
-    @ApiProperty({ example: 'Rahasia123', description: 'Password awal (min 6 karakter)' })
+    @ApiProperty({ example: 'Rahasia123', description: 'Password awal' })
     @IsString()
     @IsNotEmpty()
     @MinLength(6)
@@ -39,22 +41,24 @@ export class CreateUserDto {
     @IsNotEmpty()
     role: Role;
 
-    @ApiProperty({ example: 'uuid-v4', description: 'ID Unit Kerja (Wajib)' })
+    @ApiProperty({ example: 'uuid-unit-kerja', description: 'ID Unit Kerja' })
     @IsUUID()
     @IsNotEmpty()
+    // Jika string kosong, ubah jadi null agar validator teriak "IsNotEmpty" bukan "Invalid UUID"
+    @Transform(({ value }) => (value === '' ? null : value))
     unitKerjaId: string;
 
-    @ApiPropertyOptional({ example: 'Staff IT', description: 'Jabatan pegawai (Opsional karena tidak masuk DB User)' })
+    @ApiProperty({ example: '1990-01-01', description: 'Tanggal lahir (Wajib)' })
+    @IsDateString() // Ubah jadi Wajib karena DB require
+    @IsNotEmpty()
+    dateOfBirth: string;
+
+    @ApiPropertyOptional({ example: 'Staff IT', description: 'Jabatan pegawai' })
     @IsOptional()
     @IsString()
     jobTitle?: string;
 
-    @ApiPropertyOptional({ example: '1990-01-01', description: 'Tanggal lahir (YYYY-MM-DD)' })
-    @IsOptional()
-    @IsDateString()
-    dateOfBirth?: string;
-
-    @ApiPropertyOptional({ example: 0, description: 'Jumlah tanggungan (anak/istri)' })
+    @ApiPropertyOptional({ example: 0, description: 'Jumlah tanggungan' })
     @IsOptional()
     @IsNumber()
     dependentCount?: number;

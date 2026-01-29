@@ -1,11 +1,11 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 
 // --- Imports Module Existing ---
 // Perhatikan: Menggunakan '../' karena folder prisma ada di luar src
-import { PrismaModule } from '../prisma/prisma.module'; 
+import { PrismaModule } from '../prisma/prisma.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { FinancialModule } from './modules/financial/financial.module';
@@ -24,7 +24,7 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
     ScheduleModule.forRoot(),
-    
+
     // --- Winston Registration ---
     WinstonModule.forRoot(winstonConfig),
     // ----------------------------
@@ -48,8 +48,4 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
     },
   ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    throw new Error('Method not implemented.');
-  }
-}
+export class AppModule { }

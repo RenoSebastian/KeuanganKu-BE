@@ -202,7 +202,7 @@ export const insuranceReportTemplate = `
     
     <div class="header-grid">
       <div class="h-title-box">
-        <div class="sub-heading">PamJaya Financial</div>
+        <div class="sub-heading">MAXIPRO Financial</div>
         <h1 class="main-heading">Insurance Plan</h1>
       </div>
       <div class="h-image-right-top"></div>
@@ -215,7 +215,7 @@ export const insuranceReportTemplate = `
     <div class="section-title">01. Profil Risiko & Tanggungan</div>
     <div class="profile-card">
       <div>
-        <div class="meta-row"><label>Nama Pemohon</label> <span>{{user.name}}</span></div>
+        <div class="meta-row"><label>Nama Klien</label> <span>{{user.name}}</span></div>
         <div class="meta-row"><label>Jenis Proteksi</label> <span style="color:var(--accent);">{{plan.typeLabel}}</span></div>
         <div class="meta-row"><label>Jumlah Tanggungan</label> <span>{{plan.dependentCount}} Orang</span></div>
         <div class="meta-row"><label>Tanggal Laporan</label> <span>{{createdAt}}</span></div>

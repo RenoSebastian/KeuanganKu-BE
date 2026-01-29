@@ -292,7 +292,7 @@ export const checkupReportTemplate = `
     
     <div class="header-grid">
       <div class="h-title-box">
-        <div class="sub-heading">PamJaya Financial</div>
+        <div class="sub-heading">MAXIPRO Financial</div>
         <h1 class="main-heading">Checkup Report</h1>
       </div>
       <div class="h-image-right-top"></div>
@@ -302,7 +302,7 @@ export const checkupReportTemplate = `
       </div>
     </div>
 
-    <div class="section-title">01. Profil Pemohon</div>
+    <div class="section-title">01. Profil Klien</div>
     <div class="profile-box">
       <div>
         <div class="profile-row"><label>Nama Lengkap</label> <span>{{user.name}}</span></div>

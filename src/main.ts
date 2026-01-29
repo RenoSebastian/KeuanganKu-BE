@@ -39,7 +39,7 @@ async function bootstrap() {
 
   const config = new DocumentBuilder()
     .setTitle('Keuanganku API')
-    .setDescription('Dokumentasi API untuk Aplikasi Perencanaan Keuangan PAM JAYA')
+    .setDescription('Dokumentasi API untuk Aplikasi Perencanaan Keuangan MAXIPRO')
     .setVersion('1.0')
     .addBearerAuth()
     .build();

@@ -200,7 +200,7 @@ export const educationReportTemplate = `
 
   <div class="header-grid">
     <div class="h-title-box">
-      <div class="sub-heading">PamJaya Financial</div>
+      <div class="sub-heading">MAXIPRO Financial</div>
       <h1 class="main-heading">Education Plan</h1>
     </div>
     <div class="h-image-right-top"></div>

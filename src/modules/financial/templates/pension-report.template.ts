@@ -185,7 +185,7 @@ export const pensionReportTemplate = `
     
     <div class="header-grid">
       <div class="h-title-box">
-        <div class="sub-heading">PamJaya Financial</div>
+        <div class="sub-heading">MAXIPRO Financial</div>
         <h1 class="main-heading">Pension Plan</h1>
       </div>
       <div class="h-image-right-top"></div>
@@ -198,7 +198,7 @@ export const pensionReportTemplate = `
     <div class="section-title">01. Profil & Asumsi Dasar</div>
     <div class="profile-card">
       <div>
-        <div class="meta-row"><span class="meta-label">Nama Pemohon</span> <span class="meta-val">{{user.name}}</span></div>
+        <div class="meta-row"><span class="meta-label">Nama Klien</span> <span class="meta-val">{{user.name}}</span></div>
         <div class="meta-row"><span class="meta-label">Usia Saat Ini</span> <span class="meta-val">{{plan.currentAge}} Tahun</span></div>
         <div class="meta-row"><span class="meta-label">Usia Pensiun</span> <span class="meta-val">{{plan.retirementAge}} Tahun</span></div>
         <div class="meta-row"><span class="meta-label">Harapan Hidup</span> <span class="meta-val">Hingga {{plan.lifeExpectancy}} Tahun</span></div>
