@@ -335,4 +335,28 @@ export class FinancialController {
     });
     res.end(buffer);
   }
+
+  // [NEW] Endpoint Download PDF from History Detail
+  @Get('checkup/history/pdf/:id')
+  @ApiOperation({ summary: 'Download History PDF Report' })
+  async downloadHistoryPdf(@Param('id') id: string, @Req() req, @Res() res: express.Response) {
+    const userId = req.user.id;
+
+    // 1. Ambil Data Detail (Gabungan Raw + Analisa)
+    // Reuse logic getCheckupDetail yang sudah ada di service
+    const checkupDetail = await this.financialService.getCheckupDetail(userId, id);
+
+    if (!checkupDetail) throw new NotFoundException('Data riwayat tidak ditemukan');
+
+    // 2. Generate PDF dengan Template History
+    const buffer = await this.pdfservice.generateHistoryCheckupPdf(checkupDetail);
+
+    // 3. Stream Response
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Checkup-Report-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
 }

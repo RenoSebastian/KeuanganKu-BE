@@ -7,6 +7,7 @@ import { pensionReportTemplate } from '../templates/pension-report.template'; //
 import { insuranceReportTemplate } from '../templates/insurance-report.template';
 import { goalReportTemplate } from '../templates/goals-report.template';
 import { educationReportTemplate } from '../templates/education-report.template';
+import { historyCheckupReportTemplate } from '../templates/history-checkup-report.template';
 
 @Injectable()
 export class PdfGeneratorService {
@@ -578,5 +579,153 @@ export class PdfGeneratorService {
         return {
             plans: plans
         };
-    }   
+    }
+
+    // [NEW] Generate PDF from History Detail
+    // Input: { score, globalStatus, netWorth, ratios, record: { ...rawFinancialData } }
+    async generateHistoryCheckupPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(historyCheckupReportTemplate);
+        const context = this.mapHistoryCheckupData(data); // Mapper khusus
+        const html = template(context);
+
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' },
+        });
+
+        await browser.close();
+        return Buffer.from(pdfBuffer);
+    }
+
+    // [UPDATED] Mapper for History Checkup - Full Page Ratio Logic
+    private mapHistoryCheckupData(fullData: any) {
+        const data = fullData.record || {};
+        const analysis = fullData;
+
+        const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+        const num = (n: any) => Number(n) || 0;
+
+        // --- 1. GROUPING NERACA ---
+        const assetCash = num(data.assetCash);
+        const assetPersonal = num(data.assetHome) + num(data.assetVehicle) + num(data.assetJewelry) + num(data.assetAntique) + num(data.assetPersonalOther);
+        const assetInvest = num(data.assetInvHome) + num(data.assetInvVehicle) + num(data.assetGold) + num(data.assetInvAntique) + num(data.assetStocks) + num(data.assetMutualFund) + num(data.assetBonds) + num(data.assetDeposit) + num(data.assetInvOther);
+        const totalAsset = assetCash + assetPersonal + assetInvest;
+
+        const debtKPR = num(data.debtKPR);
+        const debtKPM = num(data.debtKPM);
+        const debtOther = num(data.debtCC) + num(data.debtCoop) + num(data.debtConsumptiveOther);
+        const debtProductive = num(data.debtBusiness);
+        const totalDebt = debtKPR + debtKPM + debtOther + debtProductive;
+
+        // --- 2. GROUPING ARUS KAS ---
+        const incomeFixed = num(data.incomeFixed);
+        const incomeVariable = num(data.incomeVariable);
+        const totalIncome = incomeFixed + incomeVariable;
+
+        const expenseDebt = num(data.installmentKPR) + num(data.installmentKPM) + num(data.installmentCC) + num(data.installmentCoop) + num(data.installmentConsumptiveOther) + num(data.installmentBusiness);
+        const expenseInsurance = num(data.insuranceLife) + num(data.insuranceHealth) + num(data.insuranceHome) + num(data.insuranceVehicle) + num(data.insuranceBPJS) + num(data.insuranceOther);
+        const expenseSaving = num(data.savingEducation) + num(data.savingRetirement) + num(data.savingPilgrimage) + num(data.savingHoliday) + num(data.savingEmergency) + num(data.savingOther);
+        const expenseLiving = num(data.expenseFood) + num(data.expenseSchool) + num(data.expenseTransport) + num(data.expenseCommunication) + num(data.expenseHelpers) + num(data.expenseTax) + num(data.expenseLifestyle);
+        const totalExpense = expenseDebt + expenseInsurance + expenseSaving + expenseLiving;
+
+        // --- 3. LOGIC SMART PAGINATION ---
+        const allRatios = (analysis.ratios || []).map((r: any) => ({
+            ...r,
+            valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
+            statusLabel: r.statusColor.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
+            cssClass: r.statusColor.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red'
+        }));
+
+        const ratioPages: any[] = [];
+        const remainingRatios = [...allRatios];
+
+        /**
+         * LOGIKA: Halaman 2 (Halaman Rasio Pertama) dibuat muat hingga 8 rasio (Grid 2x4).
+         * Jika rasio lebih dari 8 (misal ada tambahan indikator di masa depan), 
+         * barulah sisa rasio tersebut dibuatkan halaman baru (Page 3).
+         */
+        const FIRST_RATIO_PAGE_CAPACITY = 8;
+        const NEXT_RATIO_PAGE_CAPACITY = 10; // Halaman kosong penuh muat lebih banyak
+
+        if (remainingRatios.length > 0) {
+            // Ambil 8 pertama untuk Halaman 2
+            const page2Items = remainingRatios.splice(0, FIRST_RATIO_PAGE_CAPACITY);
+            ratioPages.push({
+                isFirstPage: true,
+                pageNumber: 2,
+                items: page2Items
+            });
+        }
+
+        // Jika masih ada sisa (rasio ke-9 dst), buat Halaman 3
+        let pageCounter = 3;
+        while (remainingRatios.length > 0) {
+            const chunk = remainingRatios.splice(0, NEXT_RATIO_PAGE_CAPACITY);
+            ratioPages.push({
+                isFirstPage: false,
+                pageNumber: pageCounter++,
+                items: chunk
+            });
+        }
+
+        const dob = data.userProfile?.dob ? new Date(data.userProfile.dob) : new Date();
+        const age = new Date().getFullYear() - dob.getFullYear();
+
+        return {
+            checkDate: new Date(data.checkDate).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+            user: {
+                name: data.userProfile?.name || '-',
+                age: age,
+                job: data.userProfile?.occupation || '-',
+                domicile: data.userProfile?.city || '-',
+                dependents: data.userProfile?.childrenCount || 0,
+                maritalStatus: data.userProfile?.maritalStatus === 'MARRIED' ? 'Menikah' : 'Lajang'
+            },
+            spouse: data.spouseProfile ? {
+                name: data.spouseProfile.name,
+                age: data.spouseProfile.dob ? new Date().getFullYear() - new Date(data.spouseProfile.dob).getFullYear() : '-',
+            } : null,
+
+            fin: {
+                assetCash: fmt(assetCash),
+                assetPersonal: fmt(assetPersonal),
+                assetInvest: fmt(assetInvest),
+                totalAsset: fmt(totalAsset),
+                debtKPR: fmt(debtKPR),
+                debtKPM: fmt(debtKPM),
+                debtOther: fmt(debtOther),
+                debtProductive: fmt(debtProductive),
+                totalDebt: fmt(totalDebt),
+                netWorth: fmt(num(data.totalNetWorth)),
+                netWorthColor: num(data.totalNetWorth) >= 0 ? 'val-green' : 'val-red',
+                incomeFixed: fmt(incomeFixed),
+                incomeVariable: fmt(incomeVariable),
+                totalIncome: fmt(totalIncome),
+                expenseDebt: fmt(expenseDebt),
+                expenseInsurance: fmt(expenseInsurance),
+                expenseSaving: fmt(expenseSaving),
+                expenseLiving: fmt(expenseLiving),
+                totalExpense: fmt(totalExpense),
+                surplusDeficit: fmt(num(data.surplusDeficit)),
+                surplusColor: num(data.surplusDeficit) >= 0 ? 'val-green' : 'val-red',
+            },
+
+            score: analysis.score,
+            globalStatus: analysis.globalStatus,
+            scoreColor: analysis.score >= 80 ? '#22c55e' : analysis.score >= 50 ? '#eab308' : '#ef4444',
+            healthyCount: (analysis.ratios || []).filter((r: any) => r.statusColor.includes('GREEN')).length,
+            warningCount: (analysis.ratios || []).filter((r: any) => !r.statusColor.includes('GREEN')).length,
+
+            ratioPages: ratioPages
+        };
+    }
 }
