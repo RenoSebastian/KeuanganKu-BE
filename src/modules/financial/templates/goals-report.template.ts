@@ -36,9 +36,8 @@ const assets = {
 
     // Gunakan gambar yang relevan dengan Goals (misal: image 1 atau 2)
 
-    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')),
-
-    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))
+    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangtujuanlainnya1.webp')),
+    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangtujuanlainnya2.webp'))
 
 };
 

@@ -2,23 +2,23 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 function getImageBase64(filePath: string): string {
-    try {
-        if (!fs.existsSync(filePath)) return '';
-        const bitmap = fs.readFileSync(filePath);
-        const extension = path.extname(filePath).replace('.', '');
-        const mimeType = extension === 'svg' ? 'svg+xml' : extension;
-        return `data:image/${mimeType};base64,${bitmap.toString('base64')}`;
-    } catch (error) {
-        return '';
-    }
+  try {
+    if (!fs.existsSync(filePath)) return '';
+    const bitmap = fs.readFileSync(filePath);
+    const extension = path.extname(filePath).replace('.', '');
+    const mimeType = extension === 'svg' ? 'svg+xml' : extension;
+    return `data:image/${mimeType};base64,${bitmap.toString('base64')}`;
+  } catch (error) {
+    return '';
+  }
 }
 
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 const assets = {
-    logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
-    // Menggunakan gambar default yang tersedia (bisa diganti dengan gambar spesifik pensiun jika ada)
-    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')),
-    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))
+  logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
+  // Menggunakan gambar default yang tersedia (bisa diganti dengan gambar spesifik pensiun jika ada)
+  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanaharitua1.webp')),
+  headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanaharitua2.webp'))
 };
 
 export const pensionReportTemplate = `

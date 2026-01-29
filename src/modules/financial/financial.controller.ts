@@ -285,4 +285,54 @@ export class FinancialController {
     const userId = req.user.id;
     return this.financialService.deleteEducationPlan(userId, id);
   }
+
+  // [UPDATED] Endpoint Download Education PDF (Family Report)
+  // Perbaikan: Menggunakan relation 'stages' dan hitung total manual
+  @Get('education/pdf')
+  @ApiOperation({ summary: 'Download Education Plan PDF (All Children)' })
+  async downloadEducationPdf(@Req() req, @Res() res: express.Response) {
+    const userId = req.user.id;
+
+    // 1. Ambil Data (Stages included)
+    const educationPlans = await this.prisma.educationPlan.findMany({
+      where: { userId },
+      include: {
+        stages: { // [FIX] Gunakan 'stages', bukan 'calculation'
+          orderBy: { yearsToStart: 'asc' }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    if (!educationPlans || educationPlans.length === 0) {
+      throw new NotFoundException('Belum ada rencana pendidikan yang dibuat.');
+    }
+
+    // 2. Transform Data Structure (Manual Calculation)
+    // PDF service butuh struktur: { plan: ..., calculation: { totalFutureCost, monthlySaving, stagesBreakdown } }
+    const formattedData = educationPlans.map(p => {
+      // Hitung total manual dari stages
+      const totalFutureCost = p.stages.reduce((sum, stage) => sum + Number(stage.futureCost), 0);
+      const totalMonthlySaving = p.stages.reduce((sum, stage) => sum + Number(stage.monthlySaving), 0);
+
+      return {
+        plan: p,
+        calculation: {
+          totalFutureCost: totalFutureCost,
+          monthlySaving: totalMonthlySaving,
+          stagesBreakdown: p.stages // Mapping stages DB ke stagesBreakdown PDF
+        }
+      };
+    });
+
+    // 3. Generate PDF
+    const buffer = await this.pdfservice.generateEducationPdf(formattedData);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Education-Family-Plan.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
 }

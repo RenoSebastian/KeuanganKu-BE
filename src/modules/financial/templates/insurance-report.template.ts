@@ -17,8 +17,8 @@ const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 const assets = {
     logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'maxipro.webp')),
     // Menggunakan gambar header default (bisa diganti gambar asuransi spesifik)
-    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')),
-    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))
+    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangproteksi1.webp')),
+    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangproteksi2.webp'))
 };
 
 export const insuranceReportTemplate = `

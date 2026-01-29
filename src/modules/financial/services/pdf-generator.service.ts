@@ -6,6 +6,7 @@ import { budgetReportTemplate } from '../templates/budget-report.template';
 import { pensionReportTemplate } from '../templates/pension-report.template'; // Import template
 import { insuranceReportTemplate } from '../templates/insurance-report.template';
 import { goalReportTemplate } from '../templates/goals-report.template';
+import { educationReportTemplate } from '../templates/education-report.template';
 
 @Injectable()
 export class PdfGeneratorService {
@@ -478,4 +479,104 @@ export class PdfGeneratorService {
             }
         };
     }
+
+    // [NEW] Generate Education PDF (Family Report)
+    async generateEducationPdf(dataArray: any[]): Promise<Buffer> {
+        const template = handlebars.compile(educationReportTemplate);
+        const context = this.mapEducationData(dataArray);
+        const html = template(context);
+
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' }, // Margin handled by CSS @page
+        });
+
+        await browser.close();
+        return Buffer.from(pdfBuffer);
+    }
+
+    // [NEW] Mapper for Education (Array Input)
+    private mapEducationData(dataArray: any[]) {
+        const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+        const num = (n: any) => Number(n) || 0;
+
+        // Urutan Level agar rapi di PDF
+        const levelOrder = ['TK', 'SD', 'SMP', 'SMA', 'S1', 'S2'];
+
+        const plans = dataArray.map(item => {
+            const plan = item.plan;
+            const calc = item.calculation;
+
+            // 1. Hitung Usia Anak
+            const dob = new Date(plan.childDob);
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear();
+            if (today.getMonth() < dob.getMonth() || (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) {
+                age--;
+            }
+
+            // 2. Grouping Stages by Level
+            const stagesMap = new Map<string, any[]>();
+
+            (calc.stagesBreakdown || []).forEach((stage: any) => {
+                const level = stage.level;
+                if (!stagesMap.has(level)) {
+                    stagesMap.set(level, []);
+                }
+                stagesMap.get(level)?.push({
+                    costType: stage.costType === 'ENTRY' ? 'Uang Pangkal' : 'SPP Tahunan',
+                    yearsToStart: stage.yearsToStart,
+                    currentCost: fmt(stage.currentCost),
+                    futureCost: fmt(stage.futureCost),
+                    monthlySaving: fmt(stage.monthlySaving),
+                    rawFutureCost: Number(stage.futureCost) // Helper untuk subtotal
+                });
+            });
+
+            // 3. Convert Map to Array & Sort
+            const groupedStages = Array.from(stagesMap.entries())
+                .map(([levelName, items]) => {
+                    // Hitung subtotal per level untuk header card
+                    const subTotalRaw = items.reduce((sum, i) => sum + i.rawFutureCost, 0);
+                    const minYears = Math.min(...items.map(i => i.yearsToStart)); // Tahun mulai paling cepat
+
+                    return {
+                        levelName,
+                        items,
+                        subTotalCost: fmt(subTotalRaw),
+                        startIn: minYears
+                    };
+                })
+                .sort((a, b) => {
+                    return levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName);
+                });
+
+            return {
+                childName: plan.childName,
+                childAge: age,
+                uniYear: dob.getFullYear() + 18,
+                inflationRate: plan.inflationRate,
+                returnRate: plan.returnRate,
+                method: plan.method === 'GEOMETRIC' ? 'Geometrik (Bertahap)' : 'Statik',
+
+                totalFutureCost: fmt(calc.totalFutureCost),
+                monthlySaving: fmt(calc.monthlySaving),
+
+                groupedStages: groupedStages // Gunakan data yang sudah digroup
+            };
+        });
+
+        return {
+            plans: plans
+        };
+    }   
 }
