@@ -299,6 +299,8 @@ model PensionPlan {
 
 // --- FINANCIAL ENGINE: INSURANCE PLANNING (NEW) ---
 
+// Cari block model InsurancePlan dan tambahkan 2 field baru ini
+
 model InsurancePlan {
   id                 String   @id @default(uuid())
   userId             String   @map("user_id")
@@ -311,8 +313,11 @@ model InsurancePlan {
   monthlyExpense     Decimal  @map("monthly_expense") @db.Decimal(15, 2) 
   existingDebt       Decimal  @default(0) @map("existing_debt") @db.Decimal(15, 2) 
   existingCoverage   Decimal  @default(0) @map("existing_coverage") @db.Decimal(15, 2) 
-  
   protectionDuration Int      @default(10) @map("protection_duration") 
+
+  // [FIX] Tambahkan 2 Field ini agar error TypeScript hilang & Data tersimpan
+  inflationRate      Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate         Decimal  @default(7.0) @map("return_rate") @db.Decimal(5, 2)
 
   // Output Calculation
   coverageNeeded     Decimal  @map("coverage_needed") @db.Decimal(15, 2) 

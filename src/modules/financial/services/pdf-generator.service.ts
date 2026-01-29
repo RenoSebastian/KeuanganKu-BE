@@ -373,11 +373,21 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const debt = num(data.existingDebt);
         const existingCov = num(data.existingCoverage);
 
+        // Logic perhitungan fallback jika di DB belum tersimpan (backward compatibility)
         const incomeReplacement = num(data.calculation?.incomeReplacementValue) || (annualExpense * duration);
         const totalNeeded = num(data.calculation?.totalNeeded) || (incomeReplacement + debt);
         const gap = num(data.calculation?.coverageGap) || (totalNeeded - existingCov);
 
         const typeMap = { 'LIFE': 'Asuransi Jiwa (Life)', 'HEALTH': 'Asuransi Kesehatan', 'CRITICAL_ILLNESS': 'Sakit Kritis' };
+
+        // [FIX START] Ambil Rate dari Data DB & Hitung Nett Rate
+        const inflation = num(data.inflationRate);
+        const returnR = num(data.returnRate);
+
+        // Rumus: Return Investasi - Inflasi = Nett Rate
+        // toFixed(2) memastikan format desimal 2 angka (contoh: "12.00")
+        const calculatedNettRate = (returnR - inflation).toFixed(2);
+        // [FIX END]
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
@@ -393,7 +403,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             },
             calc: {
                 annualExpense: fmt(annualExpense),
-                nettRate: "2.00",
+                nettRate: calculatedNettRate, // <--- SUDAH DINAMIS (Tidak lagi "2.00")
                 incomeReplacementValue: fmt(incomeReplacement),
                 debtClearanceValue: fmt(debt),
                 totalNeeded: fmt(totalNeeded),

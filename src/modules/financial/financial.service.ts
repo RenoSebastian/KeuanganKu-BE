@@ -187,7 +187,7 @@ export class FinancialService {
       }
     };
   }
-  
+
 
   // ===========================================================================
   // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
@@ -301,7 +301,7 @@ export class FinancialService {
     // 1. Hitung Kebutuhan UP
     const result = calculateInsurancePlan(dto);
 
-    // 2. Simpan Rencana
+    // 2. Simpan Rencana ke Database
     const plan = await this.prisma.insurancePlan.create({
       data: {
         userId,
@@ -312,6 +312,11 @@ export class FinancialService {
         existingCoverage: dto.existingCoverage,
         protectionDuration: dto.protectionDuration,
 
+        // [FIX] Simpan Asumsi Makro (Inflasi & Return) agar Slider PDF Berfungsi
+        // Menggunakan nullish coalescing (??) untuk fallback ke default jika undefined
+        inflationRate: dto.inflationRate ?? 5,
+        returnRate: dto.returnRate ?? 7,
+
         // Hasil Perhitungan
         coverageNeeded: result.totalNeeded,
         recommendation: result.recommendation,
@@ -320,7 +325,7 @@ export class FinancialService {
 
     return { plan, calculation: result };
   }
-
+  
   // ===========================================================================
   // MODULE 5: CALCULATOR - GOAL PLAN (NEW)
   // ===========================================================================
