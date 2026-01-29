@@ -8,6 +8,7 @@ import { insuranceReportTemplate } from '../templates/insurance-report.template'
 import { goalReportTemplate } from '../templates/goals-report.template';
 import { educationReportTemplate } from '../templates/education-report.template';
 import { historyCheckupReportTemplate } from '../templates/history-checkup-report.template';
+import { calculateInsurancePlan } from '../utils/financial-math.util';
 
 @Injectable()
 export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
@@ -367,27 +368,33 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
+        // [FIX 2] HITUNG ULANG AGAR SINKRON DENGAN FE & DB
+        // Kita reconstruct DTO dari data database untuk dihitung ulang
+        const calculationResult = calculateInsurancePlan({
+            type: data.type,
+            dependentCount: num(data.dependentCount),
+            monthlyExpense: num(data.monthlyExpense),
+            existingDebt: num(data.existingDebt),
+            existingCoverage: num(data.existingCoverage),
+            protectionDuration: num(data.protectionDuration),
+            inflationRate: num(data.inflationRate),
+            returnRate: num(data.returnRate)
+        });
+
+        // Ambil hasil perhitungan yang akurat (TVM Based)
+        const incomeReplacement = calculationResult.incomeReplacementValue;
+        const totalNeeded = calculationResult.totalNeeded;
+        const gap = calculationResult.coverageGap;
+        const calculatedNettRate = calculationResult.nettRatePercentage; // Ambil langsung dari hasil hitungan
+
+        // Data Display
         const monthlyExpense = num(data.monthlyExpense);
         const annualExpense = monthlyExpense * 12;
         const duration = num(data.protectionDuration);
         const debt = num(data.existingDebt);
         const existingCov = num(data.existingCoverage);
 
-        // Logic perhitungan fallback jika di DB belum tersimpan (backward compatibility)
-        const incomeReplacement = num(data.calculation?.incomeReplacementValue) || (annualExpense * duration);
-        const totalNeeded = num(data.calculation?.totalNeeded) || (incomeReplacement + debt);
-        const gap = num(data.calculation?.coverageGap) || (totalNeeded - existingCov);
-
         const typeMap = { 'LIFE': 'Asuransi Jiwa (Life)', 'HEALTH': 'Asuransi Kesehatan', 'CRITICAL_ILLNESS': 'Sakit Kritis' };
-
-        // [FIX START] Ambil Rate dari Data DB & Hitung Nett Rate
-        const inflation = num(data.inflationRate);
-        const returnR = num(data.returnRate);
-
-        // Rumus: Return Investasi - Inflasi = Nett Rate
-        // toFixed(2) memastikan format desimal 2 angka (contoh: "12.00")
-        const calculatedNettRate = (returnR - inflation).toFixed(2);
-        // [FIX END]
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
@@ -399,14 +406,14 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 protectionDuration: duration,
                 existingDebt: fmt(debt),
                 existingCoverage: fmt(existingCov),
-                recommendation: data.recommendation || data.plan?.recommendation || '-'
+                recommendation: data.recommendation || '-'
             },
             calc: {
                 annualExpense: fmt(annualExpense),
-                nettRate: calculatedNettRate, // <--- SUDAH DINAMIS (Tidak lagi "2.00")
-                incomeReplacementValue: fmt(incomeReplacement),
+                nettRate: calculatedNettRate, // Menggunakan hasil hitungan (-10.00)
+                incomeReplacementValue: fmt(incomeReplacement), // [FIXED] Sekarang pasti 2.26 M
                 debtClearanceValue: fmt(debt),
-                totalNeeded: fmt(totalNeeded),
+                totalNeeded: fmt(totalNeeded), // [FIXED] Sekarang pasti 2.3 M
                 coverageGap: fmt(gap)
             }
         };
