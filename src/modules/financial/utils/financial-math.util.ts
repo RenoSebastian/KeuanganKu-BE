@@ -157,17 +157,17 @@ export const calculateFinancialHealth = (
   // #1. RASIO DANA DARURAT (A / P)
   const r1 = monthlyExpense > 0 ? totalLiquid / monthlyExpense : 0;
   let s1: any = 'RED';
-  let rec1 = 'Dana darurat sangat kurang (< 3 bulan). Risiko tinggi!';
+  let rec1 = 'Dana darurat Anda belum ideal. Disarankan mulai membangun dana darurat secara bertahap dari penghasilan bulanan hingga mencapai minimal 3–6 kali pengeluaran.';
 
   if (r1 >= 3 && r1 <= 6) {
     s1 = 'GREEN_DARK';
-    rec1 = 'Ideal (3-6 bulan).';
+    rec1 = 'Dana darurat Anda berada pada kondisi ideal dan telah memberikan perlindungan keuangan yang memadai.';
   } else if (r1 > 6 && r1 <= 12) {
     s1 = 'GREEN_LIGHT';
-    rec1 = 'Aman, tapi agak berlebih (7-12 bulan).';
+    rec1 = 'Kondisi dana darurat masih tergolong baik. Apabila Anda belum memiliki investasi, sebagian dana ini dapat mulai dialokasikan ke instrumen investasi berisiko rendah–menengah seperti obligasi atau logam mulia.';
   } else if (r1 > 12) {
     s1 = 'YELLOW';
-    rec1 = 'Terlalu banyak uang menganggur (> 12 bulan). Investasikan ke instrumen produktif.';
+    rec1 = 'Dana darurat Anda sangat memadai. Apabila belum memiliki investasi, disarankan mengalokasikan sebagian dana ke instrumen investasi jangka menengah–panjang seperti reksa dana atau saham.';
   } else {
     s1 = 'RED'; // < 3
   }
@@ -184,17 +184,17 @@ export const calculateFinancialHealth = (
   // #2. RASIO LIKUIDITAS vs KEKAYAAN BERSIH (A / H)
   const r2 = netWorth > 0 ? (totalLiquid / netWorth) * 100 : 0;
   let s2: any = 'RED';
-  let rec2 = 'Aset likuid terlalu sedikit (< 15%). Susah cairkan uang.';
+  let rec2 = 'Likuiditas Anda kurang ideal. Disarankan meningkatkan aset likuid agar keuangan lebih fleksibel dan aman terhadap kondisi darurat.';
 
   if (r2 > 50) {
     s2 = 'GREEN_DARK'; // Logic disesuaikan agar >50% hijau tua (sangat likuid)
-    rec2 = 'Sangat likuid (> 50%).';
+    rec2 = 'Likuiditas Anda sangat tinggi. Kondisi ini aman, namun dapat menjadi kurang optimal apabila dana terlalu banyak mengendap dan belum dimanfaatkan untuk investasi.';
   } else if (r2 >= 15) { // Benchmark Min 15%
     s2 = 'GREEN_LIGHT';
-    rec2 = 'Cukup likuid (15-50%).';
+    rec2 = 'Kondisi likuiditas tergolong sangat baik dan seimbang antara keamanan dan potensi pertumbuhan.';
   } else if (r2 >= 10) {
     s2 = 'YELLOW';
-    rec2 = 'Agak ketat (10-15%).';
+    rec2 = 'Likuiditas Anda berada pada batas ideal minimum dan masih dalam kondisi sehat.';
   } else {
     s2 = 'RED'; // < 10
   }
@@ -214,14 +214,17 @@ export const calculateFinancialHealth = (
       ? (totalAnnualSaving / totalAnnualIncome) * 100
       : 0;
   let s3: any = 'RED';
-  let rec3 = 'Kurang menabung (< 10%). Masa depan terancam.';
+  let rec3 = 'Rasio tabungan belum ideal. Disarankan meninjau kembali pengeluaran dan mulai meningkatkan porsi tabungan secara bertahap.';
 
-  if (r3 >= 20) {
+  if (r3 >= 30) {
     s3 = 'GREEN_DARK';
-    rec3 = 'Excellent! Menabung > 20%.';
-  } else if (r3 >= 10) {
+    rec3 = 'Tingkat menabung sangat baik. Anda memiliki disiplin keuangan yang kuat dan ruang yang besar untuk mencapai tujuan finansial lebih cepat.';
+  } else if (r3 >= 20) {
     s3 = 'GREEN_LIGHT';
-    rec3 = 'Sudah ideal (10-20%).';
+    rec3 = 'Rasio tabungan tergolong baik dan menunjukkan perencanaan keuangan yang matang.';
+  } else if (r3 <= 10){
+    s3 = 'YELLOW';
+    rec3 = 'Rasio tabungan sudah memenuhi standar minimal dan berada pada kondisi sehat.'
   } else {
     s3 = 'RED'; // < 10
   }
@@ -240,12 +243,15 @@ export const calculateFinancialHealth = (
   let s4: any = 'RED';
   let rec4 = 'Bahaya! Utang > 50% Aset. Risiko kebangkrutan.';
 
-  if (r4 < 30) {
+  if (r4 <= 15) {
     s4 = 'GREEN_DARK';
-    rec4 = 'Sangat sehat. Utang sangat kecil (< 30%).';
-  } else if (r4 <= 50) {
+    rec4 = 'Struktur utang sangat sehat dan risiko keuangan relatif rendah.';
+  } else if (r4 <= 35) {
     s4 = 'GREEN_LIGHT';
-    rec4 = 'Masih wajar (30-50%).';
+    rec4 = 'Struktur utang masih aman dan berada dalam kondisi yang terkontrol.';
+  } else if (r4 <= 50) {
+    s4 = 'YELLOW';
+    rec4 = 'Utang mulai mendekati batas ideal. Disarankan berhati-hati dalam menambah utang baru.';
   } else {
     s4 = 'RED'; // > 50
   }
@@ -265,14 +271,17 @@ export const calculateFinancialHealth = (
       ? (totalAnnualInstallment / totalAnnualIncome) * 100
       : 0;
   let s5: any = 'RED';
-  let rec5 = 'Overleverage! Cicilan > 35% penghasilan.';
+  let rec5 = 'Beban cicilan masih dalam batas wajar, namun perlu dikelola dengan disiplin.';
 
-  if (r5 < 30) {
+  if (r5 < 10) {
     s5 = 'GREEN_DARK';
-    rec5 = 'Beban cicilan aman (< 30%).';
+    rec5 = 'Beban cicilan sangat ringan dan memberikan ruang besar untuk menabung dan berinvestasi.';
+  } else if (r5 <= 15) {
+    s5 = 'GREEN_LIGHT';
+    rec5 = 'Beban cicilan masih sangat aman dan sehat.';
   } else if (r5 <= 35) {
     s5 = 'YELLOW';
-    rec5 = 'Waspada (30-35%). Jangan tambah utang.';
+    rec5 = 'Beban cicilan masih dalam batas wajar, namun perlu dikelola dengan disiplin.';
   } else {
     s5 = 'RED'; // > 35
   }
@@ -292,13 +301,19 @@ export const calculateFinancialHealth = (
       ? (totalConsumptiveInstallment / totalAnnualIncome) * 100
       : 0;
   let s6: any = 'RED';
-  let rec6 = 'Boros! Cicilan konsumtif > 15%. Stop hutang baru.';
+  let rec6 = 'Utang konsumtif terlalu tinggi dan berisiko mengganggu kesehatan keuangan jangka panjang.';
 
-  if (r6 <= 15) {
+  if (r6 <= 5) {
     s6 = 'GREEN_DARK';
-    rec6 = 'Terkendali (<= 15%).';
+    rec6 = 'Utang konsumtif sangat terkendali dan menunjukkan perilaku keuangan yang disiplin.';
+  } else if ( r6 <= 10 ){
+    s6 = 'GREEN_LIGHT';
+    rec6 = 'Utang konsumtif masih dalam kondisi aman.';
+  } else if (r6 <= 15) {
+    s6 = 'YELLOW'
+    rec6 = 'Utang konsumtif mendekati batas ideal. Perlu pengendalian agar tidak meningkat.'
   } else {
-    s6 = 'RED'; // > 15
+    s6 = 'RED';
   }
 
   ratios.push({
@@ -313,14 +328,17 @@ export const calculateFinancialHealth = (
   // #7. RASIO ASET INVESTASI vs KEKAYAAN BERSIH (C / H)
   const r7 = netWorth > 0 ? (totalInvestment / netWorth) * 100 : 0;
   let s7: any = 'RED';
-  let rec7 = 'Aset mayoritas konsumtif. Tingkatkan investasi.';
+  let rec7 = 'Sebagian besar kekayaan belum produktif. Perlu perencanaan investasi yang lebih terstruktur.';
 
   if (r7 >= 50) {
     s7 = 'GREEN_DARK';
-    rec7 = 'Portofolio produktif (> 50%).';
+    rec7 = 'Struktur kekayaan sangat produktif dan mendukung tujuan keuangan jangka panjang.';
   } else if (r7 >= 25) {
+    s7 = 'GREEN_LIGHT';
+    rec7 = 'Kondisi cukup baik, namun masih ada ruang untuk meningkatkan porsi aset produktif.';
+  } else if (r7 >= 10) {
     s7 = 'YELLOW'; // Warning jika di bawah 50 tapi diatas 25
-    rec7 = 'Mulai bertumbuh (25-50%).';
+    rec7 = 'Aset produktif masih relatif kecil. Disarankan mulai meningkatkan investasi secara bertahap.';
   } else {
     s7 = 'RED'; // < 25
   }
@@ -337,14 +355,17 @@ export const calculateFinancialHealth = (
   // #8. RASIO SOLVABILITAS (H / D)
   const r8 = totalAssets > 0 ? (netWorth / totalAssets) * 100 : 0;
   let s8: any = 'RED';
-  let rec8 = 'Risiko kebangkrutan tinggi! Modal sendiri < 30%.';
+  let rec8 = 'Risiko keuangan tinggi. Diperlukan perencanaan keuangan yang lebih serius dan terarah.';
 
-  if (r8 >= 50) {
+  if (r8 >= 75) {
     s8 = 'GREEN_DARK';
-    rec8 = 'Sehat (> 50%).';
-  } else if (r8 >= 30) {
+    rec8 = 'Kondisi solvabilitas sangat kuat dan risiko kebangkrutan sangat rendah.';
+  } else if (r8 >= 50) {
+    s8 = 'GREEN_LIGHT';
+    rec8 = 'Kondisi solvabilitas baik dan masih dalam batas aman.';
+  } else if (r8 >= 25) { 
     s8 = 'YELLOW';
-    rec8 = 'Cukup sehat (30-50%).';
+    rec8 = 'Kondisi mulai rentan. Disarankan memperkuat aset atau mengurangi utang.';
   } else {
     s8 = 'RED'; // < 30
   }

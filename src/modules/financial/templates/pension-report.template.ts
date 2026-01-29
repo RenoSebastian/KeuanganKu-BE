@@ -3,12 +3,27 @@ import * as path from 'path';
 
 function getImageBase64(filePath: string): string {
   try {
-    if (!fs.existsSync(filePath)) return '';
+    if (!fs.existsSync(filePath)) {
+      console.error(`[PDF] File not found: ${filePath}`);
+      return '';
+    }
     const bitmap = fs.readFileSync(filePath);
-    const extension = path.extname(filePath).replace('.', '');
-    const mimeType = extension === 'svg' ? 'svg+xml' : extension;
-    return `data:image/${mimeType};base64,${bitmap.toString('base64')}`;
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+
+    // Mapping mime type yang lebih akurat
+    let mimeType = '';
+    switch (extension) {
+      case 'webp': mimeType = 'image/webp'; break;
+      case 'png': mimeType = 'image/png'; break;
+      case 'jpg':
+      case 'jpeg': mimeType = 'image/jpeg'; break;
+      case 'svg': mimeType = 'image/svg+xml'; break;
+      default: mimeType = 'image/png';
+    }
+
+    return `data:${mimeType};base64,${bitmap.toString('base64')}`;
   } catch (error) {
+    console.error(`[PDF] Error base64: ${error.message}`);
     return '';
   }
 }
@@ -31,6 +46,7 @@ export const pensionReportTemplate = `
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
     
     :root {
+      --white: #ffffff;
       --primary: #0e7490;      /* Cyan 700 */
       --primary-dark: #155e75; /* Cyan 800 */
       --secondary: #64748b;    /* Slate 500 */
@@ -78,11 +94,22 @@ export const pensionReportTemplate = `
       border-bottom-left-radius: 20px; background-color: var(--secondary);
     }
     .h-brand-box {
-      background-color: var(--primary-dark); color: white;
-      display: flex; align-items: center; justify-content: center; gap: 10px;
-      border-bottom-right-radius: 20px;
+        background-color: var(--white);
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 12px;
+        border-bottom-right-radius: 20px;
+        padding: 10px; /* Tambah padding agar logo tidak mepet */
     }
-    .logo-maxipro { height: 24px; width: auto; filter: brightness(0) invert(1); }
+   
+    .logo-maxipro { 
+    height: 88px; /* Sesuaikan ukuran */
+    width: auto; 
+    display: block;
+    }
+
     .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; }
     .main-heading { font-family: 'Playfair Display', serif; font-size: 32px; line-height: 1; margin: 0; }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
@@ -156,7 +183,6 @@ export const pensionReportTemplate = `
       <div class="h-image-left-bottom"></div>
       <div class="h-brand-box">
         <img src="${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
-        <span class="brand-text">KEUANGANKU</span>
       </div>
     </div>
 
