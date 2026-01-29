@@ -23,7 +23,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED] Ganti networkidle0 ke domcontentloaded untuk mencegah timeout karena font/network request
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -139,7 +144,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED]
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -223,7 +233,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED]
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -317,7 +332,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED]
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -394,7 +414,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED]
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -493,7 +518,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED]
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -594,7 +624,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        // [OPTIMIZED]
+        await page.setContent(html, {
+            waitUntil: 'domcontentloaded',
+            timeout: 60000
+        });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
