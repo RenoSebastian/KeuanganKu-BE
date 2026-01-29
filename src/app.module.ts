@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_INTERCEPTOR } from '@nestjs/core';
@@ -18,6 +18,7 @@ import { SearchModule } from './modules/search/search.module';
 // --- ADDED: Logging Imports ---
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './common/configs/winston.config';
+import { MasterDataModule } from './modules/master-data/master-data.module';
 
 @Module({
   imports: [
@@ -36,6 +37,7 @@ import { winstonConfig } from './common/configs/winston.config';
     MarketModule,
     DirectorModule,
     SearchModule,
+    MasterDataModule,
   ],
   controllers: [],
   providers: [
@@ -46,4 +48,8 @@ import { winstonConfig } from './common/configs/winston.config';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    throw new Error('Method not implemented.');
+  }
+}

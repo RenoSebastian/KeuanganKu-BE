@@ -87,22 +87,26 @@ export class UsersService {
 
   // 2. Create User (Admin)
   async createUser(dto: CreateUserDto) {
-    // Cek duplikat email
-    const existing = await this.prisma.user.findUnique({
-      where: { email: dto.email },
+    // 1. Cek duplikat Email atau NIP
+    const existing = await this.prisma.user.findFirst({
+      where: {
+        OR: [{ email: dto.email }, { nip: dto.nip }],
+      },
     });
-    if (existing) throw new BadRequestException('Email already exists');
+    if (existing) {
+      throw new BadRequestException('Email atau NIP sudah terdaftar');
+    }
 
-    // Hash Password
+    // 2. Hash Password
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    // Prepare Data
-    // [FIX] Exclude jobTitle karena tidak ada di schema User
+    // 3. Prepare Data
+    // Exclude field yang tidak ada di schema User (jobTitle)
     const { password, dateOfBirth, jobTitle, ...rest } = dto;
 
     const data: any = {
-      ...rest,
+      ...rest, // Ini sudah membawa 'unitKerjaId' dan 'nip'
       passwordHash: hashedPassword,
     };
 
@@ -110,27 +114,25 @@ export class UsersService {
       data.dateOfBirth = new Date(dateOfBirth);
     }
 
-    // Insert DB
-    const newUser = await this.prisma.user.create({
-      data,
-    });
-
-    // Sync Search
-    this.syncToSearch(newUser);
-
-    const { passwordHash, ...result } = newUser;
-    return result;
+    try {
+      const newUser = await this.prisma.user.create({ data });
+      this.syncToSearch(newUser);
+      const { passwordHash, ...result } = newUser;
+      return result;
+    } catch (error) {
+      if (error.code === 'P2003') {
+        throw new BadRequestException('Unit Kerja ID tidak valid');
+      }
+      throw error;
+    }
   }
 
-  // 3. Get Detail User (Admin)
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { unitKerja: true }, // Include relasi detail
+      include: { unitKerja: true },
     });
-
     if (!user) throw new NotFoundException('User not found');
-
     const { passwordHash, ...result } = user;
     return result;
   }
@@ -162,48 +164,34 @@ export class UsersService {
   // HELPERS (Shared Logic)
   // =================================================================
 
-  /**
-   * Helper untuk menangani update data (Parsing Date, Hashing Password, dll)
-   * Digunakan oleh editUser (Self) dan updateUser (Admin)
-   */
   private async processUpdate(userId: string, dto: any) {
     try {
-      // [FIX] Exclude jobTitle karena tidak ada di schema
       const { password, dateOfBirth, dependentCount, jobTitle, ...restData } = dto;
-
       const updatePayload: any = { ...restData };
 
-      // [FIX] Handle Dependent Count (Pastikan Int)
       if (dependentCount !== undefined) {
         updatePayload.dependentCount = Number(dependentCount);
       }
-
-      // [FIX] Handle Date (String YYYY-MM-DD -> Date Object)
       if (dateOfBirth) {
         updatePayload.dateOfBirth = new Date(dateOfBirth);
       }
-
-      // [FIX] Handle Password Hash (Jika ada request ganti password)
       if (password) {
         const salt = await bcrypt.genSalt();
         updatePayload.passwordHash = await bcrypt.hash(password, salt);
       }
 
-      // Update DB
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
         data: updatePayload,
       });
 
-      // Sync Search Engine
       this.syncToSearch(updatedUser);
-
-      // Return clean data
       const { passwordHash, ...result } = updatedUser;
       return result;
     } catch (error) {
       this.logger.error(`Failed update user ${userId}: ${error.message}`);
       if (error.code === 'P2025') throw new NotFoundException('User not found');
+      if (error.code === 'P2003') throw new BadRequestException('Unit Kerja ID tidak valid');
       throw error;
     }
   }

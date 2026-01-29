@@ -8,6 +8,7 @@ import {
     IsNumber,
     IsOptional,
     IsString,
+    IsUUID,
     MinLength,
 } from 'class-validator';
 
@@ -22,6 +23,11 @@ export class CreateUserDto {
     @IsNotEmpty()
     email: string;
 
+    @ApiProperty({ example: '12345678', description: 'NIP Pegawai (Harus Unik)' })
+    @IsString()
+    @IsNotEmpty()
+    nip: string;
+
     @ApiProperty({ example: 'Rahasia123', description: 'Password awal (min 6 karakter)' })
     @IsString()
     @IsNotEmpty()
@@ -33,7 +39,12 @@ export class CreateUserDto {
     @IsNotEmpty()
     role: Role;
 
-    @ApiPropertyOptional({ example: 'Staff IT', description: 'Jabatan pegawai' })
+    @ApiProperty({ example: 'uuid-v4', description: 'ID Unit Kerja (Wajib)' })
+    @IsUUID()
+    @IsNotEmpty()
+    unitKerjaId: string;
+
+    @ApiPropertyOptional({ example: 'Staff IT', description: 'Jabatan pegawai (Opsional karena tidak masuk DB User)' })
     @IsOptional()
     @IsString()
     jobTitle?: string;
