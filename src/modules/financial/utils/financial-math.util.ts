@@ -222,7 +222,7 @@ export const calculateFinancialHealth = (
   } else if (r3 >= 20) {
     s3 = 'GREEN_LIGHT';
     rec3 = 'Rasio tabungan tergolong baik dan menunjukkan perencanaan keuangan yang matang.';
-  } else if (r3 <= 10){
+  } else if (r3 <= 10) {
     s3 = 'YELLOW';
     rec3 = 'Rasio tabungan sudah memenuhi standar minimal dan berada pada kondisi sehat.'
   } else {
@@ -306,7 +306,7 @@ export const calculateFinancialHealth = (
   if (r6 <= 5) {
     s6 = 'GREEN_DARK';
     rec6 = 'Utang konsumtif sangat terkendali dan menunjukkan perilaku keuangan yang disiplin.';
-  } else if ( r6 <= 10 ){
+  } else if (r6 <= 10) {
     s6 = 'GREEN_LIGHT';
     rec6 = 'Utang konsumtif masih dalam kondisi aman.';
   } else if (r6 <= 15) {
@@ -363,7 +363,7 @@ export const calculateFinancialHealth = (
   } else if (r8 >= 50) {
     s8 = 'GREEN_LIGHT';
     rec8 = 'Kondisi solvabilitas baik dan masih dalam batas aman.';
-  } else if (r8 >= 25) { 
+  } else if (r8 >= 25) {
     s8 = 'YELLOW';
     rec8 = 'Kondisi mulai rentan. Disarankan memperkuat aset atau mengurangi utang.';
   } else {
@@ -585,44 +585,46 @@ export const calculatePensionPlan = (data: CreatePensionDto) => {
  * Rumus sesuai dokumen: PVAD = PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
  * Dimana r = Nett Rate (Investasi - Inflasi).
  */
-export const calculateInsurancePlan = (data: CreateInsuranceDto) => { // Pastikan nama fungsi konsisten
+export const calculateInsurancePlan = (data: CreateInsuranceDto) => {
   const {
     monthlyExpense,
     existingDebt = 0,
     existingCoverage = 0,
     protectionDuration = 10,
-    // Default value jika user tidak isi (bisa disesuaikan dengan global setting)
+    // Nilai ini sekarang otomatis terisi dari Slider Frontend -> DTO -> Sini
     inflationRate = 5,
     returnRate = 7,
-    // Opsional: Biaya Duka (sesuai dokumen Poin 4.C), default 0 atau bisa diset misal 50jt
-    // Pastikan DTO juga update jika ingin field ini dinamis dari FE
-    funeralCost = 0
-  } = data as any; // Cast as any sementara jika DTO belum update
+  } = data;
+
+  // Handling field opsional yang mungkin belum ada di DTO (Biaya Duka)
+  // Kita ambil secara manual agar tidak error di TypeScript jika DTO belum diupdate untuk field ini
+  const funeralCost = (data as any).funeralCost || 0;
 
   // 1. Hitung Bunga Riil / Nett Rate (r)
-  // Dokumen Poin 4.B.5: Nett interest = Target investasi - Inflasi
+  // Nett interest = Target investasi - Inflasi
   const iRate = inflationRate / 100;
   const rRate = returnRate / 100;
   const nettRate = rRate - iRate;
 
-  // 2. Hitung Income Replacement (PVAD)
-  // Dokumen Poin 4.B.1: PMT harus Tahunan
+  // 2. Hitung Income Replacement (PVAD - Present Value Annuity Due)
+  // Income tahunan yang harus digantikan
   const annualExpense = monthlyExpense * 12;
   const n = protectionDuration;
 
   let incomeReplacementValue = 0;
 
   if (nettRate === 0) {
-    // KASUS KHUSUS: Jika Investasi == Inflasi, atau keduanya 0
-    // Maka hitungannya linear (Bunga impas dengan kenaikan harga)
+    // KASUS KHUSUS: Jika Investasi == Inflasi (Nett Rate 0)
+    // Hitungan linear: Pengeluaran Tahunan x Durasi
     incomeReplacementValue = annualExpense * n;
   } else {
     // RUMUS UTAMA (PVAD)
-    // PVAD = PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
+    // Rumus: PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
+
     // Faktor Diskonto Anuitas
     const discountFactor = (1 - Math.pow(1 + nettRate, -n)) / nettRate;
 
-    // Dikali (1+r) karena asumsi penarikan di AWAL tahun (Due)
+    // Dikali (1+nettRate) karena asumsi penarikan dana dilakukan di AWAL tahun (Due)
     incomeReplacementValue = annualExpense * discountFactor * (1 + nettRate);
   }
 
@@ -630,17 +632,17 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto) => { // Pastika
   const debtClearanceValue = existingDebt;
 
   // 4. Biaya Duka & Lainnya
-  // (Jika ada input dari FE, akan dihitung disini)
   const otherNeeds = funeralCost;
 
   // 5. Total Kebutuhan UP (Gross)
+  // Total = Dana Hidup + Lunasi Hutang + Biaya Lain
   const totalNeeded = incomeReplacementValue + debtClearanceValue + otherNeeds;
 
-  // 6. Hitung Gap (Kekurangan)
-  // Dikurangi asuransi yang sudah ada (Poin 4.D)
+  // 6. Hitung Gap (Kekurangan Proteksi)
+  // Total Kebutuhan - Asuransi yang Sudah Punya
   const coverageGap = Math.max(0, totalNeeded - existingCoverage);
 
-  // 7. Rekomendasi
+  // 7. Buat Rekomendasi (String)
   let recommendation = "";
   if (coverageGap <= 0) {
     recommendation = "Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Income Replacement & Pelunasan Hutang).";
@@ -651,16 +653,16 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto) => { // Pastika
 
   return {
     // Detail Rincian untuk ditampilkan di FE
-    annualExpense,      // PMT
-    nettRatePercentage: (nettRate * 100).toFixed(2), // r dalam %
-    incomeReplacementValue, // Hasil PVAD (Dana Warisan Hidup)
-    debtClearanceValue,
-    otherNeeds,
+    annualExpense,          // Pengeluaran Tahunan
+    nettRatePercentage: (nettRate * 100).toFixed(2), // Nett Rate dalam %
+    incomeReplacementValue, // Dana Warisan Hidup (PVAD)
+    debtClearanceValue,     // Dana Pelunasan Hutang
+    otherNeeds,             // Biaya Duka/Lainnya
 
     // Hasil Akhir
-    totalNeeded,
-    coverageGap,
-    recommendation
+    totalNeeded,   // Total UP Ideal
+    coverageGap,   // Shortfall (Kekurangan)
+    recommendation // Saran Tekstual
   };
 };
 

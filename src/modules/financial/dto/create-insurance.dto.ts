@@ -36,4 +36,15 @@ export class CreateInsuranceDto {
   @Min(1)
   @Type(() => Number)
   protectionDuration?: number = 10; // Berapa tahun ingin diproteksi (Default 10 tahun)
+
+  // --- [FIX] PARAMETER TAMBAHAN AGAR SLIDER BERFUNGSI ---
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  inflationRate?: number = 5; // Default 5% jika tidak dikirim Frontend
+
+  @IsOptional()
+  @IsNumber()
+  @Type(() => Number)
+  returnRate?: number = 7; // Default 7% jika tidak dikirim Frontend
 }
