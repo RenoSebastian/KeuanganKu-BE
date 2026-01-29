@@ -3,7 +3,7 @@ import * as puppeteer from 'puppeteer';
 import * as handlebars from 'handlebars';
 import { checkupReportTemplate } from '../templates/checkup-report.template';
 import { budgetReportTemplate } from '../templates/budget-report.template';
-import { pensionReportTemplate } from '../templates/pension-report.template'; // Import template
+import { pensionReportTemplate } from '../templates/pension-report.template';
 import { insuranceReportTemplate } from '../templates/insurance-report.template';
 import { goalReportTemplate } from '../templates/goals-report.template';
 import { educationReportTemplate } from '../templates/education-report.template';
@@ -23,11 +23,9 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED] Ganti networkidle0 ke domcontentloaded untuk mencegah timeout karena font/network request
-        await page.setContent(html, {
+        await page.setContent(html, { 
             waitUntil: 'domcontentloaded',
-            timeout: 60000
+            timeout: 60000 
         });
 
         const pdfBuffer = await page.pdf({
@@ -57,7 +55,6 @@ export class PdfGeneratorService {
         const totalDebt = debtKPR + debtKPM + debtOther + debtProductive;
 
         // --- Grouping Arus Kas ---
-        // Asumsi data di DB adalah TAHUNAN (sesuai input wizard terakhir kita)
         const incomeFixed = num(data.incomeFixed);
         const incomeVariable = num(data.incomeVariable);
         const totalIncome = incomeFixed + incomeVariable;
@@ -88,13 +85,11 @@ export class PdfGeneratorService {
                 job: data.spouseProfile.occupation || '-'
             } : null,
 
-            // Financial Data Grouped
             fin: {
                 assetCash: fmt(assetCash),
                 assetPersonal: fmt(assetPersonal),
                 assetInvest: fmt(assetInvest),
                 totalAsset: fmt(totalAsset),
-
                 debtKPR: fmt(debtKPR),
                 debtKPM: fmt(debtKPM),
                 debtOther: fmt(debtOther),
@@ -102,11 +97,9 @@ export class PdfGeneratorService {
                 totalDebt: fmt(totalDebt),
                 netWorth: fmt(num(data.totalNetWorth)),
                 netWorthColor: num(data.totalNetWorth) >= 0 ? 'val-green' : 'val-red',
-
                 incomeFixed: fmt(incomeFixed),
                 incomeVariable: fmt(incomeVariable),
                 totalIncome: fmt(totalIncome),
-
                 expenseDebt: fmt(expenseDebt),
                 expenseInsurance: fmt(expenseInsurance),
                 expenseSaving: fmt(expenseSaving),
@@ -115,8 +108,6 @@ export class PdfGeneratorService {
                 surplusDeficit: fmt(num(data.surplusDeficit)),
                 surplusColor: num(data.surplusDeficit) >= 0 ? 'val-green' : 'val-red',
             },
-
-            // Score & Ratios
             score: data.healthScore,
             globalStatus: data.status,
             scoreColor: data.healthScore >= 80 ? '#22c55e' : data.healthScore >= 50 ? '#eab308' : '#ef4444',
@@ -131,14 +122,13 @@ export class PdfGeneratorService {
         };
     }
 
-    // [UPDATED] Method untuk Budgeting PDF
+    // [NEW] Method untuk Budgeting PDF
     async generateBudgetPdf(data: any): Promise<Buffer> {
         const template = handlebars.compile(budgetReportTemplate);
-
-        // Mapping data dengan struktur yang benar
+        
+        // Gunakan mapper yang sudah diperbaiki
         const context = this.mapBudgetData(data);
-
-        // Render HTML dengan data
+        
         const html = template(context);
 
         const browser = await puppeteer.launch({
@@ -147,11 +137,10 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED] Strategi loading agar tidak timeout
-        await page.setContent(html, {
-            waitUntil: 'domcontentloaded', // Lebih cepat daripada networkidle0
-            timeout: 60000 // 60 detik timeout
+        
+        await page.setContent(html, { 
+            waitUntil: 'domcontentloaded',
+            timeout: 60000 
         });
 
         const pdfBuffer = await page.pdf({
@@ -164,91 +153,70 @@ export class PdfGeneratorService {
         return Buffer.from(pdfBuffer);
     }
 
-    // [CRITICAL FIX] Mapper untuk Budgeting
-    // Memastikan struktur object sesuai dengan {{allocations.xx.value}} di template
+    // [UPDATED & FIXED] Mapper untuk Budgeting
     private mapBudgetData(data: any) {
+        // [CRITICAL FIX] Deteksi apakah data terbungkus dalam properti 'budget'
+        // Ini menangani kasus jika controller mengirim { budget: {...}, analysis: {...} }
+        const source = data.budget ? data.budget : data;
 
-        // Helper formatting yang aman (mencegah NaN/Undefined)
         const fmt = (n: any) => {
             const val = Number(n);
             if (isNaN(val)) return 'Rp 0';
-            return new Intl.NumberFormat('id-ID', {
-                style: 'currency',
-                currency: 'IDR',
-                maximumFractionDigits: 0
-            }).format(val);
+            return new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(val);
         };
-
-        // Helper konversi ke number
         const num = (n: any) => Number(n) || 0;
 
         // 1. Data Diri & Tanggal
-        // Mengambil data user dari relasi (pastikan include di controller/service)
-        const dob = data.user?.dateOfBirth ? new Date(data.user.dateOfBirth) : null;
+        // Ambil user dari source atau data root (tergantung struktur)
+        const user = source.user || data.user || {};
+        const dob = user.dateOfBirth ? new Date(user.dateOfBirth) : null;
         const age = dob ? new Date().getFullYear() - dob.getFullYear() : '-';
 
         // 2. Data Penghasilan
-        const fixedIncome = num(data.fixedIncome);
-        const variableIncome = num(data.variableIncome);
+        const fixedIncome = num(source.fixedIncome);
+        const variableIncome = num(source.variableIncome);
         const totalIncome = fixedIncome + variableIncome;
 
-        // 3. Perhitungan Alokasi (Berdasarkan FIXED INCOME)
-        // Logika 10-20-15-10-45
-        const allocProductiveDebt = fixedIncome * 0.20;
-        const allocConsumptiveDebt = fixedIncome * 0.15;
-        const allocInsurance = fixedIncome * 0.10;
-        const allocSaving = fixedIncome * 0.10;
-        const allocLiving = fixedIncome * 0.45;
+        // 3. Alokasi (GUNAKAN DATA DATABASE)
+        // Ambil langsung dari field DB jika ada, jika tidak (fallback) baru hitung manual.
+        // Ini menjamin angka PDF sama dengan angka yang tersimpan.
+        const allocProductiveDebt = source.productiveDebt !== undefined ? num(source.productiveDebt) : (fixedIncome * 0.20);
+        const allocConsumptiveDebt = source.consumptiveDebt !== undefined ? num(source.consumptiveDebt) : (fixedIncome * 0.15);
+        const allocInsurance = source.insurance !== undefined ? num(source.insurance) : (fixedIncome * 0.10);
+        const allocSaving = source.saving !== undefined ? num(source.saving) : (fixedIncome * 0.10);
+        const allocLiving = source.livingCost !== undefined ? num(source.livingCost) : (fixedIncome * 0.45);
 
         // 4. Kesimpulan
-        const totalBudget = allocProductiveDebt + allocConsumptiveDebt + allocInsurance + allocSaving + allocLiving;
-        const totalSurplus = variableIncome; // Variable income dianggap surplus murni
-
-        // [DEBUG LOG] - Cek di terminal backend saat generate
-        // console.log('[PDF GENERATOR] Fixed Income:', fixedIncome);
-        // console.log('[PDF GENERATOR] Alloc Living:', allocLiving);
+        const totalBudget = num(source.totalExpense) || (allocProductiveDebt + allocConsumptiveDebt + allocInsurance + allocSaving + allocLiving);
+        const totalSurplus = variableIncome;
 
         return {
-            period: `${data.month}/${data.year}`,
-            createdAt: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+            period: `${source.month}/${source.year}`,
+            createdAt: new Date(source.createdAt || new Date()).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
 
             user: {
-                name: data.user?.fullName || 'User',
+                name: user.fullName || 'User',
                 age: age
             },
 
-            // Bagian Income
+            // Penghasilan
             income: {
                 fixed: fmt(fixedIncome),
                 variable: fmt(variableIncome),
                 total: fmt(totalIncome)
             },
 
-            // Bagian Alokasi (Struktur Wajib Sama dengan Template)
+            // Anggaran Disarankan
+            // Struktur ini PASTI sesuai dengan template: {{allocations.productive.value}}
             allocations: {
-                productive: {
-                    label: 'Utang Produktif (20%)',
-                    value: fmt(allocProductiveDebt)
-                },
-                consumptive: {
-                    label: 'Utang Konsumtif (15%)',
-                    value: fmt(allocConsumptiveDebt)
-                },
-                insurance: {
-                    label: 'Premi Asuransi (10%)',
-                    value: fmt(allocInsurance)
-                },
-                saving: {
-                    label: 'Tabungan & Investasi (10%)',
-                    value: fmt(allocSaving)
-                },
-                living: {
-                    label: 'Biaya Hidup (45%)',
-                    value: fmt(allocLiving)
-                },
+                productive: { label: 'Utang Produktif (20%)', value: fmt(allocProductiveDebt) },
+                consumptive: { label: 'Utang Konsumtif (15%)', value: fmt(allocConsumptiveDebt) },
+                insurance: { label: 'Premi Asuransi (10%)', value: fmt(allocInsurance) },
+                saving: { label: 'Tabungan & Investasi (10%)', value: fmt(allocSaving) },
+                living: { label: 'Biaya Hidup (45%)', value: fmt(allocLiving) },
             },
 
-            // Bagian Kesimpulan
+            // Kesimpulan
             summary: {
                 totalBudget: fmt(totalBudget),
                 totalSurplus: fmt(totalSurplus)
@@ -268,12 +236,7 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED]
-        await page.setContent(html, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
-        });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -290,50 +253,28 @@ export class PdfGeneratorService {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // 1. Extract Raw Values from DB
         const currentAge = num(data.currentAge);
         const retirementAge = num(data.retirementAge);
         const lifeExpectancy = num(data.lifeExpectancy);
         const currentExpense = num(data.currentExpense);
         const currentSaving = num(data.currentSaving);
-        const inflationRate = num(data.inflationRate) / 100; // Convert percent to decimal
-        const returnRate = num(data.returnRate) / 100;       // Convert percent to decimal
+        const inflationRate = num(data.inflationRate) / 100; 
+        const returnRate = num(data.returnRate) / 100; 
 
-        // 2. Re-Calculate Logic (TVM) - Agar data di PDF lengkap
         const yearsToRetire = retirementAge - currentAge;
         const retirementDuration = lifeExpectancy - retirementAge;
-
-        // FV Pengeluaran Bulanan = PV * (1 + i)^n
         const futureMonthlyExpense = currentExpense * Math.pow(1 + inflationRate, yearsToRetire);
-
-        // FV Tabungan Saat Ini = PV * (1 + r)^n
         const fvExistingFund = currentSaving * Math.pow(1 + returnRate, yearsToRetire);
-
-        // Total Dana Dibutuhkan (Approximation: Future Monthly * 12 * Duration)
-        // Note: Rumus asli mungkin lebih kompleks (annuity), tapi kita pakai totalFundNeeded dari DB sebagai patokan utama jika ada.
-        // Jika data.totalFundNeeded ada, kita pakai itu. Jika tidak, kita hitung kasar.
-        const totalFundNeeded = num(data.totalFundNeeded) > 0
-            ? num(data.totalFundNeeded)
-            : (futureMonthlyExpense * 12 * retirementDuration);
-
+        const totalFundNeeded = num(data.totalFundNeeded) > 0 ? num(data.totalFundNeeded) : (futureMonthlyExpense * 12 * retirementDuration);
         const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
 
-        // 3. User Data
-        // Handling relasi user profile (sesuai schema User yang tidak punya userProfile relation terpisah tapi field langsung)
-        // Cek controller untuk memastikan include apa yang dikirim.
-        // Asumsi Controller mengirim: include: { user: true }
         const userProfile = data.user || {};
-
-        const dob = userProfile.dateOfBirth ? new Date(userProfile.dateOfBirth) : null;
-        // Jika age dihitung dari DOB, atau pakai currentAge dari plan
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-
             user: {
                 name: userProfile.fullName || 'User',
             },
-
             plan: {
                 currentAge: currentAge,
                 retirementAge: retirementAge,
@@ -344,7 +285,6 @@ export class PdfGeneratorService {
                 returnRate: (returnRate * 100).toFixed(1),
                 monthlySaving: fmt(data.monthlySaving)
             },
-
             calc: {
                 yearsToRetire: yearsToRetire,
                 retirementDuration: retirementDuration,
@@ -367,12 +307,7 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED]
-        await page.setContent(html, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
-        });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -388,21 +323,16 @@ export class PdfGeneratorService {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // 1. Raw Data & Calculation Re-check (Consistency)
         const monthlyExpense = num(data.monthlyExpense);
         const annualExpense = monthlyExpense * 12;
         const duration = num(data.protectionDuration);
         const debt = num(data.existingDebt);
         const existingCov = num(data.existingCoverage);
 
-        // Asumsi inflasi vs return investasi (Net Rate 2% konservatif)
-        // Rumus PV Annuity Due (Simple approximation untuk display)
-        // Real calculation mungkin lebih kompleks di service utama, tapi untuk display kita pakai data DB jika ada
         const incomeReplacement = num(data.calculation?.incomeReplacementValue) || (annualExpense * duration);
         const totalNeeded = num(data.calculation?.totalNeeded) || (incomeReplacement + debt);
         const gap = num(data.calculation?.coverageGap) || (totalNeeded - existingCov);
 
-        // Translate Type
         const typeMap = {
             'LIFE': 'Asuransi Jiwa (Life)',
             'HEALTH': 'Asuransi Kesehatan',
@@ -411,11 +341,9 @@ export class PdfGeneratorService {
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-
             user: {
                 name: data.user?.fullName || 'User',
             },
-
             plan: {
                 typeLabel: typeMap[data.type] || data.type,
                 dependentCount: data.dependentCount,
@@ -425,10 +353,9 @@ export class PdfGeneratorService {
                 existingCoverage: fmt(existingCov),
                 recommendation: data.recommendation || data.plan?.recommendation || '-'
             },
-
             calc: {
                 annualExpense: fmt(annualExpense),
-                nettRate: "2.00", // Default assumption text
+                nettRate: "2.00",
                 incomeReplacementValue: fmt(incomeReplacement),
                 debtClearanceValue: fmt(debt),
                 totalNeeded: fmt(totalNeeded),
@@ -449,12 +376,7 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED]
-        await page.setContent(html, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
-        });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -471,35 +393,21 @@ export class PdfGeneratorService {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // 1. Raw Data Extraction & Reverse Calculation
-        const targetAmount = num(data.targetAmount); // Ini adalah Future Value (FV)
+        const targetAmount = num(data.targetAmount);
         const inflationRate = num(data.inflationRate) / 100;
         const returnRate = num(data.returnRate) / 100;
 
-        // Hitung Durasi (Years) dari targetDate - createdAt (atau now)
         const startDate = data.createdAt ? new Date(data.createdAt) : new Date();
         const endDate = data.targetDate ? new Date(data.targetDate) : new Date();
 
-        // Hitung selisih tahun (secara kasar untuk display)
         let years = endDate.getFullYear() - startDate.getFullYear();
-        // Koreksi jika bulan belum sampai
         if (endDate.getMonth() < startDate.getMonth()) years--;
-        // Minimal 1 tahun agar tidak error pembagian
         years = Math.max(1, years);
 
-        // Hitung Current Cost (PV)
-        // Rumus: PV = FV / (1 + i)^n
-        // Kita balik rumus FV = PV * (1+i)^n
         const currentCost = targetAmount / Math.pow(1 + inflationRate, years);
+        const futureValue = targetAmount; 
 
-        // 2. Re-Calculation for Display Consistency
-        const futureValue = targetAmount; // FV sudah ada di DB
-
-        // Monthly Payment (PMT)
-        // Kita gunakan data.monthlySaving dari DB jika ada (hasil hitungan akurat saat save)
-        // Jika tidak ada, kita hitung ulang.
         let monthlySaving = num(data.monthlySaving);
-
         if (monthlySaving === 0) {
             const r = returnRate / 12;
             const n = years * 12;
@@ -510,29 +418,22 @@ export class PdfGeneratorService {
             }
         }
 
-        // Inflasi Effect (Selisih FV - PV)
         const inflationEffect = futureValue - currentCost;
-
-        // 3. Mapping Return
-        // Handling User Profile (jika include user dilakukan di controller)
         const userProfile = data.user || {};
 
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-
             user: {
-                name: userProfile.fullName || 'User', // Sesuaikan dengan schema User Anda
+                name: userProfile.fullName || 'User', 
             },
-
             goal: {
                 name: data.goalName || 'Tujuan Keuangan',
-                currentCost: fmt(currentCost), // Menampilkan estimasi harga hari ini
+                currentCost: fmt(currentCost), 
                 years: years,
                 inflationRate: (inflationRate * 100).toFixed(1),
                 returnRate: (returnRate * 100).toFixed(1),
                 inflationEffect: fmt(inflationEffect)
             },
-
             calc: {
                 futureValue: fmt(futureValue),
                 monthlySaving: fmt(monthlySaving),
@@ -553,17 +454,12 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED]
-        await page.setContent(html, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
-        });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
             printBackground: true,
-            margin: { top: '0', right: '0', bottom: '0', left: '0' }, // Margin handled by CSS @page
+            margin: { top: '0', right: '0', bottom: '0', left: '0' }, 
         });
 
         await browser.close();
@@ -575,14 +471,12 @@ export class PdfGeneratorService {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // Urutan Level agar rapi di PDF
         const levelOrder = ['TK', 'SD', 'SMP', 'SMA', 'S1', 'S2'];
 
         const plans = dataArray.map(item => {
             const plan = item.plan;
             const calc = item.calculation;
 
-            // 1. Hitung Usia Anak
             const dob = new Date(plan.childDob);
             const today = new Date();
             let age = today.getFullYear() - dob.getFullYear();
@@ -590,7 +484,6 @@ export class PdfGeneratorService {
                 age--;
             }
 
-            // 2. Grouping Stages by Level
             const stagesMap = new Map<string, any[]>();
 
             (calc.stagesBreakdown || []).forEach((stage: any) => {
@@ -604,16 +497,14 @@ export class PdfGeneratorService {
                     currentCost: fmt(stage.currentCost),
                     futureCost: fmt(stage.futureCost),
                     monthlySaving: fmt(stage.monthlySaving),
-                    rawFutureCost: Number(stage.futureCost) // Helper untuk subtotal
+                    rawFutureCost: Number(stage.futureCost) 
                 });
             });
 
-            // 3. Convert Map to Array & Sort
             const groupedStages = Array.from(stagesMap.entries())
                 .map(([levelName, items]) => {
-                    // Hitung subtotal per level untuk header card
                     const subTotalRaw = items.reduce((sum, i) => sum + i.rawFutureCost, 0);
-                    const minYears = Math.min(...items.map(i => i.yearsToStart)); // Tahun mulai paling cepat
+                    const minYears = Math.min(...items.map(i => i.yearsToStart)); 
 
                     return {
                         levelName,
@@ -633,11 +524,9 @@ export class PdfGeneratorService {
                 inflationRate: plan.inflationRate,
                 returnRate: plan.returnRate,
                 method: plan.method === 'GEOMETRIC' ? 'Geometrik (Bertahap)' : 'Statik',
-
                 totalFutureCost: fmt(calc.totalFutureCost),
                 monthlySaving: fmt(calc.monthlySaving),
-
-                groupedStages: groupedStages // Gunakan data yang sudah digroup
+                groupedStages: groupedStages 
             };
         });
 
@@ -647,7 +536,6 @@ export class PdfGeneratorService {
     }
 
     // [NEW] Generate PDF from History Detail
-    // Input: { score, globalStatus, netWorth, ratios, record: { ...rawFinancialData } }
     async generateHistoryCheckupPdf(data: any): Promise<Buffer> {
         const template = handlebars.compile(historyCheckupReportTemplate);
         const context = this.mapHistoryCheckupData(data); // Mapper khusus
@@ -659,12 +547,7 @@ export class PdfGeneratorService {
         });
 
         const page = await browser.newPage();
-
-        // [OPTIMIZED]
-        await page.setContent(html, {
-            waitUntil: 'domcontentloaded',
-            timeout: 60000
-        });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
         const pdfBuffer = await page.pdf({
             format: 'A4',
@@ -718,16 +601,10 @@ export class PdfGeneratorService {
         const ratioPages: any[] = [];
         const remainingRatios = [...allRatios];
 
-        /**
-         * LOGIKA: Halaman 2 (Halaman Rasio Pertama) dibuat muat hingga 8 rasio (Grid 2x4).
-         * Jika rasio lebih dari 8 (misal ada tambahan indikator di masa depan), 
-         * barulah sisa rasio tersebut dibuatkan halaman baru (Page 3).
-         */
         const FIRST_RATIO_PAGE_CAPACITY = 8;
-        const NEXT_RATIO_PAGE_CAPACITY = 10; // Halaman kosong penuh muat lebih banyak
+        const NEXT_RATIO_PAGE_CAPACITY = 10; 
 
         if (remainingRatios.length > 0) {
-            // Ambil 8 pertama untuk Halaman 2
             const page2Items = remainingRatios.splice(0, FIRST_RATIO_PAGE_CAPACITY);
             ratioPages.push({
                 isFirstPage: true,
@@ -736,7 +613,6 @@ export class PdfGeneratorService {
             });
         }
 
-        // Jika masih ada sisa (rasio ke-9 dst), buat Halaman 3
         let pageCounter = 3;
         while (remainingRatios.length > 0) {
             const chunk = remainingRatios.splice(0, NEXT_RATIO_PAGE_CAPACITY);
@@ -763,6 +639,7 @@ export class PdfGeneratorService {
             spouse: data.spouseProfile ? {
                 name: data.spouseProfile.name,
                 age: data.spouseProfile.dob ? new Date().getFullYear() - new Date(data.spouseProfile.dob).getFullYear() : '-',
+                job: data.spouseProfile.occupation || '-'
             } : null,
 
             fin: {

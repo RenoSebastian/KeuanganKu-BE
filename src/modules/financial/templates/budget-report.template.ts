@@ -15,6 +15,7 @@ function getImageBase64(filePath: string): string {
     const bitmap = fs.readFileSync(filePath);
     const extension = path.extname(filePath).toLowerCase().replace('.', '');
 
+    // Mapping mime type yang lebih akurat
     let mimeType = '';
     switch (extension) {
       case 'webp': mimeType = 'image/webp'; break;
@@ -26,7 +27,7 @@ function getImageBase64(filePath: string): string {
     }
 
     return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-  } catch (error: any) {
+  } catch (error) {
     console.error(`[PDF] Error base64: ${error.message}`);
     return '';
   }
@@ -56,6 +57,7 @@ export const budgetReportTemplate = `
     @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,600;1,600&display=swap');
     
     :root {
+      --item: #000000;
       --primary: #0e7490;      /* Cyan 700 */
       --primary-dark: #ffffff; /* Cyan 800 */
       --secondary: #64748b;    /* Slate 500 */
@@ -75,7 +77,7 @@ export const budgetReportTemplate = `
       margin: 0; padding: 0;
       font-family: 'Plus Jakarta Sans', sans-serif;
       color: var(--dark);
-      background-color: #525252; /* Dark background for preview only */
+      background-color: #525252;
     }
 
     /* --- PAGE CONTAINER --- */
@@ -199,7 +201,7 @@ export const budgetReportTemplate = `
       page-break-inside: avoid;
     }
     
-    /* Warna border variasi */
+    /* Warna border variasi (looping nth-child simulation via style inline di body nanti jika perlu, atau hardcode class) */
     .allocation-item:nth-child(1) { border-left-color: #3b82f6; } /* Blue - Utang Prod */
     .allocation-item:nth-child(2) { border-left-color: #ef4444; } /* Red - Utang Kons */
     .allocation-item:nth-child(3) { border-left-color: #f59e0b; } /* Amber - Asuransi */
@@ -207,7 +209,7 @@ export const budgetReportTemplate = `
     .allocation-item:nth-child(5) { border-left-color: #6366f1; } /* Indigo - Living */
 
     .alloc-label { font-size: 10px; font-weight: 700; color: var(--dark); text-transform: uppercase; letter-spacing: 0.5px; }
-    .alloc-val { font-size: 13px; font-weight: 700; font-family: monospace; color: var(--primary-dark); }
+    .alloc-val { font-size: 13px; font-weight: 700; font-family: monospace; color: var(--item); }
 
     /* --- SUMMARY / CONCLUSION BOX --- */
     .summary-section {
@@ -270,7 +272,7 @@ export const budgetReportTemplate = `
       <div class="h-image-right-top"></div>
       <div class="h-image-left-bottom"></div>
       <div class="h-brand-box">
-        <img src="\${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
+        <img src="${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
       </div>
     </div>
 
