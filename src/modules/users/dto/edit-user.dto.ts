@@ -1,19 +1,31 @@
+import { IsOptional, IsString, IsNumber, IsDateString, MinLength } from 'class-validator';
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsDateString, IsInt, IsOptional, IsString } from 'class-validator';
 
 export class EditUserDto {
-  @ApiPropertyOptional({ example: 'Budi Santoso, S.Kom' })
-  @IsString()
+  @ApiPropertyOptional()
   @IsOptional()
+  @IsString()
   fullName?: string;
 
-  @ApiPropertyOptional({ example: '1990-05-15' })
-  @IsDateString() // Format YYYY-MM-DD
+  @ApiPropertyOptional()
   @IsOptional()
-  dateOfBirth?: string;
+  @IsString()
+  @MinLength(6)
+  password?: string;
 
-  @ApiPropertyOptional({ example: 2 })
-  @IsInt()
+  @ApiPropertyOptional()
   @IsOptional()
-  dependentCount?: number;
+  @IsString()
+  avatar?: string; // [FIX] Field Avatar Base64
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsNumber()
+  dependentCount?: number; // [FIX] Jumlah Tanggungan
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  // @IsDateString() // Opsional: Bisa diaktifkan jika format strict ISO
+  dateOfBirth?: string; // [FIX] Tanggal Lahir (String dari input type="date")
 }

@@ -72,6 +72,10 @@ model User {
   email          String    @unique
   passwordHash   String    @map("password_hash")
   fullName       String    @map("full_name")
+  
+  // [NEW] Avatar Field
+  avatar         String?   @db.Text 
+
   dateOfBirth    DateTime  @map("date_of_birth") // Penting untuk pensiun
   dependentCount Int       @default(0) @map("dependent_count")
   role           Role      @default(USER)
@@ -87,7 +91,7 @@ model User {
   eduPlans        EducationPlan[]
   pensionPlans    PensionPlan[]    
   insurancePlans  InsurancePlan[]  
-  goalPlans       GoalPlan[]       
+  goalPlans       GoalPlan[]        
   
   // Relasi Audit
   actionsPerformed AccessLog[] @relation("ActorRelation")
@@ -101,16 +105,16 @@ model User {
 // --- AUDIT TRAIL (Untuk Dashboard Direksi) ---
 
 model AccessLog {
-  id           String   @id @default(uuid())
-  actorId      String   @map("actor_id") // Siapa yang melihat? (Direksi)
-  targetUserId String?  @map("target_user_id") // Data siapa? (Karyawan)
-  action       String   // VIEW_DETAIL, DOWNLOAD_PDF, UPDATE_PROFILE
-  metadata     Json?    // Detail tambahan
-  accessedAt   DateTime @default(now()) @map("accessed_at")
+  id             String   @id @default(uuid())
+  actorId        String   @map("actor_id") // Siapa yang melihat? (Direksi)
+  targetUserId   String?  @map("target_user_id") // Data siapa? (Karyawan)
+  action         String   // VIEW_DETAIL, DOWNLOAD_PDF, UPDATE_PROFILE
+  metadata       Json?    // Detail tambahan
+  accessedAt     DateTime @default(now()) @map("accessed_at")
 
   // Relasi
-  actor        User     @relation("ActorRelation", fields: [actorId], references: [id])
-  targetUser   User?    @relation("TargetRelation", fields: [targetUserId], references: [id])
+  actor        User      @relation("ActorRelation", fields: [actorId], references: [id])
+  targetUser   User?     @relation("TargetRelation", fields: [targetUserId], references: [id])
 
   @@map("access_logs")
 }
@@ -212,12 +216,12 @@ model FinancialCheckup {
   expenseTax           Decimal @default(0) @map("expense_tax") @db.Decimal(15, 2)
   expenseLifestyle     Decimal @default(0) @map("expense_lifestyle") @db.Decimal(15, 2)
 
-  totalNetWorth  Decimal      @default(0) @map("total_net_worth") @db.Decimal(15, 2)
-  surplusDeficit Decimal      @default(0) @map("surplus_deficit") @db.Decimal(15, 2)
-  healthScore    Int          @default(0) @map("health_score")
+  totalNetWorth  Decimal       @default(0) @map("total_net_worth") @db.Decimal(15, 2)
+  surplusDeficit Decimal       @default(0) @map("surplus_deficit") @db.Decimal(15, 2)
+  healthScore    Int           @default(0) @map("health_score")
   status         HealthStatus @default(BAHAYA)
   
-  ratiosDetails  Json         @map("ratios_details") 
+  ratiosDetails  Json          @map("ratios_details") 
 
   user User @relation(fields: [userId], references: [id])
 
@@ -288,7 +292,7 @@ model PensionPlan {
   totalFundNeeded Decimal @map("total_fund_needed") @db.Decimal(15, 2) 
   monthlySaving   Decimal @map("monthly_saving") @db.Decimal(15, 2)    
 
-  user           User     @relation(fields: [userId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
 
   @@map("pension_plans")
 }
@@ -296,25 +300,25 @@ model PensionPlan {
 // --- FINANCIAL ENGINE: INSURANCE PLANNING (NEW) ---
 
 model InsurancePlan {
-  id                String   @id @default(uuid())
-  userId            String   @map("user_id")
-  createdAt         DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  createdAt          DateTime @default(now()) @map("created_at")
   
-  type              InsuranceType @default(LIFE)
+  type               InsuranceType @default(LIFE)
 
   // Input Data
-  dependentCount    Int      @default(0) @map("dependent_count")
-  monthlyExpense    Decimal  @map("monthly_expense") @db.Decimal(15, 2) 
-  existingDebt      Decimal  @default(0) @map("existing_debt") @db.Decimal(15, 2) 
-  existingCoverage  Decimal  @default(0) @map("existing_coverage") @db.Decimal(15, 2) 
+  dependentCount     Int      @default(0) @map("dependent_count")
+  monthlyExpense     Decimal  @map("monthly_expense") @db.Decimal(15, 2) 
+  existingDebt       Decimal  @default(0) @map("existing_debt") @db.Decimal(15, 2) 
+  existingCoverage   Decimal  @default(0) @map("existing_coverage") @db.Decimal(15, 2) 
   
-  protectionDuration Int     @default(10) @map("protection_duration") 
+  protectionDuration Int      @default(10) @map("protection_duration") 
 
   // Output Calculation
-  coverageNeeded    Decimal  @map("coverage_needed") @db.Decimal(15, 2) 
-  recommendation    String?  @db.Text
+  coverageNeeded     Decimal  @map("coverage_needed") @db.Decimal(15, 2) 
+  recommendation     String?  @db.Text
 
-  user              User     @relation(fields: [userId], references: [id])
+  user               User     @relation(fields: [userId], references: [id])
 
   @@map("insurance_plans")
 }
@@ -339,7 +343,7 @@ model GoalPlan {
   futureValue    Decimal  @map("future_value") @db.Decimal(15, 2) 
   monthlySaving  Decimal  @map("monthly_saving") @db.Decimal(15, 2) 
 
-  user           User     @relation(fields: [userId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
 
   @@map("goal_plans")
 }
@@ -356,8 +360,8 @@ model GoldPriceHistory {
   changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2) 
   
   currency  String   @default("IDR") @map("currency")      
-  unit      String   @default("GRAM") @map("unit")         
-  source    String   @map("source")                        
+  unit      String   @default("GRAM") @map("unit")          
+  source    String   @map("source")                         
   
   fetchedAt DateTime @default(now()) @map("fetched_at")    
 
