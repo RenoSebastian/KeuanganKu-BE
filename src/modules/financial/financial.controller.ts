@@ -123,6 +123,55 @@ export class FinancialController {
     res.end(buffer);
   }
 
+  // [NEW] Endpoint Download Pension PDF
+  @Get('pension/pdf/:id')
+  @ApiOperation({ summary: 'Download Pension Plan PDF Report' })
+  async downloadPensionPdf(@Param('id') id: string, @Res() res: express.Response) {
+    // 1. Ambil Data Pension berdasarkan ID, include User
+    const pensionData = await this.prisma.pensionPlan.findUnique({
+      where: { id },
+      include: {
+        user: true // Include data user untuk ambil nama
+      }
+    });
+
+    if (!pensionData) throw new NotFoundException('Data rencana pensiun tidak ditemukan');
+
+    // 2. Generate PDF
+    const buffer = await this.pdfservice.generatePensionPdf(pensionData);
+
+    // 3. Return Stream
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Pension-Plan-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
+
+  // [NEW] Endpoint Download Insurance PDF
+  @Get('insurance/pdf/:id')
+  @ApiOperation({ summary: 'Download Insurance Plan PDF Report' })
+  async downloadInsurancePdf(@Param('id') id: string, @Res() res: express.Response) {
+    const insuranceData = await this.prisma.insurancePlan.findUnique({
+      where: { id },
+      include: {
+        user: true
+      }
+    });
+
+    if (!insuranceData) throw new NotFoundException('Data rencana asuransi tidak ditemukan');
+
+    const buffer = await this.pdfservice.generateInsurancePdf(insuranceData);
+
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Insurance-Plan-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
+  }
+
   // ===========================================================================
   // MODULE 2: BUDGET PLAN (MONTHLY BUDGETING)
   // ===========================================================================
@@ -182,6 +231,32 @@ export class FinancialController {
   async calculateGoal(@Req() req, @Body() dto: CreateGoalDto) {
     const userId = req.user.id;
     return this.financialService.calculateAndSaveGoal(userId, dto);
+  }
+
+  // [NEW] Endpoint Download Goal PDF
+  @Get('goals/pdf/:id')
+  @ApiOperation({ summary: 'Download Financial Goal PDF Report' })
+  async downloadGoalPdf(@Param('id') id: string, @Res() res: express.Response) {
+    // 1. Ambil Data Goal
+    const goalData = await this.prisma.goalPlan.findUnique({
+      where: { id },
+      include: {
+        user: true
+      }
+    });
+
+    if (!goalData) throw new NotFoundException('Data tujuan keuangan tidak ditemukan');
+
+    // 2. Generate PDF
+    const buffer = await this.pdfservice.generateGoalPdf(goalData);
+
+    // 3. Stream Response
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename=Goal-Plan-${id}.pdf`,
+      'Content-Length': buffer.length,
+    });
+    res.end(buffer);
   }
 
   // ===========================================================================

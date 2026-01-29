@@ -3,6 +3,9 @@ import * as puppeteer from 'puppeteer';
 import * as handlebars from 'handlebars';
 import { checkupReportTemplate } from '../templates/checkup-report.template';
 import { budgetReportTemplate } from '../templates/budget-report.template';
+import { pensionReportTemplate } from '../templates/pension-report.template'; // Import template
+import { insuranceReportTemplate } from '../templates/insurance-report.template';
+import { goalReportTemplate } from '../templates/goals-report.template';
 
 @Injectable()
 export class PdfGeneratorService {
@@ -202,6 +205,276 @@ export class PdfGeneratorService {
             summary: {
                 totalBudget: fmt(totalBudget),
                 totalSurplus: fmt(totalSurplus)
+            }
+        };
+    }
+
+    // [NEW] Generate Pension PDF
+    async generatePensionPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(pensionReportTemplate);
+        const context = this.mapPensionData(data); // Panggil mapper khusus pensiun
+        const html = template(context);
+
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' },
+        });
+
+        await browser.close();
+        return Buffer.from(pdfBuffer);
+    }
+
+    // Mapper for Pension Data
+    private mapPensionData(data: any) {
+        const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+        const num = (n: any) => Number(n) || 0;
+
+        // 1. Extract Raw Values from DB
+        const currentAge = num(data.currentAge);
+        const retirementAge = num(data.retirementAge);
+        const lifeExpectancy = num(data.lifeExpectancy);
+        const currentExpense = num(data.currentExpense);
+        const currentSaving = num(data.currentSaving);
+        const inflationRate = num(data.inflationRate) / 100; // Convert percent to decimal
+        const returnRate = num(data.returnRate) / 100;       // Convert percent to decimal
+
+        // 2. Re-Calculate Logic (TVM) - Agar data di PDF lengkap
+        const yearsToRetire = retirementAge - currentAge;
+        const retirementDuration = lifeExpectancy - retirementAge;
+
+        // FV Pengeluaran Bulanan = PV * (1 + i)^n
+        const futureMonthlyExpense = currentExpense * Math.pow(1 + inflationRate, yearsToRetire);
+
+        // FV Tabungan Saat Ini = PV * (1 + r)^n
+        const fvExistingFund = currentSaving * Math.pow(1 + returnRate, yearsToRetire);
+
+        // Total Dana Dibutuhkan (Approximation: Future Monthly * 12 * Duration)
+        // Note: Rumus asli mungkin lebih kompleks (annuity), tapi kita pakai totalFundNeeded dari DB sebagai patokan utama jika ada.
+        // Jika data.totalFundNeeded ada, kita pakai itu. Jika tidak, kita hitung kasar.
+        const totalFundNeeded = num(data.totalFundNeeded) > 0
+            ? num(data.totalFundNeeded)
+            : (futureMonthlyExpense * 12 * retirementDuration);
+
+        const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
+
+        // 3. User Data
+        // Handling relasi user profile (sesuai schema User yang tidak punya userProfile relation terpisah tapi field langsung)
+        // Cek controller untuk memastikan include apa yang dikirim.
+        // Asumsi Controller mengirim: include: { user: true }
+        const userProfile = data.user || {};
+
+        const dob = userProfile.dateOfBirth ? new Date(userProfile.dateOfBirth) : null;
+        // Jika age dihitung dari DOB, atau pakai currentAge dari plan
+
+        return {
+            createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+
+            user: {
+                name: userProfile.fullName || 'User',
+            },
+
+            plan: {
+                currentAge: currentAge,
+                retirementAge: retirementAge,
+                lifeExpectancy: lifeExpectancy,
+                currentExpense: fmt(currentExpense),
+                currentSaving: fmt(currentSaving),
+                inflationRate: (inflationRate * 100).toFixed(1),
+                returnRate: (returnRate * 100).toFixed(1),
+                monthlySaving: fmt(data.monthlySaving)
+            },
+
+            calc: {
+                yearsToRetire: yearsToRetire,
+                retirementDuration: retirementDuration,
+                futureMonthlyExpense: fmt(futureMonthlyExpense),
+                fvExistingFund: fmt(fvExistingFund),
+                totalFundNeeded: fmt(totalFundNeeded),
+                shortfall: fmt(shortfall)
+            }
+        };
+    }
+
+    async generateInsurancePdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(insuranceReportTemplate);
+        const context = this.mapInsuranceData(data);
+        const html = template(context);
+
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' },
+        });
+
+        await browser.close();
+        return Buffer.from(pdfBuffer);
+    }
+
+    private mapInsuranceData(data: any) {
+        const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+        const num = (n: any) => Number(n) || 0;
+
+        // 1. Raw Data & Calculation Re-check (Consistency)
+        const monthlyExpense = num(data.monthlyExpense);
+        const annualExpense = monthlyExpense * 12;
+        const duration = num(data.protectionDuration);
+        const debt = num(data.existingDebt);
+        const existingCov = num(data.existingCoverage);
+
+        // Asumsi inflasi vs return investasi (Net Rate 2% konservatif)
+        // Rumus PV Annuity Due (Simple approximation untuk display)
+        // Real calculation mungkin lebih kompleks di service utama, tapi untuk display kita pakai data DB jika ada
+        const incomeReplacement = num(data.calculation?.incomeReplacementValue) || (annualExpense * duration);
+        const totalNeeded = num(data.calculation?.totalNeeded) || (incomeReplacement + debt);
+        const gap = num(data.calculation?.coverageGap) || (totalNeeded - existingCov);
+
+        // Translate Type
+        const typeMap = {
+            'LIFE': 'Asuransi Jiwa (Life)',
+            'HEALTH': 'Asuransi Kesehatan',
+            'CRITICAL_ILLNESS': 'Sakit Kritis'
+        };
+
+        return {
+            createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+
+            user: {
+                name: data.user?.fullName || 'User',
+            },
+
+            plan: {
+                typeLabel: typeMap[data.type] || data.type,
+                dependentCount: data.dependentCount,
+                monthlyExpense: fmt(monthlyExpense),
+                protectionDuration: duration,
+                existingDebt: fmt(debt),
+                existingCoverage: fmt(existingCov),
+                recommendation: data.recommendation || data.plan?.recommendation || '-'
+            },
+
+            calc: {
+                annualExpense: fmt(annualExpense),
+                nettRate: "2.00", // Default assumption text
+                incomeReplacementValue: fmt(incomeReplacement),
+                debtClearanceValue: fmt(debt),
+                totalNeeded: fmt(totalNeeded),
+                coverageGap: fmt(gap)
+            }
+        };
+    }
+
+    // [NEW] Generate Goal PDF
+    async generateGoalPdf(data: any): Promise<Buffer> {
+        const template = handlebars.compile(goalReportTemplate);
+        const context = this.mapGoalData(data); // Mapper baru
+        const html = template(context);
+
+        const browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        });
+
+        const page = await browser.newPage();
+        await page.setContent(html, { waitUntil: 'networkidle0' });
+
+        const pdfBuffer = await page.pdf({
+            format: 'A4',
+            printBackground: true,
+            margin: { top: '0', right: '0', bottom: '0', left: '0' },
+        });
+
+        await browser.close();
+        return Buffer.from(pdfBuffer);
+    }
+
+    // [UPDATED] Mapper for Goal Data
+    private mapGoalData(data: any) {
+        const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
+        const num = (n: any) => Number(n) || 0;
+
+        // 1. Raw Data Extraction & Reverse Calculation
+        const targetAmount = num(data.targetAmount); // Ini adalah Future Value (FV)
+        const inflationRate = num(data.inflationRate) / 100;
+        const returnRate = num(data.returnRate) / 100;
+
+        // Hitung Durasi (Years) dari targetDate - createdAt (atau now)
+        const startDate = data.createdAt ? new Date(data.createdAt) : new Date();
+        const endDate = data.targetDate ? new Date(data.targetDate) : new Date();
+
+        // Hitung selisih tahun (secara kasar untuk display)
+        let years = endDate.getFullYear() - startDate.getFullYear();
+        // Koreksi jika bulan belum sampai
+        if (endDate.getMonth() < startDate.getMonth()) years--;
+        // Minimal 1 tahun agar tidak error pembagian
+        years = Math.max(1, years);
+
+        // Hitung Current Cost (PV)
+        // Rumus: PV = FV / (1 + i)^n
+        // Kita balik rumus FV = PV * (1+i)^n
+        const currentCost = targetAmount / Math.pow(1 + inflationRate, years);
+
+        // 2. Re-Calculation for Display Consistency
+        const futureValue = targetAmount; // FV sudah ada di DB
+
+        // Monthly Payment (PMT)
+        // Kita gunakan data.monthlySaving dari DB jika ada (hasil hitungan akurat saat save)
+        // Jika tidak ada, kita hitung ulang.
+        let monthlySaving = num(data.monthlySaving);
+
+        if (monthlySaving === 0) {
+            const r = returnRate / 12;
+            const n = years * 12;
+            if (r === 0) {
+                monthlySaving = futureValue / n;
+            } else {
+                monthlySaving = (futureValue * r) / (Math.pow(1 + r, n) - 1);
+            }
+        }
+
+        // Inflasi Effect (Selisih FV - PV)
+        const inflationEffect = futureValue - currentCost;
+
+        // 3. Mapping Return
+        // Handling User Profile (jika include user dilakukan di controller)
+        const userProfile = data.user || {};
+
+        return {
+            createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+
+            user: {
+                name: userProfile.fullName || 'User', // Sesuaikan dengan schema User Anda
+            },
+
+            goal: {
+                name: data.goalName || 'Tujuan Keuangan',
+                currentCost: fmt(currentCost), // Menampilkan estimasi harga hari ini
+                years: years,
+                inflationRate: (inflationRate * 100).toFixed(1),
+                returnRate: (returnRate * 100).toFixed(1),
+                inflationEffect: fmt(inflationEffect)
+            },
+
+            calc: {
+                futureValue: fmt(futureValue),
+                monthlySaving: fmt(monthlySaving),
+                months: years * 12
             }
         };
     }

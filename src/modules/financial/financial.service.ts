@@ -7,6 +7,7 @@ import { CreateInsuranceDto } from './dto/create-insurance.dto';
 import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto';
 import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { SchoolLevel, CostType, HealthStatus } from '@prisma/client';
+
 import {
   calculateFinancialHealth,
   calculatePensionPlan,
@@ -186,6 +187,7 @@ export class FinancialService {
       }
     };
   }
+  
 
   // ===========================================================================
   // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
