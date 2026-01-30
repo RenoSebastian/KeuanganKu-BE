@@ -1,30 +1,34 @@
-import { IsEnum, IsDateString, IsNotEmpty, IsBoolean, Equals } from 'class-validator';
+import { IsEnum, IsDateString, IsNotEmpty, IsString } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { RetentionEntityType } from './export-query.dto'; // Reuse Enum dari Fase 3
+import { RetentionEntityType } from './export-query.dto';
 
 export class PruneExecutionDto {
     @ApiProperty({
         enum: RetentionEntityType,
-        description: 'Target data yang akan dimusnahkan',
+        description: 'Target data entitas yang akan dimusnahkan secara permanen.',
         example: 'FINANCIAL_CHECKUP',
     })
-    @IsEnum(RetentionEntityType)
+    @IsEnum(RetentionEntityType, {
+        message: 'Entity Type tidak valid. Pilih entitas yang tersedia.',
+    })
     @IsNotEmpty()
     entityType: string;
 
     @ApiProperty({
-        description: 'Batas tanggal penghapusan. HARUS < Awal Bulan Ini.',
+        description: 'Batas tanggal penghapusan (Format YYYY-MM-DD). Data sebelum tanggal ini akan dihapus.',
         example: '2025-12-31',
     })
-    @IsDateString()
+    @IsDateString({}, { message: 'Format tanggal harus YYYY-MM-DD (ISO 8601).' })
     @IsNotEmpty()
     cutoffDate: string;
 
     @ApiProperty({
-        description: 'Safety Toggle: Konfirmasi bahwa Admin SUDAH melakukan export data.',
-        example: true,
+        description: 'Security Token (HMAC) yang didapat dari dalam footer file hasil export (property: security.pruneToken). Token ini membuktikan bahwa data telah sukses diamankan.',
+        example: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.e30.Et9LQ9...',
     })
-    @IsBoolean()
-    @Equals(true, { message: 'Anda WAJIB mengonfirmasi bahwa data telah diexport sebelum menghapus.' })
-    confirmExported: boolean;
+    @IsString()
+    @IsNotEmpty({
+        message: 'SECURITY BLOCKED: Token Prune wajib disertakan. Anda harus melakukan export data terlebih dahulu dan menyalin token dari file hasil export.'
+    })
+    pruneToken: string;
 }

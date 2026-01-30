@@ -3,6 +3,7 @@ import { Response } from 'express';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { RetentionStrategyFactory } from '../strategies/retention-strategy.factory';
 import { ExportQueryDto } from '../dto/export-query.dto';
+import { RetentionService } from '../retention.service';
 
 @Injectable()
 export class ExportManagerService {
@@ -12,66 +13,92 @@ export class ExportManagerService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly strategyFactory: RetentionStrategyFactory,
+        private readonly retentionService: RetentionService, // Dependency untuk Security Token & Date normalization
     ) { }
 
     /**
-     * Mengalirkan data arsip langsung ke Client (Browser) tanpa memuat semua ke RAM.
-     * Menggunakan konsep 'Backpressure' handling secara implisit via await.
+     * Mengalirkan data arsip langsung ke Client dengan pola "Secure Envelope".
+     * Data dibungkus dalam JSON Object yang memiliki Metadata dan Security Token.
      */
     async exportDataStream(query: ExportQueryDto, res: Response): Promise<void> {
         const { entityType, cutoffDate } = query;
-        this.logger.log(`Starting Safe Export for ${entityType} (Cutoff: ${cutoffDate})`);
+
+        // 1. Timezone Fix: Pastikan tanggal dinormalisasi (UTC Midnight) agar konsisten dengan Prune Logic
+        const normalizedDate = this.retentionService.normalizeCutoffDate(cutoffDate);
+
+        this.logger.log(`Starting Secure Export for ${entityType} (Cutoff: ${cutoffDate})`);
 
         try {
-            // 1. Dapatkan Strategi & Nama Tabel yang tepat
+            // 2. Dapatkan Strategi & Nama Tabel
             const { strategy, tableName } = this.strategyFactory.getStrategy(entityType);
 
-            // 2. Identifikasi Kandidat (Hanya ID)
-            // Ini menggunakan logika "Smart Deletion" (Historical vs Snapshot) yang sudah kita buat di Fase 2
-            const candidateIds = await strategy.findCandidates(tableName, new Date(cutoffDate));
+            // 3. Identifikasi Kandidat (Query ID saja)
+            const candidateIds = await strategy.findCandidates(tableName, normalizedDate);
 
             if (candidateIds.length === 0) {
-                this.logger.warn(`No candidates found for ${entityType} before ${cutoffDate}`);
-                throw new NotFoundException('Tidak ada data yang memenuhi kriteria penghapusan.');
+                if (!res.headersSent) {
+                    this.logger.warn(`No candidates found for ${entityType} before ${cutoffDate}`);
+                    throw new NotFoundException('Tidak ada data yang memenuhi kriteria penghapusan.');
+                }
+                return;
             }
 
-            this.logger.log(`Found ${candidateIds.length} candidates. Starting stream...`);
+            this.logger.log(`Found ${candidateIds.length} candidates. Starting secure stream...`);
 
-            // 3. Setup HTTP Headers untuk Download File
-            const filename = `archive-${entityType.toLowerCase()}-${new Date().getTime()}.json`;
+            // 4. Generate Security Token (HMAC)
+            // Token ini wajib dikirim balik oleh Admin saat melakukan pruning
+            const pruneToken = this.retentionService.generatePruneToken(entityType, cutoffDate);
+
+            // 5. Setup HTTP Headers
+            const filename = `secure-archive-${entityType.toLowerCase()}-${cutoffDate}-${new Date().getTime()}.json`;
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-            // 4. Mulai Streaming JSON Array
-            res.write('[');
+            // 6. Start Streaming "Envelope" Structure
+            // Kita menulis JSON secara manual string-by-string ke response stream
+            res.write(`{
+  "metadata": {
+    "entityType": "${entityType}",
+    "cutoffDate": "${cutoffDate}",
+    "totalRecords": ${candidateIds.length},
+    "exportedAt": "${new Date().toISOString()}"
+  },
+  "records": [`); // Membuka Array records
+
             let isFirstRecord = true;
 
-            // 5. Batch Fetching & Streaming Loop
+            // 7. Batch Fetching & Streaming Loop
             for (let i = 0; i < candidateIds.length; i += this.BATCH_SIZE) {
                 const batchIds = candidateIds.slice(i, i + this.BATCH_SIZE);
 
-                // Ambil full data dari DB berdasarkan batch ID
+                // Ambil full data
                 const records = await this.fetchFullRecords(tableName, batchIds);
 
-                // Tulis ke stream
+                // Tulis record ke stream
                 for (const record of records) {
                     if (!isFirstRecord) {
-                        res.write(','); // Separator JSON antar object
+                        res.write(','); // Separator antar object dalam array
                     }
-                    // Serialisasi record ke string JSON & kirim
                     res.write(JSON.stringify(record));
                     isFirstRecord = false;
                 }
 
-                // Optional: Set Immediate untuk memberi nafas pada Event Loop jika load sangat tinggi
-                // await new Promise(resolve => setImmediate(resolve));
+                // Optional: Beri jeda ke Event Loop jika CPU usage tinggi
+                await new Promise(resolve => setImmediate(resolve));
             }
 
-            // 6. Tutup JSON Array & Stream
-            res.write(']');
-            res.end(); // Selesai. Koneksi ditutup.
+            // 8. Close Array & Inject Security Footer
+            // Jika stream putus/error sebelum baris ini, JSON akan invalid (kurang '}' penutup)
+            // Frontend akan gagal parsing, sehingga Admin tidak bisa mendapatkan Token.
+            res.write(`],
+  "security": {
+    "integrity": "END_OF_STREAM_OK",
+    "pruneToken": "${pruneToken}"
+  }
+}`);
 
-            this.logger.log(`Export completed successfully for ${filename}`);
+            res.end(); // Selesai.
+            this.logger.log(`Secure Export completed successfully for ${filename}`);
 
         } catch (error) {
             this.handleExportError(error, res);
@@ -79,50 +106,42 @@ export class ExportManagerService {
     }
 
     /**
-     * Mengambil data lengkap (SELECT *) secara aman menggunakan parameterisasi ID.
-     * Kita menggunakan $queryRawUnsafe karena nama tabel dinamis, TAPI ID diparameterisasi manual
-     * untuk keamanan extra, meskipun candidateIds berasal dari sistem internal.
+     * Mengambil data lengkap (SELECT *) secara aman.
      */
     private async fetchFullRecords(tableName: string, ids: string[]): Promise<any[]> {
         if (ids.length === 0) return [];
 
-        // Construct Parameterized Query Manual untuk array IN (...)
-        // Prisma Raw tidak support array binding native di semua driver, 
-        // jadi kita mapping string literal dengan quote aman.
+        // Parameterisasi ID manual untuk 'IN (...)' clause pada Raw Query
         const idList = ids.map((id) => `'${id}'`).join(',');
 
-        // VALIDASI FINAL: Pastikan tableName hanya berisi karakter aman (a-z, _, 0-9)
-        // Ini pertahanan lapis terakhir terhadap SQL Injection via nama tabel
+        // Validasi nama tabel (whitelist regex) untuk mencegah SQL Injection
         if (!/^[a-z0-9_]+$/i.test(tableName)) {
             throw new InternalServerErrorException('Security Error: Invalid table name format.');
         }
 
         const query = `SELECT * FROM "${tableName}" WHERE id IN (${idList})`;
-
         return this.prisma.$queryRawUnsafe(query);
     }
 
     /**
-     * Error Handling khusus untuk Stream.
-     * Jika header sudah terkirim, kita tidak bisa kirim JSON Error response standar.
-     * Kita harus memutus stream atau mengirim sinyal error dalam text.
+     * Error Handling khusus Stream.
+     * Menangani kondisi jika header sudah terkirim vs belum.
      */
     private handleExportError(error: any, res: Response) {
         this.logger.error(`Export Failed: ${error.message}`, error.stack);
 
         if (error instanceof NotFoundException) {
-            // Jika belum mulai streaming (headers belum dikirim), kirim 404 standar
             if (!res.headersSent) {
                 res.status(404).json({ statusCode: 404, message: error.message });
             }
             return;
         }
 
-        // Jika error terjadi di tengah streaming (misal putus koneksi DB)
         if (!res.headersSent) {
             res.status(500).json({ statusCode: 500, message: 'Internal Server Error during export initialization.' });
         } else {
-            // Jika stream sedang berjalan, kita paksa tutup (Browser akan mendeteksi network error / file corrupt)
+            // Jika stream sedang berjalan, matikan koneksi.
+            // Client akan mendeteksi network error atau JSON tidak valid (terpotong).
             res.end();
         }
     }
