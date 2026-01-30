@@ -1,18 +1,15 @@
 services:
   keuanganku-be:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     container_name: keuanganku-be
     restart: always
-    env_file:
-      - .env
+    env_file: .env
     ports:
       - "3001:3000"
     networks:
-      - e-daily-network
+      - e-daily-report-net
 
 networks:
-  e-daily-network:
+  e-daily-report-net:
     external: true
     name: e-daily-report_default
