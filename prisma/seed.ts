@@ -1,60 +1,51 @@
 import { PrismaClient } from '@prisma/client';
-import * as bcrypt from 'bcrypt';
+import { seedMasterData } from './seeds/01_master_data';
+import { seedUsers } from './seeds/02_users';
+import { seedFinancialCheckups } from './seeds/03_financial_checkup';
+import { seedBudgetPlans } from './seeds/04_budget_plan';
+import { seedEducationPlans } from './seeds/05_education_plan';
+import { seedInsurancePlans } from './seeds/06_insurance_plan';
+import { seedPensionPlans } from './seeds/07_pension_plan';
+import { seedGoalPlans } from './seeds/08_goal_plan';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  console.log('🌱 Mulai seeding database...');
+  const startTime = performance.now();
+  console.log('🚀 Starting Full Database Seeding...');
+  console.log('========================================');
 
-  // 1. SEED UNIT KERJA
-  // Kita hardcode ID-nya supaya match dengan yang dikirim Frontend ("KANTOR_PUSAT")
-  const unitUmum = await prisma.unitKerja.upsert({
-    where: { id: 'KANTOR_PUSAT' },
-    update: {},
-    create: {
-      id: 'KANTOR_PUSAT',
-      namaUnit: 'Kantor Pusat PAM JAYA', // Sesuai schema: namaUnit
-      kodeUnit: 'KP-001',                // Sesuai schema: kodeUnit
-    },
-  });
+  try {
+    // --- LEVEL 1: FOUNDATION ---
+    // Master data dan User harus ada duluan agar Foreign Key tidak error.
+    await seedMasterData(prisma);
+    await seedUsers(prisma);
 
-  const unitCabang = await prisma.unitKerja.upsert({
-    where: { id: 'CABANG_BARAT' },
-    update: {},
-    create: {
-      id: 'CABANG_BARAT',
-      namaUnit: 'Kantor Cabang Barat',
-      kodeUnit: 'KC-001',
-    },
-  });
+    // --- LEVEL 2: CORE FINANCIAL & RETENTION ---
+    // Modul inti untuk diagnosa kesehatan finansial & budgeting bulanan.
+    // Data ini krusial untuk validasi fitur Retention (T-14 bulan).
+    await seedFinancialCheckups(prisma);
+    await seedBudgetPlans(prisma);
 
-  console.log('✅ Unit Kerja created:', { unitUmum, unitCabang });
+    // --- LEVEL 3: ADVANCED PLANNING MODULES ---
+    // Modul kalkulator spesifik (Pendidikan, Asuransi, Pensiun, Goals).
+    // Menggunakan user_id yang sama dari Level 1.
+    await seedEducationPlans(prisma);
+    await seedInsurancePlans(prisma);
+    await seedPensionPlans(prisma);
+    await seedGoalPlans(prisma);
 
-  // 2. SEED ADMIN USER
-  const hashedPassword = await bcrypt.hash('admin123', 10);
+  } catch (e) {
+    console.error('❌ Seeding Failed:', e);
+    process.exit(1);
+  } finally {
+    const endTime = performance.now();
+    const duration = ((endTime - startTime) / 1000).toFixed(2);
 
-  const admin = await prisma.user.upsert({
-    where: { email: 'admin@pamjaya.co.id' },
-    update: {},
-    create: {
-      email: 'admin@pamjaya.co.id',
-      passwordHash: hashedPassword, // Sesuai schema: passwordHash
-      fullName: 'Super Admin',
-      nip: '99999999',
-      role: 'ADMIN',
-      unitKerjaId: 'KANTOR_PUSAT',
-      dateOfBirth: new Date('1985-01-01'), // Wajib diisi sesuai schema
-    },
-  });
-
-  console.log('✅ Admin user created:', admin);
+    console.log('========================================');
+    console.log(`✨ Seeding Finished Successfully in ${duration}s`);
+    await prisma.$disconnect();
+  }
 }
 
-main()
-  .catch((e) => {
-    console.error('❌ Seeding error:', e);
-    process.exit(1);
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+main();

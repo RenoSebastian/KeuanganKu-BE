@@ -185,9 +185,9 @@ export const budgetReportTemplate = `
     .value { font-weight: 700; color: var(--dark); font-family: monospace; font-size: 12px; }
 
     .total-highlight {
-      margin-top: 10px; padding-top: 8px; border-top: 2px solid #cbd5e1;
+      margin-top: 10px; padding-top: 8px; border-top: 2px solid #000000;
     }
-    .total-highlight .label { font-weight: 800; color: var(--primary-dark); text-transform: uppercase; font-size: 10px; }
+    .total-highlight .label { font-weight: 800; color: var(--primary-dark);     text-transform: uppercase; font-size: 10px; }
     .total-highlight .value { font-size: 14px; color: var(--primary-dark); }
 
     /* --- ALLOCATION LIST --- */

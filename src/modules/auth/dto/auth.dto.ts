@@ -39,4 +39,12 @@ export class LoginDto {
   @IsString()
   @IsNotEmpty()
   password: string;
+
+  // [UPDATE] Jadikan Optional.
+  // Jika dikirim, FE bisa kirim kode "IT-01", "FIN-01".
+  // Jika tidak dikirim, Backend akan set ke default "IT-01".
+  @ApiProperty({ example: 'IT-01', required: false })
+  @IsString()
+  @IsOptional()
+  unitKerjaId?: string;
 }

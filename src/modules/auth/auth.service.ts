@@ -1,6 +1,6 @@
 // File: src/modules/auth/auth.service.ts
 
-import { ForbiddenException, Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import * as argon from 'argon2';
@@ -14,12 +14,26 @@ export class AuthService {
     private prisma: PrismaService,
     private jwt: JwtService,
     private config: ConfigService,
-  ) {}
+  ) { }
 
   // --- REGISTER ---
   async register(dto: RegisterDto) {
     // 1. Hash Password
     const hash = await argon.hash(dto.password);
+
+    // [FIX LOGIC] Resolusi Unit Kerja (Auto Default)
+    // Masalah sebelumnya: FE mengirim string kode ("IT-01"), tapi DB butuh UUID.
+    // Solusi: Kita cari UUID-nya dulu. Jika FE tidak kirim, default ke "IT-01".
+    const targetKodeUnit = dto.unitKerjaId || 'IT-01';
+
+    const unitKerja = await this.prisma.unitKerja.findUnique({
+      where: { kodeUnit: targetKodeUnit },
+    });
+
+    // Validasi: Pastikan kode unit tersebut ada di Master Data
+    if (!unitKerja) {
+      throw new NotFoundException(`Unit Kerja dengan kode '${targetKodeUnit}' tidak ditemukan di sistem.`);
+    }
 
     try {
       // 2. Simpan ke DB
@@ -29,13 +43,18 @@ export class AuthService {
           email: dto.email,
           fullName: dto.fullName,
           passwordHash: hash,
-          unitKerjaId: dto.unitKerjaId, // Pastikan FE mengirim unitKerjaId yang valid
+
+          // [CRITICAL FIX] Gunakan ID (UUID) dari hasil query di atas, bukan string kode mentah
+          unitKerjaId: unitKerja.id,
+
           dateOfBirth: new Date(), // Placeholder, nanti user update profil sendiri
+          role: 'USER', // Set default role eksplisit
         },
       });
 
       // 3. Return Token dengan Claim Lengkap (Role & Unit)
       return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
+
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError) {
         // Handle Error Duplicate (P2002)
@@ -75,7 +94,7 @@ export class AuthService {
     };
 
     const secret = this.config.get('JWT_SECRET');
-    
+
     // Generate Token
     const token = await this.jwt.signAsync(payload, {
       expiresIn: '1d', // Token valid 1 hari (Security Best Practice)
