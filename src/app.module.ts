@@ -19,6 +19,7 @@ import { SearchModule } from './modules/search/search.module';
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './common/configs/winston.config';
 import { MasterDataModule } from './modules/master-data/master-data.module';
+import { RetentionModule } from './modules/retention/retention.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { MasterDataModule } from './modules/master-data/master-data.module';
     DirectorModule,
     SearchModule,
     MasterDataModule,
+    RetentionModule,
   ],
   controllers: [],
   providers: [
