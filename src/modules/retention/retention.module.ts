@@ -7,6 +7,7 @@ import { PrismaModule } from '../../../prisma/prisma.module';
 import { HistoricalRetentionStrategy } from './strategies/historical-retention.strategy';
 import { SnapshotRetentionStrategy } from './strategies/snapshot-retention.strategy';
 import { RetentionStrategyFactory } from './strategies/retention-strategy.factory';
+import { ExportManagerService } from './services/export-manager.service';
 
 @Module({
     imports: [PrismaModule],
@@ -16,6 +17,7 @@ import { RetentionStrategyFactory } from './strategies/retention-strategy.factor
         RetentionStrategyFactory,
         HistoricalRetentionStrategy,
         SnapshotRetentionStrategy,
+        ExportManagerService
     ],
     exports: [RetentionService],
 })
