@@ -297,11 +297,23 @@ export class FinancialService {
   // MODULE 4: CALCULATOR - INSURANCE PLAN (UPDATED LOGIC)
   // ===========================================================================
 
+  // ===========================================================================
+  // MODULE 4: CALCULATOR - INSURANCE PLAN (UPDATED LOGIC)
+  // ===========================================================================
+
   async calculateAndSaveInsurance(userId: string, dto: CreateInsuranceDto) {
-    // 1. Hitung Kebutuhan UP
+    /**
+     * 1. Hitung Kebutuhan UP menggunakan Math Utility.
+     * Field 'finalExpense' dikirim ke utilitas agar perhitungan 
+     * 'incomeReplacementValue' dan 'totalNeeded' menjadi akurat dan terpisah.
+     */
     const result = calculateInsurancePlan(dto);
 
-    // 2. Simpan Rencana ke Database
+    /**
+     * 2. Simpan Rencana ke Database.
+     * Pastikan field 'finalExpense' disimpan secara eksplisit ke kolom database
+     * agar saat pembuatan PDF, data ini bisa ditarik kembali secara granular.
+     */
     const plan = await this.prisma.insurancePlan.create({
       data: {
         userId,
@@ -312,17 +324,24 @@ export class FinancialService {
         existingCoverage: dto.existingCoverage,
         protectionDuration: dto.protectionDuration,
 
+        // [NEW] Simpan Biaya Pemakaman/Duka secara terpisah
+        finalExpense: dto.finalExpense ?? 0,
+
         // [FIX] Simpan Asumsi Makro (Inflasi & Return) agar Slider PDF Berfungsi
         // Menggunakan nullish coalescing (??) untuk fallback ke default jika undefined
         inflationRate: dto.inflationRate ?? 5,
         returnRate: dto.returnRate ?? 7,
 
-        // Hasil Perhitungan
+        // Hasil Perhitungan Utama
         coverageNeeded: result.totalNeeded,
         recommendation: result.recommendation,
       },
     });
 
+    /**
+     * Mengembalikan objek gabungan antara data yang tersimpan (plan) 
+     * dan hasil kalkulasi detail (result) untuk langsung ditampilkan di UI.
+     */
     return { plan, calculation: result };
   }
   

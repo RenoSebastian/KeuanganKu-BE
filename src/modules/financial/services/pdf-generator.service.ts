@@ -368,34 +368,49 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const fmt = (n: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(n) || 0);
         const num = (n: any) => Number(n) || 0;
 
-        // [FIX 2] HITUNG ULANG AGAR SINKRON DENGAN FE & DB
-        // Kita reconstruct DTO dari data database untuk dihitung ulang
+        /**
+         * [STEP 1] AMBIL DATA GRANULAR DARI DATABASE
+         * Kita definisikan nilai mentah untuk perhitungan aritmatika.
+         */
+        const finalExpenseVal = num(data.finalExpense);
+        const existingDebtVal = num(data.existingDebt);
+
+        /**
+         * [STEP 2] HITUNG ULANG DENGAN PARAMETER LENGKAP
+         * Memasukkan finalExpense ke utilitas agar 'incomeReplacementValue' 
+         * benar-benar murni untuk biaya hidup saja.
+         */
         const calculationResult = calculateInsurancePlan({
             type: data.type,
             dependentCount: num(data.dependentCount),
             monthlyExpense: num(data.monthlyExpense),
-            existingDebt: num(data.existingDebt),
+            existingDebt: existingDebtVal,
             existingCoverage: num(data.existingCoverage),
             protectionDuration: num(data.protectionDuration),
             inflationRate: num(data.inflationRate),
-            returnRate: num(data.returnRate)
+            returnRate: num(data.returnRate),
+            finalExpense: finalExpenseVal,
         });
 
-        // Ambil hasil perhitungan yang akurat (TVM Based)
+        // Ambil hasil kalkulasi TVM
         const incomeReplacement = calculationResult.incomeReplacementValue;
         const totalNeeded = calculationResult.totalNeeded;
         const gap = calculationResult.coverageGap;
-        const calculatedNettRate = calculationResult.nettRatePercentage; // Ambil langsung dari hasil hitungan
+        const calculatedNettRate = calculationResult.nettRatePercentage;
 
-        // Data Display
+        // Data display dasar
         const monthlyExpense = num(data.monthlyExpense);
         const annualExpense = monthlyExpense * 12;
         const duration = num(data.protectionDuration);
-        const debt = num(data.existingDebt);
         const existingCov = num(data.existingCoverage);
 
         const typeMap = { 'LIFE': 'Asuransi Jiwa (Life)', 'HEALTH': 'Asuransi Kesehatan', 'CRITICAL_ILLNESS': 'Sakit Kritis' };
 
+        /**
+         * [STEP 3] MAPPING DATA KE CONTEXT TEMPLATE PDF
+         * [LOGIC FIX]: debtClearanceValue sekarang adalah HASIL PENJUMLAHAN (Utang + Biaya Final).
+         * Ini memastikan Box B di PDF memiliki total yang akurat secara matematis.
+         */
         return {
             createdAt: new Date(data.createdAt).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
             user: { name: data.user?.fullName || 'User' },
@@ -404,17 +419,21 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 dependentCount: data.dependentCount,
                 monthlyExpense: fmt(monthlyExpense),
                 protectionDuration: duration,
-                existingDebt: fmt(debt),
+                existingDebt: fmt(existingDebtVal), // Sisa hutang (baris 1)
                 existingCoverage: fmt(existingCov),
-                recommendation: data.recommendation || '-'
+                recommendation: data.recommendation || '-',
             },
             calc: {
                 annualExpense: fmt(annualExpense),
-                nettRate: calculatedNettRate, // Menggunakan hasil hitungan (-10.00)
-                incomeReplacementValue: fmt(incomeReplacement), // [FIXED] Sekarang pasti 2.26 M
-                debtClearanceValue: fmt(debt),
-                totalNeeded: fmt(totalNeeded), // [FIXED] Sekarang pasti 2.3 M
-                coverageGap: fmt(gap)
+                nettRate: calculatedNettRate,
+                incomeReplacementValue: fmt(incomeReplacement), // Pilar A
+
+                // [FIXED] Menjumlahkan Utang + Pemakaman sebelum diformat ke Rupiah
+                debtClearanceValue: fmt(existingDebtVal + finalExpenseVal),
+
+                finalExpenseValue: fmt(finalExpenseVal),         // Biaya Final (baris 2)
+                totalNeeded: fmt(totalNeeded),                   // Total (A + B)
+                coverageGap: fmt(gap)                            // Shortfall
             }
         };
     }

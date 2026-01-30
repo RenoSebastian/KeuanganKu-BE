@@ -185,6 +185,7 @@ export const insuranceReportTemplate = `
     .rb-desc { font-size: 11px; opacity: 0.95; line-height: 1.5; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 8px; }
 
     .kosong{ margin-top: 30px; margin-bottom: 40px; }
+    .kosong2{markin-top:15px;}
 
     /* --- FOOTER --- */
     .page-footer {
@@ -242,6 +243,7 @@ export const insuranceReportTemplate = `
         <div class="bd-row">
           <span>Faktor Inflasi/Bunga</span> <span class="bd-val">{{calc.nettRate}}%</span>
         </div>
+        <div class="kosong2"><span>.</span></div>
         <div class="bd-row" style="background:#f0f9ff; margin-top:5px; border:none; padding:8px;">
           <span style="font-weight:700; color:#0369a1;">Total Dana Hidup</span> 
           <span class="bd-val" style="color:#0369a1;">{{calc.incomeReplacementValue}}</span>
@@ -249,18 +251,19 @@ export const insuranceReportTemplate = `
       </div>
 
       <div class="breakdown-card">
-        <div class="bd-header" style="color:#b91c1c;">B. Debt Clearance</div>
+        <div class="bd-header" style="color:#b91c1c;">B. Debt & Final Clearance</div>
         <div style="font-size:10px; color:var(--secondary); margin-bottom:10px; line-height:1.4;">
-          Dana tunai yang wajib tersedia seketika untuk melunasi seluruh sisa hutang agar tidak membebani ahli waris.
+          Dana tunai yang wajib tersedia seketika untuk melunasi seluruh sisa hutang dan biaya akhir hayat agar tidak membebani ahli waris.
         </div>
         <div class="bd-row">
           <span>Sisa Hutang</span> <span class="bd-val">{{plan.existingDebt}}</span>
         </div>
         <div class="bd-row">
-          <span>Biaya Final (Pemakaman)</span> <span class="bd-val">Included</span>
+          <span>Biaya Final (Pemakaman)</span> 
+          <span class="bd-val">{{calc.finalExpenseValue}}</span>
         </div>
         <div class="bd-row" style="background:#fef2f2; margin-top:5px; border:none; padding:8px;">
-          <span style="font-weight:700; color:#b91c1c;">Total Pelunasan</span> 
+          <span style="font-weight:700; color:#b91c1c;">Total Pelunasan & Biaya Pemakaman</span> 
           <span class="bd-val" style="color:#b91c1c;">{{calc.debtClearanceValue}}</span>
         </div>
       </div>

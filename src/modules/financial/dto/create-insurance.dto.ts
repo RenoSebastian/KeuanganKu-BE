@@ -47,4 +47,15 @@ export class CreateInsuranceDto {
   @IsNumber()
   @Type(() => Number)
   returnRate?: number = 7; // Default 7% jika tidak dikirim Frontend
+
+  /**
+   * [NEW] BIAYA PEMAKAMAN & DUKA (FINAL EXPENSE)
+   * Menambahkan field ini secara eksplisit untuk memisahkan komponen biaya duka
+   * dari Income Replacement Value, sehingga data bisa disajikan secara granular pada laporan PDF.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  @Type(() => Number)
+  finalExpense?: number = 0;
 }

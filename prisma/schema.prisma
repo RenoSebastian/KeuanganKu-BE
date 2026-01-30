@@ -318,6 +318,8 @@ model InsurancePlan {
   // [FIX] Tambahkan 2 Field ini agar error TypeScript hilang & Data tersimpan
   inflationRate      Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
   returnRate         Decimal  @default(7.0) @map("return_rate") @db.Decimal(5, 2)
+  // --- [NEW] Tambahkan baris ini ---
+  finalExpense       Decimal       @default(0) @db.Decimal(15, 2)
 
   // Output Calculation
   coverageNeeded     Decimal  @map("coverage_needed") @db.Decimal(15, 2) 

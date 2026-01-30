@@ -585,29 +585,33 @@ export const calculatePensionPlan = (data: CreatePensionDto) => {
  * Rumus sesuai dokumen: PVAD = PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
  * Dimana r = Nett Rate (Investasi - Inflasi).
  */
+/**
+ * CALCULATOR: INSURANCE PLAN (Income Replacement Method)
+ * Sebagai analis, kita memisahkan kebutuhan menjadi 3 pilar: 
+ * 1. Income Replacement (Living Cost)
+ * 2. Debt Clearance (Liability)
+ * 3. Final Expense (Funeral & Emergency)
+ */
 export const calculateInsurancePlan = (data: CreateInsuranceDto) => {
   const {
     monthlyExpense,
     existingDebt = 0,
     existingCoverage = 0,
     protectionDuration = 10,
-    // Nilai ini sekarang otomatis terisi dari Slider Frontend -> DTO -> Sini
     inflationRate = 5,
     returnRate = 7,
+    // [NEW] Destrukturisasi langsung dari DTO yang sudah diperbaharui
+    finalExpense = 0,
   } = data;
 
-  // Handling field opsional yang mungkin belum ada di DTO (Biaya Duka)
-  // Kita ambil secara manual agar tidak error di TypeScript jika DTO belum diupdate untuk field ini
-  const funeralCost = (data as any).funeralCost || 0;
-
   // 1. Hitung Bunga Riil / Nett Rate (r)
-  // Nett interest = Target investasi - Inflasi
+  // Nett interest = Target investasi - Inflasi (Real Rate of Return)
   const iRate = inflationRate / 100;
   const rRate = returnRate / 100;
   const nettRate = rRate - iRate;
 
   // 2. Hitung Income Replacement (PVAD - Present Value Annuity Due)
-  // Income tahunan yang harus digantikan
+  // Income tahunan yang harus digantikan untuk menjaga standar hidup keluarga
   const annualExpense = monthlyExpense * 12;
   const n = protectionDuration;
 
@@ -615,54 +619,66 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto) => {
 
   if (nettRate === 0) {
     // KASUS KHUSUS: Jika Investasi == Inflasi (Nett Rate 0)
-    // Hitungan linear: Pengeluaran Tahunan x Durasi
+    // Hitungan linear sederhana: Pengeluaran Tahunan x Durasi
     incomeReplacementValue = annualExpense * n;
   } else {
-    // RUMUS UTAMA (PVAD)
-    // Rumus: PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
-
-    // Faktor Diskonto Anuitas
+    /**
+     * RUMUS UTAMA (PVAD)
+     * Kita menggunakan Annuity Due karena asumsi keluarga membutuhkan 
+     * dana di AWAL tahun untuk biaya hidup.
+     * Rumus: PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
+     */
     const discountFactor = (1 - Math.pow(1 + nettRate, -n)) / nettRate;
-
-    // Dikali (1+nettRate) karena asumsi penarikan dana dilakukan di AWAL tahun (Due)
     incomeReplacementValue = annualExpense * discountFactor * (1 + nettRate);
   }
 
   // 3. Debt Clearance (Pelunasan Hutang)
   const debtClearanceValue = existingDebt;
 
-  // 4. Biaya Duka & Lainnya
-  const otherNeeds = funeralCost;
+  /**
+   * 4. Biaya Duka & Kebutuhan Akhir (Final Expense)
+   * Sekarang nilai ini diambil secara murni dari input user, 
+   * bukan lagi 'Included' secara abstrak di dalam income replacement.
+   */
+  const otherNeeds = finalExpense;
 
-  // 5. Total Kebutuhan UP (Gross)
-  // Total = Dana Hidup + Lunasi Hutang + Biaya Lain
+  /**
+   * 5. Total Kebutuhan UP (Gross)
+   * Total = Dana Hidup + Pelunasan Hutang + Biaya Akhir Hayat
+   * Sesuai prinsip 'Separation of Concerns', kita menjumlahkan 3 komponen yang berbeda.
+   */
   const totalNeeded = incomeReplacementValue + debtClearanceValue + otherNeeds;
 
   // 6. Hitung Gap (Kekurangan Proteksi)
-  // Total Kebutuhan - Asuransi yang Sudah Punya
+  // Total Kebutuhan - Aset/Asuransi yang Sudah Dimiliki
   const coverageGap = Math.max(0, totalNeeded - existingCoverage);
 
-  // 7. Buat Rekomendasi (String)
+  // 7. Buat Rekomendasi Tekstual yang Akurat
   let recommendation = "";
   if (coverageGap <= 0) {
-    recommendation = "Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Income Replacement & Pelunasan Hutang).";
+    recommendation = "Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Biaya Hidup, Hutang, & Biaya Duka).";
   } else {
-    const formattedGap = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(coverageGap);
-    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk bertahan hidup selama ${n} tahun dan melunasi hutang jika terjadi risiko. Disarankan menambah UP Asuransi Jiwa Berjangka (Term Life).`;
+    const formattedGap = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      maximumFractionDigits: 0
+    }).format(coverageGap);
+
+    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk menjaga standar hidup selama ${n} tahun, melunasi hutang, serta mencadangkan biaya akhir hayat jika terjadi risiko. Disarankan menambah UP Asuransi Jiwa Berjangka (Term Life).`;
   }
 
   return {
-    // Detail Rincian untuk ditampilkan di FE
+    // Rincian Granular untuk disajikan ke FE & PDF
     annualExpense,          // Pengeluaran Tahunan
-    nettRatePercentage: (nettRate * 100).toFixed(2), // Nett Rate dalam %
-    incomeReplacementValue, // Dana Warisan Hidup (PVAD)
-    debtClearanceValue,     // Dana Pelunasan Hutang
-    otherNeeds,             // Biaya Duka/Lainnya
+    nettRatePercentage: (nettRate * 100).toFixed(2), // Real Rate dalam %
+    incomeReplacementValue, // Pilar 1: Dana Hidup (PVAD)
+    debtClearanceValue,     // Pilar 2: Dana Hutang
+    otherNeeds,             // Pilar 3: Biaya Duka/Pemakaman
 
-    // Hasil Akhir
+    // Aggregated Results
     totalNeeded,   // Total UP Ideal
     coverageGap,   // Shortfall (Kekurangan)
-    recommendation // Saran Tekstual
+    recommendation // Saran Analis
   };
 };
 
