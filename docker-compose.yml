@@ -1,0 +1,18 @@
+services:
+  keuanganku-be:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: keuanganku-be
+    restart: always
+    # Docker akan otomatis mencari file bernama .env di direktori yang sama
+    env_file:
+      - .env
+    ports:
+      - "${APP_PORT:-3001}:3000"
+    networks:
+      - edaily_network
+
+networks:
+  edaily_network:
+    external: true
