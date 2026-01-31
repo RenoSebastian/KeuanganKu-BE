@@ -32,6 +32,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         this.logger.log('Initializing Puppeteer Browser...');
         try {
             this.browser = await puppeteer.launch({
+		executablePath: '/usr/bin/google-chrome',
                 headless: true, // Mode tanpa UI (Wajib untuk server)
                 args: [
                     '--no-sandbox',
