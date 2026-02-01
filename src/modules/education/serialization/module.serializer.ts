@@ -6,9 +6,14 @@ import { EducationModuleStatus, EducationProgressStatus } from '@prisma/client';
 export class ModuleSectionSerializer {
     @Expose() id: string;
     @Expose() sectionOrder: number;
-    @Expose() title: string;
-    @Expose() contentMarkdown: string; // Hanya dikirim saat Detail View
-    @Expose() illustrationUrl: string;
+
+    // [FIX] Allow null karena di DB field ini optional (String?)
+    @Expose() title: string | null;
+
+    @Expose() contentMarkdown: string;
+
+    // [FIX] Allow null karena di DB field ini optional (String?)
+    @Expose() illustrationUrl: string | null;
 
     constructor(partial: Partial<ModuleSectionSerializer>) {
         Object.assign(this, partial);
@@ -35,16 +40,16 @@ export class ModuleListResponse {
     @Expose() thumbnailUrl: string;
     @Expose() excerpt: string;
     @Expose() readingTime: number;
-    @Expose() publishedAt: Date;
+
+    @Expose() publishedAt: Date | null;
 
     @Expose()
     @Type(() => CategorySerializer)
     category: CategorySerializer;
 
-    // Progress Ringan untuk List View (Optional, misal: "Sudah dibaca?")
     @Expose() userStatus: EducationProgressStatus | 'NOT_STARTED';
 
-    @Exclude() status: EducationModuleStatus; // Hide internal status
+    @Exclude() status: EducationModuleStatus;
     @Exclude() createdAt: Date;
     @Exclude() updatedAt: Date;
 
@@ -59,7 +64,8 @@ export class ModuleDetailResponse {
     @Expose() slug: string;
     @Expose() thumbnailUrl: string;
     @Expose() readingTime: number;
-    @Expose() publishedAt: Date;
+
+    @Expose() publishedAt: Date | null;
 
     @Expose()
     @Type(() => CategorySerializer)
@@ -69,8 +75,6 @@ export class ModuleDetailResponse {
     @Type(() => ModuleSectionSerializer)
     sections: ModuleSectionSerializer[];
 
-    // --- PROGRESS INJECTION ---
-    // Data ini disuntikkan runtime berdasarkan siapa user yang login
     @Expose() currentProgress: {
         status: EducationProgressStatus;
         lastReadSectionId: string | null;

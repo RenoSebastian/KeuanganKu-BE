@@ -36,7 +36,6 @@ export class EducationManagementService {
         const slug = await this.generateUniqueSlug(moduleData.title);
 
         // 3. Atomic Transaction (Header + Sections)
-        // Jika insert section gagal, insert module harus dibatalkan.
         try {
             const result = await this.prisma.$transaction(async (tx) => {
                 // A. Create Header
@@ -77,7 +76,9 @@ export class EducationManagementService {
         if (!existing) throw new NotFoundException('Module not found');
 
         // 2. Handle Slug Update jika Title berubah
-        let newSlug = undefined;
+        // [FIX] Explicit Type Declaration to avoid "Type 'string' is not assignable to type 'undefined'" error
+        let newSlug: string | undefined;
+
         if (dto.title && dto.title !== existing.title) {
             newSlug = await this.generateUniqueSlug(dto.title);
         }
@@ -87,7 +88,7 @@ export class EducationManagementService {
             where: { id },
             data: {
                 ...dto,
-                slug: newSlug,
+                slug: newSlug, // Now safe to pass undefined or string
             },
         });
     }
@@ -123,8 +124,6 @@ export class EducationManagementService {
         if (!module) throw new NotFoundException('Module not found');
 
         // Hard Delete: Karena Cascade delete aktif di Schema, sections otomatis terhapus.
-        // Jika ingin Soft Delete, kita bisa ubah status jadi ARCHIVED, tapi di sini
-        // kita beri Admin kuasa penuh untuk menghapus sampah (DRAFT) atau konten usang.
         return this.prisma.educationModule.delete({
             where: { id },
         });
@@ -133,16 +132,13 @@ export class EducationManagementService {
     // --- SECTION MANAGEMENT ---
 
     async reorderSections(moduleId: string, dto: ReorderSectionsDto) {
-        // Validasi kepemilikan
         const module = await this.prisma.educationModule.findUnique({ where: { id: moduleId } });
         if (!module) throw new NotFoundException('Module not found');
 
-        // Eksekusi Transactional Reorder
-        // Kita gunakan updateMany loop karena Prisma belum support bulk update dengan value berbeda native
         return this.prisma.$transaction(
             dto.items.map((item) =>
                 this.prisma.moduleSection.update({
-                    where: { id: item.sectionId, moduleId }, // Pastikan section milik module ini (Safety Check)
+                    where: { id: item.sectionId, moduleId },
                     data: { sectionOrder: item.newOrder },
                 }),
             ),
@@ -157,7 +153,6 @@ export class EducationManagementService {
         let counter = 1;
         let isUnique = false;
 
-        // Loop check keberadaan slug
         while (!isUnique) {
             const existing = await this.prisma.educationModule.findUnique({
                 where: { slug },
