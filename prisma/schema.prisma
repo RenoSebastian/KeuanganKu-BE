@@ -49,6 +49,18 @@ enum InsuranceType {
   CRITICAL_ILLNESS
 }
 
+// [NEW] Enums untuk Modul Edukasi
+enum EducationModuleStatus {
+  DRAFT
+  PUBLISHED
+  ARCHIVED
+}
+
+enum EducationProgressStatus {
+  STARTED
+  COMPLETED
+}
+
 // --- MASTER DATA ---
 
 model UnitKerja {
@@ -74,7 +86,7 @@ model User {
   passwordHash String @map("password_hash")
   fullName     String @map("full_name")
 
-  // [NEW] Avatar Field
+  // Avatar Field
   avatar String? @db.Text
 
   dateOfBirth    DateTime @map("date_of_birth") // Penting untuk pensiun
@@ -86,7 +98,7 @@ model User {
   // Relasi
   unitKerja UnitKerja @relation(fields: [unitKerjaId], references: [id])
 
-  // Relasi ke Fitur
+  // Relasi ke Fitur Finansial
   budgetPlans     BudgetPlan[]
   financialChecks FinancialCheckup[]
   eduPlans        EducationPlan[]
@@ -94,7 +106,10 @@ model User {
   insurancePlans  InsurancePlan[]
   goalPlans       GoalPlan[]
 
-  // Relasi Audit
+  // [NEW] Relasi ke Modul Edukasi (Fase 1)
+  educationProgress UserEducationProgress[]
+
+  // Relasi Audit & Logs
   actionsPerformed AccessLog[]    @relation("ActorRelation")
   actionsTargeted  AccessLog[]    @relation("TargetRelation")
   RetentionLog     RetentionLog[]
@@ -158,10 +173,8 @@ model FinancialCheckup {
   userId    String   @map("user_id")
   checkDate DateTime @default(now()) @map("check_date")
 
-  // --- [NEW] TAMBAHKAN DUA BARIS INI ---
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
-  // -------------------------------------
 
   userProfile   Json  @map("user_profile")
   spouseProfile Json? @map("spouse_profile")
@@ -234,9 +247,6 @@ model FinancialCheckup {
 
   user User @relation(fields: [userId], references: [id])
 
-  // [OPTIMIZATION]
-  // 1. Composite Index: Mempercepat query "ORDER BY checkDate DESC" per user
-  // 2. Status Index: Mempercepat filtering statistik global (Count Sehat/Bahaya)
   @@index([userId, checkDate(sort: Desc)])
   @@index([status])
   @@map("financial_checkups")
@@ -280,13 +290,12 @@ model EducationStage {
   @@map("education_stages")
 }
 
-// --- FINANCIAL ENGINE: PENSION PLANNING (NEW) ---
+// --- FINANCIAL ENGINE: PENSION PLANNING ---
 
 model PensionPlan {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   createdAt DateTime @default(now()) @map("created_at")
-  // [NEW] Tambahkan baris ini
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Input Data
@@ -309,14 +318,13 @@ model PensionPlan {
   @@map("pension_plans")
 }
 
-// --- FINANCIAL ENGINE: INSURANCE PLANNING (NEW) ---
-
-// Cari block model InsurancePlan dan tambahkan 2 field baru ini
+// --- FINANCIAL ENGINE: INSURANCE PLANNING ---
 
 model InsurancePlan {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   type InsuranceType @default(LIFE)
 
@@ -326,14 +334,9 @@ model InsurancePlan {
   existingDebt       Decimal @default(0) @map("existing_debt") @db.Decimal(15, 2)
   existingCoverage   Decimal @default(0) @map("existing_coverage") @db.Decimal(15, 2)
   protectionDuration Int     @default(10) @map("protection_duration")
-
-  // [NEW] Tambahkan baris ini
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  // [FIX] Tambahkan 2 Field ini agar error TypeScript hilang & Data tersimpan
+  
   inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
   returnRate    Decimal @default(7.0) @map("return_rate") @db.Decimal(5, 2)
-  // --- [NEW] Tambahkan baris ini ---
   finalExpense  Decimal @default(0) @db.Decimal(15, 2)
 
   // Output Calculation
@@ -345,13 +348,12 @@ model InsurancePlan {
   @@map("insurance_plans")
 }
 
-// --- FINANCIAL ENGINE: GOAL PLANNING (NEW) ---
+// --- FINANCIAL ENGINE: GOAL PLANNING ---
 
 model GoalPlan {
   id        String   @id @default(uuid())
   userId    String   @map("user_id")
   createdAt DateTime @default(now()) @map("created_at")
-  // [NEW] Tambahkan baris ini
   updatedAt DateTime @updatedAt @map("updated_at")
 
   // Input Data
@@ -413,4 +415,96 @@ model RetentionLog {
 
   @@index([executedAt])
   @@map("retention_logs")
+}
+
+// =========================================================
+// MODULE: EDUCATION & LITERACY (FASE 1)
+// =========================================================
+
+model EducationCategory {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique // URL-friendly ID
+  iconUrl      String   @map("icon_url") // URL icon kategori
+  displayOrder Int      @default(0) @map("display_order") // Untuk sorting manual di FE
+  isActive     Boolean  @default(true) @map("is_active")
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relasi
+  modules      EducationModule[]
+
+  @@map("education_categories")
+}
+
+model EducationModule {
+  id             String                @id @default(uuid())
+  categoryId     String                @map("category_id")
+  title          String
+  slug           String                @unique
+  thumbnailUrl   String                @map("thumbnail_url")
+  excerpt        String                @db.Text // Ringkasan pendek untuk card view
+  readingTime    Int                   @default(5) @map("reading_time") // Estimasi dalam menit
+  
+  status         EducationModuleStatus @default(DRAFT)
+  publishedAt    DateTime?             @map("published_at")
+
+  createdAt      DateTime              @default(now()) @map("created_at")
+  updatedAt      DateTime              @updatedAt @map("updated_at")
+
+  // Relasi
+  category       EducationCategory     @relation(fields: [categoryId], references: [id])
+  sections       ModuleSection[]
+  userProgress   UserEducationProgress[]
+
+  // Indexing untuk performa filtering & searching
+  @@index([categoryId])
+  @@index([status])
+  @@index([slug])
+  
+  @@map("education_modules")
+}
+
+model ModuleSection {
+  id              String   @id @default(uuid())
+  moduleId        String   @map("module_id")
+  
+  sectionOrder    Int      @map("section_order") // Urutan langkah baca (1, 2, 3...)
+  title           String?  // Optional, misal "Langkah 1: Kenali Asetmu"
+  contentMarkdown String   @map("content_markdown") @db.Text // Konten utama format Markdown
+  illustrationUrl String?  @map("illustration_url") // Gambar pendukung per section
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relasi
+  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  
+  // Relasi balik untuk tracking posisi baca user
+  progressLogs    UserEducationProgress[]
+
+  @@index([moduleId])
+  @@map("module_sections")
+}
+
+model UserEducationProgress {
+  userId            String                  @map("user_id")
+  moduleId          String                  @map("module_id")
+  
+  status            EducationProgressStatus @default(STARTED)
+  lastReadSectionId String?                 @map("last_read_section_id") // Bookmark otomatis
+  
+  completedAt       DateTime?               @map("completed_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at") // Kapan terakhir baca
+
+  // Relasi
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module            EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  lastReadSection   ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
+
+  // Composite Primary Key: 
+  // Satu user hanya boleh punya satu record progress per modul.
+  @@id([userId, moduleId])
+  @@map("user_education_progress")
 }
