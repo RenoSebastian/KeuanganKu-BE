@@ -91,7 +91,7 @@ model User {
   noWa            String?   @map("no_wa")
   company         String?   @map("company")
   jabatan         String?   @map("jabatan")
-  gender          String?   @map("gender") // Bisa diubah enum jika perlu strict
+  gender          String?   @map("gender")
   
   // --- Optional Fields ---
   statusMenikah   String?   @map("status_menikah")
@@ -106,13 +106,14 @@ model User {
   // --- Relasi ---
   educationProgress UserEducationProgress[]
   
-  // Relasi ke AccessLog (Actor = Pelaku)
+  // Relasi ke AccessLog
   actionsPerformed AccessLog[]    @relation("ActorRelation")
-  
-  // Relasi ke AccessLog (Target = Objek yang diubah, opsional)
   actionsTargeted  AccessLog[]    @relation("TargetRelation")
   
   RetentionLog     RetentionLog[]
+
+  // [NEW] Relasi ke Market Insight (Telemetri)
+  insights         MarketInsight[]
 
   @@map("users")
 }
@@ -131,37 +132,62 @@ model UnitKerja {
   @@map("unit_kerja")
 }
 
-// =========================================================
-// FINANCIAL ENGINE MODELS (STATELESS / INDEPENDENT)
-// =========================================================
+// [NEW] MASTER DATA REFERENCES (Untuk Standarisasi Input)
+model RefOccupation {
+  code        String @id // Ex: "JOB-001"
+  name        String // Ex: "PNS", "Wiraswasta"
+  sector      String // Ex: "Pemerintahan"
 
-model BudgetPlan {
-  id        String   @id @default(uuid())
-  sessionId String?  @map("session_id")
-  
-  month     Int
-  year      Int
-
-  fixedIncome     Decimal @map("fixed_income") @db.Decimal(15, 2)
-  variableIncome  Decimal @default(0) @map("variable_income") @db.Decimal(15, 2)
-
-  productiveDebt  Decimal @default(0) @map("productive_debt") @db.Decimal(15, 2)
-  consumptiveDebt Decimal @default(0) @map("consumptive_debt") @db.Decimal(15, 2)
-  insurance       Decimal @default(0) @map("insurance") @db.Decimal(15, 2)
-  saving          Decimal @default(0) @map("saving") @db.Decimal(15, 2)
-  livingCost      Decimal @default(0) @map("living_cost") @db.Decimal(15, 2)
-
-  totalIncome     Decimal @map("total_income") @db.Decimal(15, 2)
-  totalExpense    Decimal @map("total_expense") @db.Decimal(15, 2)
-  balance         Decimal @map("balance") @db.Decimal(15, 2)
-  status          String
-
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
-
-  @@index([sessionId])
-  @@map("budget_plans")
+  @@map("ref_occupations")
 }
+
+model RefIncomeBracket {
+  id          Int     @id @default(autoincrement())
+  rangeLabel  String  @map("range_label") // Ex: "5jt - 10jt"
+  minVal      Decimal @map("min_val") @db.Decimal(15, 2)
+  maxVal      Decimal @map("max_val") @db.Decimal(15, 2)
+
+  @@map("ref_income_brackets")
+}
+
+// =========================================================
+// TELEMETRY & ANALYTICS (Stateless Storage)
+// =========================================================
+
+// [NEW] Tabel untuk menyimpan insight pasar tanpa data pribadi klien
+model MarketInsight {
+  id                BigInt   @id @default(autoincrement()) @map("insight_id")
+  agentId           String   @map("agent_id")
+  
+  // Data Demografis (Anonim)
+  occupationCode    String   @map("occupation_code") // Ref ke RefOccupation
+  incomeBracketId   Int      @map("income_bracket_id") // Ref ke RefIncomeBracket
+  locationLat       Float?   @map("latitude")
+  locationLong      Float?   @map("longitude")
+  
+  // Hasil Analisis
+  moduleType        String   @map("module_type") // Value: "BUDGETING", "PENSION", dll
+  financialScore    Int      @map("financial_health_score") // Skor 0-100
+  
+  // Detail Statistik (Disimpan sebagai JSONB)
+  // Contoh: { savings_ratio: 0.2, debt_ratio: 0.3 }
+  metrics           Json     @map("insight_metrics") 
+
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  // Relasi ke Agen (User)
+  agent             User     @relation(fields: [agentId], references: [id])
+
+  @@index([occupationCode])
+  @@index([moduleType])
+  @@map("market_insights")
+}
+
+// =========================================================
+// FINANCIAL ENGINE MODELS (LEGACY / STATELESS TRANSITION)
+// =========================================================
+
+// [DELETED] Model BudgetPlan dihapus karena beralih ke Stateless
 
 model FinancialCheckup {
   id            String   @id @default(uuid())
