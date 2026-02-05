@@ -8,11 +8,11 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pg_trgm]
+  extensions = [pg_trgm] // Definisikan extension pg_trgm untuk search
 }
 
 // =========================================================
-// ENUMS
+// ENUMS (Standarisasi Data)
 // =========================================================
 
 enum Role {
@@ -28,8 +28,8 @@ enum HealthStatus {
 }
 
 enum EducationMethod {
-  ARITHMETIC
-  GEOMETRIC
+  ARITHMETIC // Konvensional
+  GEOMETRIC // Inflasi Progresif
 }
 
 enum SchoolLevel {
@@ -42,8 +42,8 @@ enum SchoolLevel {
 }
 
 enum CostType {
-  ENTRY
-  ANNUAL
+  ENTRY // Uang Pangkal
+  ANNUAL // SPP Tahunan
 }
 
 enum InsuranceType {
@@ -51,6 +51,8 @@ enum InsuranceType {
   HEALTH
   CRITICAL_ILLNESS
 }
+
+// --- Enums Modul Edukasi & Quiz ---
 
 enum EducationModuleStatus {
   DRAFT
@@ -63,89 +65,106 @@ enum EducationProgressStatus {
   COMPLETED
 }
 
+// [NEW] Enum Tipe Pertanyaan (Extensible untuk masa depan)
 enum QuizQuestionType {
   SINGLE_CHOICE
-}
-
-enum EducationLevel {
-  BEGINNER
-  INTERMEDIATE
-  ADVANCED
+  // MULTIPLE_CHOICE - (Future Dev)
+  // TRUE_FALSE - (Future Dev)
 }
 
 // =========================================================
-// USER MANAGEMENT (AGENT PROFILE)
-// =========================================================
-
-model User {
-  id              String    @id @default(uuid())
-  
-  // --- Kredensial ---
-  nama            String    @map("nama")
-  email           String    @unique
-  password        String    @map("password_hash")
-  
-  // --- Profil Agen ---
-  tanggalLahir    DateTime  @map("tanggal_lahir")
-  alamatDomisili  String    @map("alamat_domisili") @db.Text
-  noWa            String    @map("no_wa")
-  company         String    @map("company")
-  jabatan         String    @map("jabatan")
-  gender          String    @map("gender") // Bisa diubah enum jika perlu strict
-  
-  // --- Optional Fields ---
-  statusMenikah   String?   @map("status_menikah")
-  jumlahTanggungan Int?     @map("jumlah_tanggungan")
-  profilPicture   String?   @map("profil_picture") @db.Text
-
-  // --- System Metadata ---
-  role            Role      @default(USER)
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
-
-  // --- Relasi Edukasi (TETAP DIPERTAHANKAN) ---
-  educationProgress UserEducationProgress[]
-
-  // --- Relasi Audit (TETAP DIPERTAHANKAN untuk Log Actor) ---
-  actionsPerformed AccessLog[]    @relation("ActorRelation")
-  RetentionLog     RetentionLog[]
-
-  // [NOTE] Relasi ke UnitKerja dan Tabel Finansial DIHAPUS Total.
-  
-  @@map("users")
-}
-
-// =========================================================
-// MASTER DATA (Optional / Standalone)
+// MASTER DATA
 // =========================================================
 
 model UnitKerja {
   id        String   @id @default(uuid())
-  kodeUnit  String   @unique @map("kode_unit")
-  namaUnit  String   @map("nama_unit")
+  kodeUnit  String   @unique @map("kode_unit") // e.g. "IT-01"
+  namaUnit  String   @map("nama_unit") // e.g. "Divisi TI"
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // Tidak ada relasi balik ke User karena User sekarang "Flat"
+  // Relasi
+  users User[]
+
   @@map("unit_kerja")
 }
 
 // =========================================================
-// FINANCIAL ENGINE MODELS (STATELESS / INDEPENDENT)
+// USER MANAGEMENT & SECURITY
 // =========================================================
 
-// Note: Field `sessionId` ditambahkan untuk grouping data sementara 
-// jika user melakukan multiple simulation dalam satu sesi browser.
+model User {
+  id           String @id @default(uuid())
+  unitKerjaId  String @map("unit_kerja_id")
+  nip          String @unique
+  email        String @unique
+  passwordHash String @map("password_hash")
+  fullName     String @map("full_name")
+
+  // Avatar Field
+  avatar String? @db.Text
+
+  dateOfBirth    DateTime @map("date_of_birth") // Penting untuk pensiun
+  dependentCount Int      @default(0) @map("dependent_count")
+  role           Role     @default(USER)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  // Relasi Master Data
+  unitKerja UnitKerja @relation(fields: [unitKerjaId], references: [id])
+
+  // Relasi Fitur Finansial
+  budgetPlans     BudgetPlan[]
+  financialChecks FinancialCheckup[]
+  eduPlans        EducationPlan[]
+  pensionPlans    PensionPlan[]
+  insurancePlans  InsurancePlan[]
+  goalPlans       GoalPlan[]
+
+  // Relasi Modul Edukasi (Fase 1)
+  educationProgress UserEducationProgress[]
+
+  // Relasi Audit & Logs
+  actionsPerformed AccessLog[]    @relation("ActorRelation")
+  actionsTargeted  AccessLog[]    @relation("TargetRelation")
+  RetentionLog     RetentionLog[]
+
+  // [OPTIMIZATION] Index FK untuk mempercepat JOIN Unit Kerja
+  @@index([unitKerjaId])
+  @@map("users")
+}
+
+// =========================================================
+// AUDIT TRAIL (Dashboard Direksi)
+// =========================================================
+
+model AccessLog {
+  id           String   @id @default(uuid())
+  actorId      String   @map("actor_id") // Siapa yang melihat? (Direksi)
+  targetUserId String?  @map("target_user_id") // Data siapa? (Karyawan)
+  action       String // VIEW_DETAIL, DOWNLOAD_PDF, UPDATE_PROFILE
+  metadata     Json? // Detail tambahan
+  accessedAt   DateTime @default(now()) @map("accessed_at")
+
+  // Relasi
+  actor      User  @relation("ActorRelation", fields: [actorId], references: [id])
+  targetUser User? @relation("TargetRelation", fields: [targetUserId], references: [id])
+
+  @@map("access_logs")
+}
+
+// =========================================================
+// FINANCIAL ENGINE MODELS
+// =========================================================
 
 model BudgetPlan {
-  id        String   @id @default(uuid())
-  sessionId String?  @map("session_id") // Identifier anonim
-  
-  month     Int
-  year      Int
+  id     String @id @default(uuid())
+  userId String @map("user_id")
+  month  Int
+  year   Int
 
-  fixedIncome     Decimal @map("fixed_income") @db.Decimal(15, 2)
-  variableIncome  Decimal @default(0) @map("variable_income") @db.Decimal(15, 2)
+  fixedIncome    Decimal @map("fixed_income") @db.Decimal(15, 2)
+  variableIncome Decimal @default(0) @map("variable_income") @db.Decimal(15, 2)
 
   productiveDebt  Decimal @default(0) @map("productive_debt") @db.Decimal(15, 2)
   consumptiveDebt Decimal @default(0) @map("consumptive_debt") @db.Decimal(15, 2)
@@ -153,30 +172,31 @@ model BudgetPlan {
   saving          Decimal @default(0) @map("saving") @db.Decimal(15, 2)
   livingCost      Decimal @default(0) @map("living_cost") @db.Decimal(15, 2)
 
-  totalIncome     Decimal @map("total_income") @db.Decimal(15, 2)
-  totalExpense    Decimal @map("total_expense") @db.Decimal(15, 2)
-  balance         Decimal @map("balance") @db.Decimal(15, 2)
-  status          String
+  totalIncome  Decimal @map("total_income") @db.Decimal(15, 2)
+  totalExpense Decimal @map("total_expense") @db.Decimal(15, 2)
+  balance      Decimal @map("balance") @db.Decimal(15, 2)
+  status       String
 
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  @@index([sessionId])
+  user User @relation(fields: [userId], references: [id])
+
   @@map("budget_plans")
 }
 
 model FinancialCheckup {
-  id            String   @id @default(uuid())
-  sessionId     String?  @map("session_id")
-  checkDate     DateTime @default(now()) @map("check_date")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  checkDate DateTime @default(now()) @map("check_date")
 
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  userProfile   Json     @map("user_profile")
-  spouseProfile Json?    @map("spouse_profile")
+  userProfile   Json  @map("user_profile")
+  spouseProfile Json? @map("spouse_profile")
 
-  // --- ASET ---
+  // Aset & Utang (Condensed for brevity, structure preserved)
   assetCash          Decimal @default(0) @map("asset_cash") @db.Decimal(15, 2)
   assetHome          Decimal @default(0) @map("asset_home") @db.Decimal(15, 2)
   assetVehicle       Decimal @default(0) @map("asset_vehicle") @db.Decimal(15, 2)
@@ -184,17 +204,16 @@ model FinancialCheckup {
   assetAntique       Decimal @default(0) @map("asset_antique") @db.Decimal(15, 2)
   assetPersonalOther Decimal @default(0) @map("asset_personal_other") @db.Decimal(15, 2)
 
-  assetInvHome       Decimal @default(0) @map("asset_inv_home") @db.Decimal(15, 2)
-  assetInvVehicle    Decimal @default(0) @map("asset_inv_vehicle") @db.Decimal(15, 2)
-  assetGold          Decimal @default(0) @map("asset_gold") @db.Decimal(15, 2)
-  assetInvAntique    Decimal @default(0) @map("asset_inv_antique") @db.Decimal(15, 2)
-  assetStocks        Decimal @default(0) @map("asset_stocks") @db.Decimal(15, 2)
-  assetMutualFund    Decimal @default(0) @map("asset_mutual_fund") @db.Decimal(15, 2)
-  assetBonds         Decimal @default(0) @map("asset_bonds") @db.Decimal(15, 2)
-  assetDeposit       Decimal @default(0) @map("asset_deposit") @db.Decimal(15, 2)
-  assetInvOther      Decimal @default(0) @map("asset_inv_other") @db.Decimal(15, 2)
+  assetInvHome    Decimal @default(0) @map("asset_inv_home") @db.Decimal(15, 2)
+  assetInvVehicle Decimal @default(0) @map("asset_inv_vehicle") @db.Decimal(15, 2)
+  assetGold       Decimal @default(0) @map("asset_gold") @db.Decimal(15, 2)
+  assetInvAntique Decimal @default(0) @map("asset_inv_antique") @db.Decimal(15, 2)
+  assetStocks     Decimal @default(0) @map("asset_stocks") @db.Decimal(15, 2)
+  assetMutualFund Decimal @default(0) @map("asset_mutual_fund") @db.Decimal(15, 2)
+  assetBonds      Decimal @default(0) @map("asset_bonds") @db.Decimal(15, 2)
+  assetDeposit    Decimal @default(0) @map("asset_deposit") @db.Decimal(15, 2)
+  assetInvOther   Decimal @default(0) @map("asset_inv_other") @db.Decimal(15, 2)
 
-  // --- UTANG ---
   debtKPR              Decimal @default(0) @map("debt_kpr") @db.Decimal(15, 2)
   debtKPM              Decimal @default(0) @map("debt_kpm") @db.Decimal(15, 2)
   debtCC               Decimal @default(0) @map("debt_cc") @db.Decimal(15, 2)
@@ -202,9 +221,8 @@ model FinancialCheckup {
   debtConsumptiveOther Decimal @default(0) @map("debt_consumptive_other") @db.Decimal(15, 2)
   debtBusiness         Decimal @default(0) @map("debt_business") @db.Decimal(15, 2)
 
-  // --- INCOME & EXPENSE ---
-  incomeFixed         Decimal @default(0) @map("income_fixed") @db.Decimal(15, 2)
-  incomeVariable      Decimal @default(0) @map("income_variable") @db.Decimal(15, 2)
+  incomeFixed    Decimal @default(0) @map("income_fixed") @db.Decimal(15, 2)
+  incomeVariable Decimal @default(0) @map("income_variable") @db.Decimal(15, 2)
 
   installmentKPR              Decimal @default(0) @map("installment_kpr") @db.Decimal(15, 2)
   installmentKPM              Decimal @default(0) @map("installment_kpm") @db.Decimal(15, 2)
@@ -234,158 +252,174 @@ model FinancialCheckup {
   expenseHelpers       Decimal @default(0) @map("expense_helpers") @db.Decimal(15, 2)
   expenseTax           Decimal @default(0) @map("expense_tax") @db.Decimal(15, 2)
   expenseLifestyle     Decimal @default(0) @map("expense_lifestyle") @db.Decimal(15, 2)
-  expenseOther         Decimal @default(0) @map("expense_other") @db.Decimal(15, 2)
 
-  // --- RESULT ---
-  totalNetWorth   Decimal      @default(0) @map("total_net_worth") @db.Decimal(15, 2)
-  surplusDeficit  Decimal      @default(0) @map("surplus_deficit") @db.Decimal(15, 2)
-  healthScore     Int          @default(0) @map("health_score")
-  status          HealthStatus @default(BAHAYA)
-  ratiosDetails   Json         @map("ratios_details")
+  expenseOther Decimal @default(0) @map("expense_other") @db.Decimal(15, 2)
 
-  @@index([sessionId])
+  totalNetWorth  Decimal      @default(0) @map("total_net_worth") @db.Decimal(15, 2)
+  surplusDeficit Decimal      @default(0) @map("surplus_deficit") @db.Decimal(15, 2)
+  healthScore    Int          @default(0) @map("health_score")
+  status         HealthStatus @default(BAHAYA)
+
+  ratiosDetails Json @map("ratios_details")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, checkDate(sort: Desc)])
   @@index([status])
   @@map("financial_checkups")
 }
 
 model EducationPlan {
-  id            String          @id @default(uuid())
-  sessionId     String?         @map("session_id")
-  
-  childName     String          @map("child_name")
-  childDob      DateTime        @map("child_dob")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  childName String   @map("child_name")
+  childDob  DateTime @map("child_dob")
 
   inflationRate Decimal         @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
   returnRate    Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
   method        EducationMethod @default(GEOMETRIC)
 
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  stages        EducationStage[]
+  user   User             @relation(fields: [userId], references: [id])
+  stages EducationStage[]
 
-  @@index([sessionId])
   @@map("education_plans")
 }
 
 model EducationStage {
-  id            String        @id @default(uuid())
-  planId        String        @map("plan_id")
-  level         SchoolLevel
-  costType      CostType      @map("cost_type")
+  id       String      @id @default(uuid())
+  planId   String      @map("plan_id")
+  level    SchoolLevel
+  costType CostType    @map("cost_type")
 
-  currentCost   Decimal       @map("current_cost") @db.Decimal(15, 2)
-  futureCost    Decimal       @map("future_cost") @db.Decimal(15, 2)
+  currentCost Decimal @map("current_cost") @db.Decimal(15, 2)
+  futureCost  Decimal @map("future_cost") @db.Decimal(15, 2)
 
-  yearsToStart  Int           @map("years_to_start")
-  monthlySaving Decimal       @map("monthly_saving") @db.Decimal(15, 2)
+  yearsToStart  Int     @map("years_to_start")
+  monthlySaving Decimal @map("monthly_saving") @db.Decimal(15, 2)
 
-  plan          EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@map("education_stages")
 }
 
 model PensionPlan {
-  id             String   @id @default(uuid())
-  sessionId      String?  @map("session_id")
-  
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  currentAge     Int      @map("current_age")
-  retirementAge  Int      @map("retirement_age")
-  lifeExpectancy Int      @default(80) @map("life_expectancy")
+  currentAge     Int @map("current_age")
+  retirementAge  Int @map("retirement_age")
+  lifeExpectancy Int @default(80) @map("life_expectancy")
 
-  currentExpense Decimal  @map("current_expense") @db.Decimal(15, 2)
-  currentSaving  Decimal  @default(0) @map("current_saving") @db.Decimal(15, 2)
+  currentExpense Decimal @map("current_expense") @db.Decimal(15, 2)
+  currentSaving  Decimal @default(0) @map("current_saving") @db.Decimal(15, 2)
 
-  inflationRate  Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate     Decimal  @default(8.0) @map("return_rate") @db.Decimal(5, 2)
+  inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate    Decimal @default(8.0) @map("return_rate") @db.Decimal(5, 2)
 
   totalFundNeeded Decimal @map("total_fund_needed") @db.Decimal(15, 2)
   monthlySaving   Decimal @map("monthly_saving") @db.Decimal(15, 2)
 
-  @@index([sessionId])
+  user User @relation(fields: [userId], references: [id])
+
   @@map("pension_plans")
 }
 
 model InsurancePlan {
-  id                 String        @id @default(uuid())
-  sessionId          String?       @map("session_id")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  type InsuranceType @default(LIFE)
+
+  dependentCount     Int     @default(0) @map("dependent_count")
+  monthlyExpense     Decimal @map("monthly_expense") @db.Decimal(15, 2)
+  existingDebt       Decimal @default(0) @map("existing_debt") @db.Decimal(15, 2)
+  existingCoverage   Decimal @default(0) @map("existing_coverage") @db.Decimal(15, 2)
+  protectionDuration Int     @default(10) @map("protection_duration")
   
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
+  inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate    Decimal @default(7.0) @map("return_rate") @db.Decimal(5, 2)
+  finalExpense  Decimal @default(0) @db.Decimal(15, 2)
 
-  type               InsuranceType @default(LIFE)
+  coverageNeeded Decimal @map("coverage_needed") @db.Decimal(15, 2)
+  recommendation String? @db.Text
 
-  dependentCount     Int           @default(0) @map("dependent_count")
-  monthlyExpense     Decimal       @map("monthly_expense") @db.Decimal(15, 2)
-  existingDebt       Decimal       @default(0) @map("existing_debt") @db.Decimal(15, 2)
-  existingCoverage   Decimal       @default(0) @map("existing_coverage") @db.Decimal(15, 2)
-  protectionDuration Int           @default(10) @map("protection_duration")
-  
-  inflationRate      Decimal       @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate         Decimal       @default(7.0) @map("return_rate") @db.Decimal(5, 2)
-  finalExpense       Decimal       @default(0) @db.Decimal(15, 2)
+  user User @relation(fields: [userId], references: [id])
 
-  coverageNeeded     Decimal       @map("coverage_needed") @db.Decimal(15, 2)
-  recommendation     String?       @db.Text
-
-  @@index([sessionId])
   @@map("insurance_plans")
 }
 
 model GoalPlan {
-  id            String   @id @default(uuid())
-  sessionId     String?  @map("session_id")
-  
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  goalName      String   @map("goal_name")
-  targetAmount  Decimal  @map("target_amount") @db.Decimal(15, 2)
-  targetDate    DateTime @map("target_date")
+  goalName     String  @map("goal_name")
+  targetAmount Decimal @map("target_amount") @db.Decimal(15, 2)
 
-  inflationRate Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal  @default(6.0) @map("return_rate") @db.Decimal(5, 2)
+  targetDate DateTime @map("target_date")
 
-  futureValue   Decimal  @map("future_value") @db.Decimal(15, 2)
-  monthlySaving Decimal  @map("monthly_saving") @db.Decimal(15, 2)
+  inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate    Decimal @default(6.0) @map("return_rate") @db.Decimal(5, 2)
 
-  @@index([sessionId])
+  futureValue   Decimal @map("future_value") @db.Decimal(15, 2)
+  monthlySaving Decimal @map("monthly_saving") @db.Decimal(15, 2)
+
+  user User @relation(fields: [userId], references: [id])
+
   @@map("goal_plans")
 }
 
 // =========================================================
-// AUDIT TRAIL
+// EXTERNAL & SYSTEM DATA
 // =========================================================
 
-model AccessLog {
-  id           String   @id @default(uuid())
-  actorId      String   @map("actor_id") // ID Agen yang melakukan aksi
-  targetUserId String?  @map("target_user_id") // Bisa digunakan untuk menyimpan ID sesama agen jika ada fitur kolaborasi
-  action       String 
-  metadata     Json?
-  accessedAt   DateTime @default(now()) @map("accessed_at")
+model GoldPriceHistory {
+  id String @id @default(uuid())
 
-  actor        User     @relation("ActorRelation", fields: [actorId], references: [id])
-  targetUser   User?    @relation("TargetRelation", fields: [targetUserId], references: [id])
+  buyPrice  Decimal @map("buy_price") @db.Decimal(10, 2)
+  sellPrice Decimal @map("sell_price") @db.Decimal(10, 2)
 
-  @@map("access_logs")
+  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2)
+  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2)
+
+  currency String @default("IDR") @map("currency")
+  unit     String @default("GRAM") @map("unit")
+  source   String @map("source")
+
+  fetchedAt DateTime @default(now()) @map("fetched_at")
+
+  @@index([fetchedAt])
+  @@map("gold_price_histories")
 }
 
+// Update pada model RetentionLog
 model RetentionLog {
-  id             String    @id @default(uuid())
-  executorId     String    @map("executor_id")
-  entityType     String    @map("entity_type")
-  status         String    @default("STARTED") 
-  recordsDeleted Int       @default(0) @map("records_deleted")
-  cutoffDate     DateTime  @map("cutoff_date")
-  startedAt      DateTime  @default(now()) @map("started_at")
-  completedAt    DateTime? @map("completed_at")
-  metadata       Json?
+  id           String   @id @default(uuid())
+  executorId   String   @map("executor_id")
+  entityType   String   @map("entity_type")
+  
+  // [NEW] Status Eksekusi untuk Idempotency & Crash Recovery
+  // Values: 'STARTED', 'DB_DELETED', 'COMPLETED', 'FAILED'
+  status       String   @default("STARTED") 
+  
+  recordsDeleted Int      @default(0) @map("records_deleted")
+  cutoffDate     DateTime @map("cutoff_date")
+  
+  startedAt    DateTime @default(now()) @map("started_at")
+  completedAt  DateTime? @map("completed_at")
+  
+  // Metadata menyimpan list file yang "akan" dihapus untuk recovery jika crash
+  metadata     Json?    
 
-  executor       User      @relation(fields: [executorId], references: [id])
+  executor User @relation(fields: [executorId], references: [id])
 
   @@index([startedAt])
   @@map("retention_logs")
