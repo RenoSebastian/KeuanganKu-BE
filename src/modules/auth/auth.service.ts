@@ -1,115 +1,87 @@
-// File: src/modules/auth/auth.service.ts
-
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
-import { PrismaService } from '../../../prisma/prisma.service';
-import { RegisterDto, LoginDto } from './dto/auth.dto';
-import * as argon from 'argon2';
-import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
+import {
+  Injectable,
+  Logger,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { ConfigService } from '@nestjs/config';
+import * as bcrypt from 'bcrypt';
+import { UsersService } from '../users/users.service';
+import { CreateUserDto } from '../users/dto/create-user.dto';
+import { LoginDto } from './dto/auth.dto';
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
-    private prisma: PrismaService,
-    private jwt: JwtService,
-    private config: ConfigService,
+    private usersService: UsersService,
+    private jwtService: JwtService,
   ) { }
 
   // --- REGISTER ---
-  async register(dto: RegisterDto) {
-    // 1. Hash Password
-    const hash = await argon.hash(dto.password);
-
-    // [FIX LOGIC] Resolusi Unit Kerja (Auto Default)
-    // Masalah sebelumnya: FE mengirim string kode ("IT-01"), tapi DB butuh UUID.
-    // Solusi: Kita cari UUID-nya dulu. Jika FE tidak kirim, default ke "IT-01".
-    const targetKodeUnit = dto.unitKerjaId || 'IT-01';
-
-    const unitKerja = await this.prisma.unitKerja.findUnique({
-      where: { kodeUnit: targetKodeUnit },
-    });
-
-    // Validasi: Pastikan kode unit tersebut ada di Master Data
-    if (!unitKerja) {
-      throw new NotFoundException(`Unit Kerja dengan kode '${targetKodeUnit}' tidak ditemukan di sistem.`);
-    }
-
-    try {
-      // 2. Simpan ke DB
-      const user = await this.prisma.user.create({
-        data: {
-          nip: dto.nip,
-          email: dto.email,
-          fullName: dto.fullName,
-          passwordHash: hash,
-
-          // [CRITICAL FIX] Gunakan ID (UUID) dari hasil query di atas, bukan string kode mentah
-          unitKerjaId: unitKerja.id,
-
-          dateOfBirth: new Date(), // Placeholder, nanti user update profil sendiri
-          role: 'USER', // Set default role eksplisit
-        },
-      });
-
-      // 3. Return Token dengan Claim Lengkap (Role & Unit)
-      return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
-
-    } catch (error) {
-      if (error instanceof PrismaClientKnownRequestError) {
-        // Handle Error Duplicate (P2002)
-        if (error.code === 'P2002') {
-          throw new ForbiddenException('NIP atau Email sudah terdaftar');
-        }
-      }
-      throw error;
-    }
+  /**
+   * Register Logic (Frictionless)
+   * Meneruskan data ke UsersService untuk pembuatan akun.
+   * Tidak ada lagi validasi Unit Kerja atau NIP di sini.
+   */
+  async register(dto: CreateUserDto) {
+    // Logic pembuatan user & hashing ada di UsersService
+    return this.usersService.createUser(dto);
   }
 
   // --- LOGIN ---
+  /**
+   * Login Logic
+   * 1. Validasi keberadaan user (By Email)
+   * 2. Validasi password (Bcrypt Compare)
+   * 3. Generate JWT Token
+   */
   async login(dto: LoginDto) {
     // 1. Cari User by Email
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-    });
+    const user = await this.usersService.findByEmail(dto.email);
 
-    if (!user) throw new ForbiddenException('Kredensial salah (Email tidak ditemukan)');
+    if (!user) {
+      // Return 401 Unauthorized dengan pesan generik (Security Best Practice)
+      throw new UnauthorizedException('Email atau password salah');
+    }
 
-    // 2. Cek Password (Argon2 Verify)
-    const pwMatches = await argon.verify(user.passwordHash, dto.password);
-    if (!pwMatches) throw new ForbiddenException('Kredensial salah (Password salah)');
+    // 2. Cek Password
+    // user.passwordHash didapat dari UsersService (pastikan field ini ter-select di prisma query service)
+    const isPasswordValid = await bcrypt.compare(
+      dto.password,
+      user.password,
+    );
 
-    // 3. Return Token dengan Claim Lengkap (Role & Unit)
-    return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
+    if (!isPasswordValid) {
+      throw new UnauthorizedException('Email atau password salah');
+    }
+
+    // 3. Return Token
+    return this.signToken(user.id, user.email, user.role);
   }
 
-  // --- HELPER: SIGN TOKEN (Updated) ---
-  async signToken(userId: string, email: string, role: string, unitKerjaId: string) {
-    // Payload ini akan dibaca oleh Passport Strategy & Frontend (via jwt-decode)
+  // --- HELPER: SIGN TOKEN ---
+  /**
+   * Generate JWT Token
+   * Payload disederhanakan agar stateless dan ringan.
+   */
+  private async signToken(userId: string, email: string, role: string) {
     const payload = {
       sub: userId,
       email,
       role,
-      unitKerjaId
     };
 
-    const secret = this.config.get('JWT_SECRET');
-
-    // Generate Token
-    const token = await this.jwt.signAsync(payload, {
-      expiresIn: '1d', // Token valid 1 hari (Security Best Practice)
-      secret: secret,
-    });
+    // Secret diambil otomatis oleh JwtModule dari ConfigService (Environment Variables)
+    const token = await this.jwtService.signAsync(payload);
 
     return {
       access_token: token,
-      // Kembalikan juga data user plain agar FE tidak wajib decode token saat login sukses
       user: {
         id: userId,
         email,
         role,
-        unitKerjaId
-      }
+      },
     };
   }
 }

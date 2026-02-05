@@ -85,13 +85,13 @@ model User {
   email           String    @unique
   password        String    @map("password_hash")
   
-  // --- Profil Agen ---
-  tanggalLahir    DateTime  @map("tanggal_lahir")
-  alamatDomisili  String    @map("alamat_domisili") @db.Text
-  noWa            String    @map("no_wa")
-  company         String    @map("company")
-  jabatan         String    @map("jabatan")
-  gender          String    @map("gender") // Bisa diubah enum jika perlu strict
+  // --- Profil Agen (NULLABLE UNTUK FRICTIONLESS REGIS) ---
+  tanggalLahir    DateTime? @map("tanggal_lahir")
+  alamatDomisili  String?   @map("alamat_domisili") @db.Text
+  noWa            String?   @map("no_wa")
+  company         String?   @map("company")
+  jabatan         String?   @map("jabatan")
+  gender          String?   @map("gender") // Bisa diubah enum jika perlu strict
   
   // --- Optional Fields ---
   statusMenikah   String?   @map("status_menikah")
@@ -103,15 +103,17 @@ model User {
   createdAt       DateTime  @default(now()) @map("created_at")
   updatedAt       DateTime  @updatedAt @map("updated_at")
 
-  // --- Relasi Edukasi (TETAP DIPERTAHANKAN) ---
+  // --- Relasi ---
   educationProgress UserEducationProgress[]
-
-  // --- Relasi Audit (TETAP DIPERTAHANKAN untuk Log Actor) ---
+  
+  // Relasi ke AccessLog (Actor = Pelaku)
   actionsPerformed AccessLog[]    @relation("ActorRelation")
+  
+  // Relasi ke AccessLog (Target = Objek yang diubah, opsional)
+  actionsTargeted  AccessLog[]    @relation("TargetRelation")
+  
   RetentionLog     RetentionLog[]
 
-  // [NOTE] Relasi ke UnitKerja dan Tabel Finansial DIHAPUS Total.
-  
   @@map("users")
 }
 
@@ -126,7 +128,6 @@ model UnitKerja {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // Tidak ada relasi balik ke User karena User sekarang "Flat"
   @@map("unit_kerja")
 }
 
@@ -134,12 +135,9 @@ model UnitKerja {
 // FINANCIAL ENGINE MODELS (STATELESS / INDEPENDENT)
 // =========================================================
 
-// Note: Field `sessionId` ditambahkan untuk grouping data sementara 
-// jika user melakukan multiple simulation dalam satu sesi browser.
-
 model BudgetPlan {
   id        String   @id @default(uuid())
-  sessionId String?  @map("session_id") // Identifier anonim
+  sessionId String?  @map("session_id")
   
   month     Int
   year      Int
@@ -415,12 +413,6 @@ model EducationCategory {
   @@map("education_categories")
 }
 
-enum EducationLevel {
-  BEGINNER
-  INTERMEDIATE
-  ADVANCED
-}
-
 model EducationModule {
   id           String                @id @default(uuid())
   categoryId   String                @map("category_id")
@@ -502,14 +494,14 @@ model UserEducationProgress {
   startedAt         DateTime?               @map("started_at")
 
   // Relasi
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   // [CRITICAL UPDATE] Mengubah onDelete menjadi Restrict.
   // Ini mencegah penghapusan Modul jika masih ada user yang memiliki progress/history belajar.
   // Strategi Retention harus menangani ini secara eksplisit (seperti yang sudah kita refactor).
-  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  module            EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
   
-  lastReadSection ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
+  lastReadSection   ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
 
   @@id([userId, moduleId])
   @@map("user_education_progress")
@@ -576,4 +568,20 @@ model QuizOption {
 
   @@index([questionId])
   @@map("quiz_options")
+}
+
+// [NOTE] GoldPriceHistory included to ensure full schema integrity
+model GoldPriceHistory {
+  id           String   @id @default(uuid())
+  buyPrice     Decimal  @map("buy_price") @db.Decimal(10, 2)
+  sellPrice    Decimal  @map("sell_price") @db.Decimal(10, 2)
+  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2)
+  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2)
+  currency     String   @default("IDR") @map("currency")
+  unit         String   @default("GRAM") @map("unit")
+  source       String   @map("source")
+  fetchedAt    DateTime @default(now()) @map("fetched_at")
+  
+  @@index([fetchedAt])
+  @@map("gold_price_histories")
 }

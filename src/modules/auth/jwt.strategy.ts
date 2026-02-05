@@ -1,43 +1,44 @@
-// File: src/modules/auth/strategies/jwt.strategy.ts
-
-import { Injectable } from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { UsersService } from './../users/users.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(
     config: ConfigService,
-    private prisma: PrismaService,
+    private usersService: UsersService,
   ) {
     super({
       // Ambil token dari Header: Authorization: Bearer <token>
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      // Pastikan Secret Key ada. Jika tidak, aplikasi akan crash (Fail Fast)
-      secretOrKey: config.getOrThrow('JWT_SECRET'), 
+      // Fail fast jika JWT_SECRET tidak ada di .env
+      secretOrKey: config.getOrThrow('JWT_SECRET'),
     });
   }
 
-  // Payload yang masuk ke sini sudah di-decode dan diverifikasi signature-nya
-  async validate(payload: { sub: string; email: string; role: string; unitKerjaId: string }) {
-    // Best Practice: Tetap cek ke DB untuk memastikan user masih aktif/eksis.
-    // Jika user di-ban/hapus, token valid pun akan ditolak di sini.
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-    });
-    
-    // Jika user null (tidak ketemu), Passport akan otomatis melempar 401 Unauthorized
+  /**
+   * validate
+   * * Method ini dipanggil otomatis oleh Passport setelah token berhasil di-decode 
+   * dan signature-nya valid.
+   * * @param payload Data JSON yang ada di dalam token (sub, email, role)
+   */
+  async validate(payload: { sub: string; email: string; role: string }) {
+    // 1. Cek keberadaan user via UsersService
+    // payload.sub adalah userId
+    const user = await this.usersService.findOne(payload.sub);
+
+    // 2. Validasi status User
+    // Jika user tidak ditemukan (misal: soft deleted atau id salah), tolak request
     if (!user) {
-      return null;
+      throw new UnauthorizedException('Token tidak valid atau User tidak ditemukan.');
     }
 
-    // Hapus password hash agar tidak terbawa ke Controller (req.user)
-    const { passwordHash, ...userWithoutPassword } = user;
-    
-    // Object ini akan tersedia di Controller via @GetUser() atau request.user
-    return userWithoutPassword;
+    // 3. Return User
+    // Object ini akan di-attach ke Request object (req.user) di Controller
+    // UsersService.findOne sudah memastikan password hash tidak ikut dikembalikan.
+    return user;
   }
 }

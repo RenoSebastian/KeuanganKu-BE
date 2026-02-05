@@ -1,10 +1,12 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
+  InternalServerErrorException,
   Logger,
   NotFoundException,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Role, Prisma } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
@@ -22,21 +24,73 @@ export class UsersService {
   ) { }
 
   // =================================================================
-  // SELF-SERVICE (User Biasa)
+  // AUTH & SELF-SERVICE
   // =================================================================
 
+  /**
+   * createUser (Frictionless Registration)
+   * Membuat user baru dengan data minimal (Nama, Email, Password).
+   */
+  async createUser(dto: CreateUserDto) {
+    const { password, ...rest } = dto;
+
+    // 1. Hash Password
+    const salt = await bcrypt.genSalt();
+    const hashedPassword = await bcrypt.hash(password, salt);
+
+    try {
+      // 2. Create User
+      const newUser = await this.prisma.user.create({
+        data: {
+          nama: dto.nama,
+          email: dto.email,
+          password: hashedPassword, // Maps to 'password_hash' in DB via Schema
+          role: 'USER', // Default Role
+          // Field profil lain (company, noWa, dll) otomatis NULL
+        },
+      });
+
+      // 3. Sync to Search (Async - Fire & Forget)
+      this.syncToSearch(newUser);
+
+      // 4. Return result without password
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password: _, ...result } = newUser;
+      return result;
+    } catch (error) {
+      // Handle Unique Constraint (Email duplicate)
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException('Email sudah terdaftar.');
+      }
+
+      this.logger.error(`Create user failed: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal mendaftarkan pengguna.');
+    }
+  }
+
+  /**
+   * getMe
+   * Mengambil profil diri sendiri.
+   */
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { unitKerja: true },
     });
 
     if (!user) throw new NotFoundException(`User not found`);
 
-    const { passwordHash, ...result } = user;
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password: _, ...result } = user;
     return result;
   }
 
+  /**
+   * editUser (Self Service)
+   * Agen melengkapi profil mereka sendiri.
+   */
   async editUser(userId: string, dto: EditUserDto) {
     this.logger.log(
       `User ${userId} editing self. Fields: ${Object.keys(dto).join(', ')}`,
@@ -44,25 +98,55 @@ export class UsersService {
     return this.processUpdate(userId, dto);
   }
 
+  /**
+   * findByEmail
+   * Digunakan oleh AuthService untuk Login.
+   */
+  async findByEmail(email: string) {
+    return this.prisma.user.findUnique({
+      where: { email },
+    });
+  }
+
+  /**
+   * findOne
+   * Digunakan oleh JWT Strategy.
+   */
+  async findOne(id: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id },
+    });
+
+    if (!user) return null; // Strategy akan melempar Unauthorized
+
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const { password: _, ...result } = user;
+    return result;
+  }
+
   // =================================================================
-  // ADMIN FEATURES (Manajemen Pegawai)
+  // ADMIN FEATURES (Manajemen Agen)
   // =================================================================
 
-  // 1. List Users (Search & Filter)
+  /**
+   * findAll
+   * List user dengan fitur pencarian nama/email/perusahaan.
+   */
   async findAll(params: { search?: string; role?: Role }) {
     const { search, role } = params;
-    const where: any = {};
+    const where: Prisma.UserWhereInput = {};
 
     // Filter by Role
     if (role) {
       where.role = role;
     }
 
-    // Filter by Search (Name / Email)
+    // Filter by Search (Nama / Email / Company)
     if (search) {
       where.OR = [
-        { fullName: { contains: search, mode: 'insensitive' } },
+        { nama: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
+        { company: { contains: search, mode: 'insensitive' } },
       ];
     }
 
@@ -71,138 +155,111 @@ export class UsersService {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
-        fullName: true,
+        nama: true,
         email: true,
         role: true,
-        // jobTitle: true, // [REMOVED] Field ini tidak ada di schema.prisma
-        unitKerja: {
-          select: {
-            namaUnit: true // [FIXED] Menggunakan namaUnit sesuai schema
-          }
-        },
+        company: true,
+        jabatan: true,
+        noWa: true,
         createdAt: true,
       },
     });
   }
 
-  // 2. Create User (Admin)
-  async createUser(dto: CreateUserDto) {
-    // Cek duplikat
-    const existing = await this.prisma.user.findFirst({
-      where: {
-        OR: [{ email: dto.email }, { nip: dto.nip }],
-      },
-    });
-    if (existing) throw new BadRequestException('Email atau NIP sudah terdaftar');
-
-    const salt = await bcrypt.genSalt();
-    const hashedPassword = await bcrypt.hash(dto.password, salt);
-
-    // [FIX] Exclude jobTitle yang tidak ada di DB User
-    const { password, dateOfBirth, jobTitle, ...rest } = dto;
-
-    const data: any = {
-      ...rest,
-      passwordHash: hashedPassword,
-      // [FIX 500 ERROR] Pastikan dateOfBirth selalu ada
-      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : new Date('1990-01-01'),
-    };
-
-    try {
-      const newUser = await this.prisma.user.create({ data });
-      this.syncToSearch(newUser);
-      const { passwordHash, ...result } = newUser;
-      return result;
-    } catch (error) {
-      if (error.code === 'P2003') {
-        throw new BadRequestException('Unit Kerja ID tidak valid');
-      }
-      this.logger.error(`Create user failed: ${error.message}`);
-      throw error;
-    }
-  }
-
-  // 3. Get Detail
-  async findOne(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
-      include: { unitKerja: true },
-    });
-    if (!user) throw new NotFoundException('User not found');
-    const { passwordHash, ...result } = user;
-    return result;
-  }
-
-  // 4. Update User
+  /**
+   * updateUser (Admin)
+   */
   async updateUser(id: string, dto: UpdateUserDto) {
     return this.processUpdate(id, dto);
   }
 
-  // 5. Delete User
+  /**
+   * deleteUser (Admin)
+   */
   async deleteUser(id: string) {
-    await this.findOne(id);
+    // Pastikan user ada
+    await this.getMe(id);
+
     const deleted = await this.prisma.user.delete({ where: { id } });
+
+    // Cleanup Search Index
+    this.searchService
+      .removeDocument('global_search', id)
+      .catch((e) =>
+        this.logger.warn(`Search cleanup failed for ${id}: ${e.message}`),
+      );
+
     return { message: 'User deleted successfully', id: deleted.id };
   }
 
   // =================================================================
-  // HELPERS (Shared Logic)
+  // HELPERS
   // =================================================================
 
+  /**
+   * processUpdate
+   * Logika terpusat untuk update profil (handle hashing password & date conversion).
+   */
   private async processUpdate(userId: string, dto: any) {
     try {
-      const { password, dateOfBirth, dependentCount, jobTitle, ...restData } = dto;
+      const { password, tanggalLahir, ...restData } = dto;
 
-      // Bersihkan undefined/empty values dari restData
+      // 1. Bersihkan undefined/empty values
       const updatePayload: any = {};
-
-      Object.keys(restData).forEach(key => {
+      Object.keys(restData).forEach((key) => {
         if (restData[key] !== undefined && restData[key] !== '') {
           updatePayload[key] = restData[key];
         }
       });
 
-      if (dependentCount !== undefined) {
-        updatePayload.dependentCount = Number(dependentCount);
+      // 2. Handle Tanggal Lahir (String to Date)
+      if (tanggalLahir) {
+        updatePayload.tanggalLahir = new Date(tanggalLahir);
       }
 
-      if (dateOfBirth) {
-        updatePayload.dateOfBirth = new Date(dateOfBirth);
-      }
-
+      // 3. Handle Password Rotation
       if (password) {
         const salt = await bcrypt.genSalt();
-        updatePayload.passwordHash = await bcrypt.hash(password, salt);
+        updatePayload.password = await bcrypt.hash(password, salt);
       }
 
+      // 4. Execute Update
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
         data: updatePayload,
       });
 
+      // 5. Sync to Search Engine
       this.syncToSearch(updatedUser);
-      const { passwordHash, ...result } = updatedUser;
+
+      // 6. Return sanitized result
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password: _, ...result } = updatedUser;
       return result;
     } catch (error) {
       this.logger.error(`Failed update user ${userId}: ${error.message}`);
       if (error.code === 'P2025') throw new NotFoundException('User not found');
-      if (error.code === 'P2003') throw new BadRequestException('Unit Kerja ID tidak valid');
       throw error;
     }
   }
 
+  /**
+   * syncToSearch
+   * Sinkronisasi data agen ke MeiliSearch (Fire & Forget).
+   */
   private async syncToSearch(user: any) {
     try {
       const searchPayload = {
         id: user.id,
         redirectId: user.id,
-        type: 'PERSON',
-        title: user.fullName,
+        type: 'AGENT',
+        title: user.nama,
         subtitle: user.email,
+        description: `${user.company || 'Tanpa Perusahaan'} - ${user.jabatan || 'Agen'}`,
         role: user.role,
-        unitKerjaId: user.unitKerjaId,
+        // Removed unitKerjaId as per new schema
       };
-      // Fire & Forget sync
+
       this.searchService
         .addDocuments('global_search', [searchPayload])
         .catch((e) => this.logger.warn(`Search sync error: ${e.message}`));
