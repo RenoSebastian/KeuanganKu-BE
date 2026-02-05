@@ -13,6 +13,7 @@ import { SearchService } from '../search/search.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { EditUserDto } from './dto/edit-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto'; // [NEW IMPORT]
 
 @Injectable()
 export class UsersService {
@@ -88,12 +89,53 @@ export class UsersService {
   }
 
   /**
-   * editUser (Self Service)
-   * Agen melengkapi profil mereka sendiri.
+   * updateProfile (Phase 3: Gradual Completion)
+   * Digunakan oleh Agen untuk melengkapi data diri mereka sendiri.
+   * Method ini aman (IDOR safe karena userId dari Token) dan menangani transformasi data.
+   */
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const updateData: Prisma.UserUpdateInput = { ...dto };
+
+    // 1. Transformasi Tanggal (String ISO -> Date Object)
+    // Penting: Frontend sering mengirim tanggal sebagai string JSON
+    if (dto.tanggalLahir) {
+      updateData.tanggalLahir = new Date(dto.tanggalLahir);
+    }
+
+    try {
+      // 2. Eksekusi Update
+      const updatedUser = await this.prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+      });
+
+      // 3. Sync ke Search Engine
+      // Agar data profil baru (Company, Jabatan) langsung bisa dicari
+      await this.syncToSearch(updatedUser);
+
+      // 4. Return Clean Data
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { password: _, ...result } = updatedUser;
+      return result;
+
+    } catch (error) {
+      this.logger.error(`Failed to update profile for user ${userId}: ${error.message}`);
+
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2025') throw new NotFoundException('User tidak ditemukan.');
+      }
+
+      throw new InternalServerErrorException('Gagal mengupdate profil.');
+    }
+  }
+
+  /**
+   * editUser (Legacy / Backward Compatibility)
+   * Jika masih ada controller lama yang menggunakan EditUserDto.
    */
   async editUser(userId: string, dto: EditUserDto) {
     this.logger.log(
-      `User ${userId} editing self. Fields: ${Object.keys(dto).join(', ')}`,
+      `User ${userId} editing self (Legacy). Fields: ${Object.keys(dto).join(', ')}`,
     );
     return this.processUpdate(userId, dto);
   }
@@ -117,7 +159,7 @@ export class UsersService {
       where: { id },
     });
 
-    if (!user) return null; // Strategy akan melempar Unauthorized
+    if (!user) return null;
 
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { password: _, ...result } = user;
@@ -198,7 +240,8 @@ export class UsersService {
 
   /**
    * processUpdate
-   * Logika terpusat untuk update profil (handle hashing password & date conversion).
+   * Logika terpusat untuk update profil yang komprehensif (termasuk password).
+   * Digunakan oleh Admin atau Legacy Edit.
    */
   private async processUpdate(userId: string, dto: any) {
     try {
@@ -257,7 +300,6 @@ export class UsersService {
         subtitle: user.email,
         description: `${user.company || 'Tanpa Perusahaan'} - ${user.jabatan || 'Agen'}`,
         role: user.role,
-        // Removed unitKerjaId as per new schema
       };
 
       this.searchService

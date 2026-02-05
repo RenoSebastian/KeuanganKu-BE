@@ -3,76 +3,98 @@ import {
   Controller,
   Delete,
   Get,
+  HttpCode,
+  HttpStatus,
   Param,
   Patch,
   Post,
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import * as client from '@prisma/client';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
+import { Role } from '@prisma/client';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
-import { EditUserDto } from './dto/edit-user.dto';
 import { UsersService } from './users.service';
-// [NOTE] Pastikan Anda membuat file DTO ini di folder modules/users/dto/
 import { CreateUserDto } from './dto/create-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto'; // [NEW] DTO Fase 3
 
 @ApiTags('Users')
-@UseGuards(JwtAuthGuard, RolesGuard) // Menggunakan Guard Custom + Roles
+@UseGuards(JwtAuthGuard, RolesGuard) // Guard Global untuk Controller ini
 @ApiBearerAuth()
 @Controller('users')
 export class UsersController {
-  constructor(private userService: UsersService) { }
+  constructor(private readonly usersService: UsersService) { }
 
   // =================================================================
-  // SELF-SERVICE (Untuk User Biasa mengelola akun sendiri)
+  // SELF-SERVICE (Agen Mengelola Akun Sendiri)
   // =================================================================
 
   @Get('me')
-  getMe(@GetUser() user: client.User) {
-    return this.userService.getMe(user.id);
+  @ApiOperation({ summary: 'Ambil detail profil user yang sedang login' })
+  @ApiResponse({ status: 200, description: 'Berhasil mengambil data profil.' })
+  getMe(@GetUser('id') userId: string) {
+    return this.usersService.getMe(userId);
   }
 
-  @Patch('me')
-  editUser(@GetUser('id') userId: string, @Body() dto: EditUserDto) {
-    return this.userService.editUser(userId, dto);
+  @Patch('me/profile')
+  @ApiOperation({ summary: 'Lengkapi data profil agen (Gradual Completion)' })
+  @ApiResponse({ status: 200, description: 'Profil berhasil diperbarui.' })
+  @ApiResponse({ status: 400, description: 'Validasi data gagal.' })
+  updateProfile(
+    @GetUser('id') userId: string,
+    @Body() dto: UpdateProfileDto,
+  ) {
+    // Memanggil method khusus updateProfile di service
+    return this.usersService.updateProfile(userId, dto);
   }
 
   // =================================================================
-  // ADMIN ONLY (Manajemen Pegawai)
+  // ADMIN ONLY (Manajemen Agen)
   // =================================================================
 
   @Get()
-  @Roles(client.Role.ADMIN)
-  findAll(@Query('search') search?: string, @Query('role') role?: client.Role) {
-    return this.userService.findAll({ search, role });
+  @Roles(Role.ADMIN, Role.DIRECTOR) // Hanya Admin & Direktur
+  @ApiOperation({ summary: 'List semua user dengan filter pencarian (Admin)' })
+  findAll(@Query('search') search?: string, @Query('role') role?: Role) {
+    return this.usersService.findAll({ search, role });
   }
 
   @Post()
-  @Roles(client.Role.ADMIN)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Admin membuat user baru secara manual' })
+  @ApiResponse({ status: 201, description: 'User berhasil dibuat.' })
   create(@Body() createUserDto: CreateUserDto) {
-    return this.userService.createUser(createUserDto);
+    return this.usersService.createUser(createUserDto);
   }
 
   @Get(':id')
-  @Roles(client.Role.ADMIN)
+  @Roles(Role.ADMIN, Role.DIRECTOR)
+  @ApiOperation({ summary: 'Admin melihat detail user lain' })
   findOne(@Param('id') id: string) {
-    return this.userService.findOne(id);
+    return this.usersService.findOne(id);
   }
 
   @Patch(':id')
-  @Roles(client.Role.ADMIN)
+  @Roles(Role.ADMIN)
+  @ApiOperation({ summary: 'Admin mengedit data user lain' })
   update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.userService.updateUser(id, updateUserDto);
+    return this.usersService.updateUser(id, updateUserDto);
   }
 
   @Delete(':id')
-  @Roles(client.Role.ADMIN)
+  @Roles(Role.ADMIN)
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Admin menghapus user (Soft/Hard delete logic di service)' })
   remove(@Param('id') id: string) {
-    return this.userService.deleteUser(id);
+    return this.usersService.deleteUser(id);
   }
 }
