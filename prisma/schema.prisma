@@ -46,6 +46,7 @@ enum CostType {
   ANNUAL
 }
 
+// [NOTE] Enum ini mungkin masih dipakai di DTO, biarkan dulu meski tabelnya dihapus
 enum InsuranceType {
   LIFE
   HEALTH
@@ -155,6 +156,7 @@ model RefIncomeBracket {
 // =========================================================
 
 // [NEW] Tabel untuk menyimpan insight pasar tanpa data pribadi klien
+// Digunakan oleh modul Budgeting, Insurance, dll.
 model MarketInsight {
   id                BigInt   @id @default(autoincrement()) @map("insight_id")
   agentId           String   @map("agent_id")
@@ -166,11 +168,11 @@ model MarketInsight {
   locationLong      Float?   @map("longitude")
   
   // Hasil Analisis
-  moduleType        String   @map("module_type") // Value: "BUDGETING", "PENSION", dll
+  moduleType        String   @map("module_type") // Value: "BUDGETING", "INSURANCE", "PENSION"
   financialScore    Int      @map("financial_health_score") // Skor 0-100
   
   // Detail Statistik (Disimpan sebagai JSONB)
-  // Contoh: { savings_ratio: 0.2, debt_ratio: 0.3 }
+  // Contoh Insurance: { "gap": 1500000000, "priority": "LIFE" }
   metrics           Json     @map("insight_metrics") 
 
   createdAt         DateTime @default(now()) @map("created_at")
@@ -187,7 +189,8 @@ model MarketInsight {
 // FINANCIAL ENGINE MODELS (LEGACY / STATELESS TRANSITION)
 // =========================================================
 
-// [DELETED] Model BudgetPlan dihapus karena beralih ke Stateless
+// [DELETED] BudgetPlan (Stateless Phase 1)
+// [DELETED] InsurancePlan (Stateless Phase 2 - REMOVED)
 
 model FinancialCheckup {
   id            String   @id @default(uuid())
@@ -331,32 +334,6 @@ model PensionPlan {
 
   @@index([sessionId])
   @@map("pension_plans")
-}
-
-model InsurancePlan {
-  id                 String        @id @default(uuid())
-  sessionId          String?       @map("session_id")
-  
-  createdAt          DateTime      @default(now()) @map("created_at")
-  updatedAt          DateTime      @updatedAt @map("updated_at")
-
-  type               InsuranceType @default(LIFE)
-
-  dependentCount     Int           @default(0) @map("dependent_count")
-  monthlyExpense     Decimal       @map("monthly_expense") @db.Decimal(15, 2)
-  existingDebt       Decimal       @default(0) @map("existing_debt") @db.Decimal(15, 2)
-  existingCoverage   Decimal       @default(0) @map("existing_coverage") @db.Decimal(15, 2)
-  protectionDuration Int           @default(10) @map("protection_duration")
-  
-  inflationRate      Decimal       @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate         Decimal       @default(7.0) @map("return_rate") @db.Decimal(5, 2)
-  finalExpense       Decimal       @default(0) @db.Decimal(15, 2)
-
-  coverageNeeded     Decimal       @map("coverage_needed") @db.Decimal(15, 2)
-  recommendation     String?       @db.Text
-
-  @@index([sessionId])
-  @@map("insurance_plans")
 }
 
 model GoalPlan {
