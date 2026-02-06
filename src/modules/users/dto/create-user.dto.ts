@@ -27,7 +27,7 @@ export class CreateUserDto {
 
     @ApiProperty({ example: '12345678', description: 'NIP Pegawai' })
     @IsString()
-    @IsNotEmpty()
+    @IsOptional()
     nip: string;
 
     @ApiProperty({ example: 'Rahasia123', description: 'Password awal' })
@@ -43,14 +43,14 @@ export class CreateUserDto {
 
     @ApiProperty({ example: 'uuid-unit-kerja', description: 'ID Unit Kerja' })
     @IsUUID()
-    @IsNotEmpty()
+    @IsOptional()
     // Jika string kosong, ubah jadi null agar validator teriak "IsNotEmpty" bukan "Invalid UUID"
     @Transform(({ value }) => (value === '' ? null : value))
     unitKerjaId: string;
 
     @ApiProperty({ example: '1990-01-01', description: 'Tanggal lahir (Wajib)' })
     @IsDateString() // Ubah jadi Wajib karena DB require
-    @IsNotEmpty()
+    @IsOptional()
     dateOfBirth: string;
 
     @ApiPropertyOptional({ example: 0, description: 'Jumlah tanggungan' })

@@ -95,8 +95,8 @@ model UnitKerja {
 
 model User {
   id           String @id @default(uuid())
-  unitKerjaId  String @map("unit_kerja_id")
-  nip          String @unique
+  unitKerjaId  String? @map("unit_kerja_id")
+  nip          String? @unique
   email        String @unique
   passwordHash String @map("password_hash")
   fullName     String @map("full_name")
@@ -113,14 +113,14 @@ model User {
   // Avatar Field
   avatar String? @db.Text
 
-  dateOfBirth    DateTime @map("date_of_birth") // Penting untuk pensiun
+  dateOfBirth    DateTime? @map("date_of_birth") // Penting untuk pensiun
   dependentCount Int      @default(0) @map("dependent_count")
   role           Role     @default(USER)
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
   // Relasi Master Data
-  unitKerja UnitKerja @relation(fields: [unitKerjaId], references: [id])
+  unitKerja UnitKerja? @relation(fields: [unitKerjaId], references: [id])
 
   // Relasi Fitur Finansial
   budgetPlans     BudgetPlan[]
