@@ -4,7 +4,7 @@ import { ApiProperty } from '@nestjs/swagger';
 export class RegisterDto {
   @ApiProperty({ example: '10203040' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   nip: string;
 
   @ApiProperty({ example: 'budi@pamjaya.co.id' })
@@ -25,7 +25,7 @@ export class RegisterDto {
 
   @ApiProperty({ example: 'IT-001' })
   @IsString()
-  @IsNotEmpty()
+  @IsOptional()
   unitKerjaId: string; // Nanti kita seed Unit Kerja dulu
 }
 
