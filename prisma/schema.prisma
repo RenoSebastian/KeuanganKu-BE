@@ -137,6 +137,9 @@ model User {
   actionsPerformed AccessLog[]    @relation("ActorRelation")
   actionsTargeted  AccessLog[]    @relation("TargetRelation")
   RetentionLog     RetentionLog[]
+  // [NEW] Relasi ke Log Simulasi (Agent Tools)
+  // Menghubungkan Agen dengan history simulasi yang pernah mereka lakukan
+  simulationLogs   SimulationLog[]
 
   // [OPTIMIZATION] Index FK untuk mempercepat JOIN Unit Kerja
   @@index([unitKerjaId])
@@ -619,4 +622,59 @@ model QuizOption {
 
   @@index([questionId])
   @@map("quiz_options")
+}
+
+// =========================================================
+// MODULE: AGENT SIMULATION & ANALYTICS (NEW PHASE)
+// =========================================================
+
+model SimulationLog {
+  id        String   @id @default(uuid())
+  agentId   String   @map("agent_id")
+
+  // --- DEMOGRAFI KLIEN (ANONIM) ---
+  // Digunakan untuk filter statistik (e.g., "Rata-rata pengeluaran umur 30 di Jakarta")
+  clientAge     Int      @map("client_age")
+  clientCity    String   @map("client_city") // e.g., "Jakarta Selatan"
+  clientJob     String   @map("client_job")  // e.g., "PNS", "Wiraswasta"
+
+  // --- SNAPSHOT FINANSIAL ---
+  // Menggunakan Decimal(15,2) untuk akurasi mata uang.
+  // totalIncome = Fixed Income + Variable Income
+  totalIncome   Decimal  @map("total_income") @db.Decimal(15, 2)
+  
+  // Surplus ideal yang dihitung sistem (bukan input user)
+  // Berguna untuk melihat potensi tabungan rata-rata klien
+  calculatedSurplus Decimal @map("calculated_surplus") @db.Decimal(15, 2)
+
+  // --- HASIL DIAGNOSA ---
+  healthScore   Int          @map("health_score")
+  // Menggunakan Enum HealthStatus agar konsisten dengan modul FinancialCheckup
+  status        HealthStatus @default(BAHAYA) 
+
+  // --- DETAIL RASIO (JSON) ---
+  // Menyimpan breakdown detail seperti:
+  // {
+  //   "savingsRatio": 10.5,
+  //   "debtRatio": 35.0,
+  //   "variableIncome": 5000000,
+  //   "fixedIncome": 10000000
+  // }
+  financialRatios Json @map("financial_ratios")
+
+  // Metadata System
+  moduleType    String   @default("BUDGETING") @map("module_type")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  // Relasi ke Agen (User)
+  agent         User     @relation(fields: [agentId], references: [id])
+
+  // --- INDEXING STRATEGY ---
+  // 1. [clientCity, clientJob]: Query statistik demografi paling umum.
+  // 2. [agentId]: Tracking performa agen (berapa simulasi yang dibuat).
+  // 3. [createdAt]: Query trend waktu (bulan ke bulan).
+  @@index([clientCity, clientJob])
+  @@index([agentId])
+  @@index([createdAt])
+  @@map("simulation_logs")
 }

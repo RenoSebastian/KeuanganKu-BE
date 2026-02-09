@@ -8,6 +8,7 @@ import { SchoolLevel, CostType } from '@prisma/client';
 // Tambahkan 2 baris ini bersama import DTO lainnya
 import { RiskAnswerOption } from '../dto/calculate-risk-profile.dto';
 import { RiskProfileCategory } from '../dto/risk-profile-response.dto';
+import { BUDGET_ALLOCATION_RULES } from '../constants/budgeting-rules.constant';
 
 // --- INTERFACES (Mirroring FE logic) ---
 export interface RatioDetail {
@@ -924,5 +925,93 @@ export const calculateRiskProfileAnalysis = (answers: RiskAnswerOption[]) => {
     profile,
     description,
     allocation,
+  };
+};
+
+// ===========================================================================
+// [NEW] AGENT SIMULATION ENGINE
+// ===========================================================================
+
+/**
+ * Interface untuk Output Simulasi Agen
+ */
+export interface AgentBudgetSimulationResult {
+  meta: {
+    totalIncome: number;
+    fixedIncome: number;
+    variableIncome: number;
+  };
+  allocation: {
+    livingCost: number;       // 45%
+    debtConsumptive: number;  // 15%
+    debtProductive: number;   // 20%
+    insurance: number;        // 10%
+    saving: number;           // 10%
+  };
+  analysis: {
+    totalRecommendedSavings: number; // Saving (Fixed) + Variable Income
+    variableIncomeRecommendation: string;
+    notes: string[]; // Catatan tambahan untuk agen
+  };
+}
+
+/**
+ * calculateAgentBudgetSimulation
+ * ------------------------------
+ * Core Logic untuk fitur Simulasi Anggaran oleh Agen.
+ * * Logic Workflow:
+ * 1. Gaji Tetap (Fixed Income) dialokasikan menggunakan persentase baku (45/15/20/10/10).
+ * 2. Gaji Variabel (Variable Income) TIDAK dipecah, melainkan disarankan masuk 100% ke Surplus/Tabungan.
+ * * @param fixedIncome Pendapatan tetap bulanan (Basis Perhitungan)
+ * @param variableIncome Pendapatan tidak tetap (Opsional, Default 0)
+ */
+export const calculateAgentBudgetSimulation = (
+  fixedIncome: number,
+  variableIncome: number = 0
+): AgentBudgetSimulationResult => {
+  // 1. Validasi Input (Defensive Programming)
+  const baseIncome = Math.max(0, Number(fixedIncome));
+  const extraIncome = Math.max(0, Number(variableIncome));
+  const totalIncome = baseIncome + extraIncome;
+
+  // 2. Hitung Alokasi berdasarkan Gaji Tetap
+  const livingCost = baseIncome * BUDGET_ALLOCATION_RULES.LIVING_COST;
+  const debtConsumptive = baseIncome * BUDGET_ALLOCATION_RULES.DEBT_CONSUMPTIVE_MAX;
+  const debtProductive = baseIncome * BUDGET_ALLOCATION_RULES.DEBT_PRODUCTIVE_MAX;
+  const insurance = baseIncome * BUDGET_ALLOCATION_RULES.INSURANCE_MIN;
+  const savingFromFixed = baseIncome * BUDGET_ALLOCATION_RULES.SAVING_MIN;
+
+  // 3. Logic Gaji Variabel -> Masuk ke Tabungan/Surplus
+  const totalRecommendedSavings = savingFromFixed + extraIncome;
+
+  // 4. Generate Recommendation String
+  let variableIncomeRecommendation = 'Tidak ada pendapatan variabel.';
+  const notes: string[] = [];
+
+  if (extraIncome > 0) {
+    const formattedExtra = new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR' }).format(extraIncome);
+    variableIncomeRecommendation = `Klien memiliki pendapatan tidak tetap sebesar ${formattedExtra}. Disarankan dana ini dialokasikan 100% untuk Tabungan, Dana Darurat, atau Top-up Investasi untuk mempercepat pencapaian tujuan finansial.`;
+    notes.push('Pendapatan variabel dianggap sebagai surplus untuk memperkuat pos tabungan.');
+  }
+
+  // 5. Construct Result Object
+  return {
+    meta: {
+      totalIncome,
+      fixedIncome: baseIncome,
+      variableIncome: extraIncome,
+    },
+    allocation: {
+      livingCost,
+      debtConsumptive,
+      debtProductive,
+      insurance,
+      saving: savingFromFixed, // Ini hanya porsi dari gaji tetap
+    },
+    analysis: {
+      totalRecommendedSavings, // Ini gabungan (Fixed Saving + Variable)
+      variableIncomeRecommendation,
+      notes,
+    },
   };
 };

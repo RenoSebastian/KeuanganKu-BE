@@ -34,9 +34,14 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { CalculateRiskProfileDto } from './dto/calculate-risk-profile.dto';
 import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 
+// [NEW] DTOs - Agent Simulation (Phase 2 & 5)
+import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
+import { ImportSimulationDto } from './dto/import-simulation.dto';
+
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import * as client from '@prisma/client'; // Import User type for type-safety
 
 @ApiTags('Financial Engine')
 @UseGuards(JwtAuthGuard)
@@ -411,5 +416,51 @@ export class FinancialController {
 
     // 4. Return Stream
     return new StreamableFile(pdfBuffer);
+  }
+
+  // ===========================================================================
+  // MODULE 8: AGENT BUDGET SIMULATION (OFFLINE/STATELESS CAPABILITY)
+  // ===========================================================================
+
+  @Post('simulation/budget')
+  @ApiOperation({
+    summary: 'Simulasi Budgeting Agen (Generate PDF & .mgc File)',
+    description: 'Menghitung alokasi budget, menyimpan log analitik (anonim), dan menghasilkan token file .mgc bertanda tangan digital.'
+  })
+  async createBudgetSimulation(@GetUser() user: client.User, @Body() dto: CreateBudgetSimulationDto) {
+    // 1. Eksekusi Service Orchestrator
+    const result = await this.financialService.simulateAgentBudget(user, dto);
+
+    // 2. Audit Log (Security & Tracking)
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'SIMULATE_BUDGET',
+      entity: 'SimulationLog',
+      entityId: 'ANONYMOUS', // Data anonim, ID fisik ada di DB tapi tidak diexpose detailnya ke sini
+      details: `Agent simulated budget for client profile: ${dto.clientJob} in ${dto.clientCity}`
+    });
+
+    return result;
+  }
+
+  @Post('simulation/decode')
+  @ApiOperation({
+    summary: 'Import & Decode File .mgc',
+    description: 'Memverifikasi signature HMAC file .mgc dan mengembalikan data JSON asli jika valid.'
+  })
+  async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
+    // 1. Eksekusi Service Verifikasi
+    const result = await this.financialService.verifyAndDecodeSimulationToken(dto);
+
+    // 2. Audit Log (Penting untuk mendeteksi percobaan tampering file)
+    await this.auditService.logActivity({
+      userId,
+      action: 'IMPORT_SIMULATION',
+      entity: 'SimulationToken',
+      entityId: 'STATELESS',
+      details: 'Agent successfully imported a .mgc simulation file'
+    });
+
+    return result;
   }
 }

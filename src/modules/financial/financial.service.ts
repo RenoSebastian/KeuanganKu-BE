@@ -1,17 +1,35 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  InternalServerErrorException,
+  Logger,
+  BadRequestException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
+import * as nodeCrypto from 'crypto'; // [FIX] Renamed to nodeCrypto to avoid clash with global Crypto type
+import { SchoolLevel, CostType, HealthStatus, User } from '@prisma/client';
+
+// DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
 import { CreateInsuranceDto } from './dto/create-insurance.dto';
 import { CreateGoalDto, SimulateGoalDto } from './dto/create-goal.dto';
 import { CreateEducationPlanDto } from './dto/create-education.dto';
-import { SchoolLevel, CostType, HealthStatus } from '@prisma/client';
 
-// [NEW] Imports untuk Risk Profile Feature (Stateless)
+// DTOs - Risk Profile Feature
 import { CalculateRiskProfileDto } from './dto/calculate-risk-profile.dto';
 import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 
+// DTOs - Agent Simulation Feature
+import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
+import { ImportSimulationDto } from './dto/import-simulation.dto';
+
+// Services
+import { PdfGeneratorService } from './services/pdf-generator.service';
+
+// Math Utilities
 import {
   calculateFinancialHealth,
   calculatePensionPlan,
@@ -20,47 +38,57 @@ import {
   calculateGoalSimulation,
   calculateEducationPlan,
   calculateBudgetSplit,
-  calculateRiskProfileAnalysis, // <--- [UPDATED] Import Utility Baru
+  calculateRiskProfileAnalysis,
+  calculateAgentBudgetSimulation,
+  AgentBudgetSimulationResult,
 } from './utils/financial-math.util';
 
 @Injectable()
 export class FinancialService {
-  constructor(private prisma: PrismaService) { }
+  private readonly logger = new Logger(FinancialService.name);
+
+  // [FIX] Added missing property declaration
+  private readonly RETENTION_SECRET: string;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    // [FIX] Added missing injections needed for Phase 4
+    private readonly configService: ConfigService,
+    private readonly pdfService: PdfGeneratorService,
+  ) {
+    // [FIX] Initialize Secret Key
+    this.RETENTION_SECRET = this.configService.get<string>(
+      'RETENTION_SECRET',
+      'DEFAULT_SECRET_DO_NOT_USE_IN_PROD_PLEASE_CHANGE_ME',
+    );
+  }
 
   // ===========================================================================
   // MODULE 1: FINANCIAL CHECKUP (The "Medical" Check)
   // ===========================================================================
 
   async createCheckup(userId: string, dto: CreateFinancialRecordDto) {
-    // 1. Hitung Ulang (Re-calculate) menggunakan Math Utility
     const analysis = calculateFinancialHealth(dto);
 
-    // 2. Mapping Status String dari Utility ke Enum Prisma
     let dbStatus: HealthStatus = HealthStatus.BAHAYA;
     if (analysis.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
     else if (analysis.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
 
-    // 3. Simpan ke Database
     return this.prisma.financialCheckup.create({
       data: {
         userId,
         ...dto,
-        // Mapping manual karena Prisma tidak otomatis map sub-object JSON
         userProfile: dto.userProfile as any,
         spouseProfile: dto.spouseProfile ? (dto.spouseProfile as any) : undefined,
-
-        // Simpan Hasil Analisa (Persistence Optimization)
         totalNetWorth: analysis.netWorth,
         surplusDeficit: analysis.surplusDeficit,
         healthScore: analysis.score,
         status: dbStatus,
-        ratiosDetails: analysis.ratios as any, // Simpan detail rasio sebagai JSON
+        ratiosDetails: analysis.ratios as any,
       },
     });
   }
 
-  // [UPDATED] Method ini Public & Exported untuk dipakai DirectorService
-  // Phase 1 Fix: Mapping ratiosDetails -> ratios & Kalkulasi Agregat
   async getLatestCheckup(userId: string, actorRole?: string) {
     const checkup = await this.prisma.financialCheckup.findFirst({
       where: { userId },
@@ -69,11 +97,8 @@ export class FinancialService {
 
     if (!checkup) return null;
 
-    // --- AGGREGATION LOGIC (Hitung ulang total kategori) ---
-    // Helper untuk konversi Decimal/null ke Number
     const val = (n: any) => Number(n) || 0;
 
-    // 1. Total Asset Investasi
     const assetInvestment =
       val(checkup.assetInvHome) +
       val(checkup.assetInvVehicle) +
@@ -85,7 +110,6 @@ export class FinancialService {
       val(checkup.assetDeposit) +
       val(checkup.assetInvOther);
 
-    // 2. Total Hutang Konsumtif
     const debtConsumptive =
       val(checkup.debtKPR) +
       val(checkup.debtKPM) +
@@ -93,36 +117,28 @@ export class FinancialService {
       val(checkup.debtCoop) +
       val(checkup.debtConsumptiveOther);
 
-    // 3. Total Hutang Produktif
     const debtProductive = val(checkup.debtBusiness);
-
-    // 4. Total Pemasukan Bulanan
     const incomeMonthly = val(checkup.incomeFixed) + val(checkup.incomeVariable);
 
-    // 5. Total Pengeluaran Bulanan (Cicilan + Asuransi + Tabungan + Biaya Hidup)
     const expenseMonthly =
-      // Installments
       val(checkup.installmentKPR) +
       val(checkup.installmentKPM) +
       val(checkup.installmentCC) +
       val(checkup.installmentCoop) +
       val(checkup.installmentConsumptiveOther) +
       val(checkup.installmentBusiness) +
-      // Insurance
       val(checkup.insuranceLife) +
       val(checkup.insuranceHealth) +
       val(checkup.insuranceHome) +
       val(checkup.insuranceVehicle) +
       val(checkup.insuranceBPJS) +
       val(checkup.insuranceOther) +
-      // Savings
       val(checkup.savingEducation) +
       val(checkup.savingRetirement) +
       val(checkup.savingPilgrimage) +
       val(checkup.savingHoliday) +
       val(checkup.savingEmergency) +
       val(checkup.savingOther) +
-      // Living Cost
       val(checkup.expenseFood) +
       val(checkup.expenseSchool) +
       val(checkup.expenseTransport) +
@@ -131,21 +147,14 @@ export class FinancialService {
       val(checkup.expenseTax) +
       val(checkup.expenseLifestyle);
 
-    // Transformasi Data Manual (Data Mapping Layer)
     return {
       ...checkup,
-
-      // [CRITICAL FIX] Mapping field DB 'ratiosDetails' ke field FE 'ratios'
       ratios: checkup.ratiosDetails,
-
-      // [CRITICAL FIX] Mengirimkan data agregat yang dihitung di atas
       assetInvestment,
       debtConsumptive,
       debtProductive,
       incomeMonthly,
       expenseMonthly,
-
-      // Data Cleaning: Convert Decimal (Prisma) ke Number (JS)
       totalNetWorth: val(checkup.totalNetWorth),
       surplusDeficit: val(checkup.surplusDeficit),
       assetCash: val(checkup.assetCash),
@@ -166,7 +175,6 @@ export class FinancialService {
     });
   }
 
-  // [NEW] Method untuk Mengambil Detail Checkup Spesifik (Roadmap Part 1)
   async getCheckupDetail(userId: string, checkupId: string) {
     const checkup = await this.prisma.financialCheckup.findFirst({
       where: { id: checkupId, userId },
@@ -176,20 +184,19 @@ export class FinancialService {
       throw new NotFoundException('Data checkup tidak ditemukan');
     }
 
-    // Return objek bersih (Clean Object) untuk Frontend
     return {
       score: checkup.healthScore,
       globalStatus: checkup.status,
       netWorth: Number(checkup.totalNetWorth),
       surplusDeficit: Number(checkup.surplusDeficit),
-      ratios: checkup.ratiosDetails, // Mengembalikan JSON detail rasio
+      ratios: checkup.ratiosDetails,
       generatedAt: checkup.checkDate.toISOString(),
       record: {
         ...checkup,
         assetCash: Number(checkup.assetCash),
         totalNetWorth: Number(checkup.totalNetWorth),
         surplusDeficit: Number(checkup.surplusDeficit),
-      }
+      },
     };
   }
 
@@ -199,8 +206,6 @@ export class FinancialService {
 
   async createBudget(userId: string, dto: CreateBudgetDto) {
     const totalIncome = dto.fixedIncome + dto.variableIncome;
-
-    // --- LOGIKA CERDAS: AUTO-CALCULATE JIKA KOSONG ---
     const isManualInput = dto.livingCost && dto.livingCost > 0;
 
     let finalAllocation = {
@@ -212,7 +217,6 @@ export class FinancialService {
     };
 
     if (!isManualInput) {
-      // Jika kosong, panggil otak matematika Phase 2
       finalAllocation = calculateBudgetSplit(totalIncome);
     }
 
@@ -237,7 +241,6 @@ export class FinancialService {
           year: dto.year,
           fixedIncome: dto.fixedIncome,
           variableIncome: dto.variableIncome,
-          // Gunakan hasil finalAllocation (bisa manual atau auto-calculate)
           productiveDebt: finalAllocation.productiveDebt,
           consumptiveDebt: finalAllocation.consumptiveDebt,
           insurance: finalAllocation.insurance,
@@ -250,10 +253,9 @@ export class FinancialService {
         },
       });
 
-      // Jalankan analisa kesehatan berdasarkan data yang sudah lengkap
       const analysis = this.analyzeBudgetHealth({
         ...dto,
-        ...finalAllocation
+        ...finalAllocation,
       });
 
       return { budget, analysis };
@@ -269,14 +271,11 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 3: CALCULATOR - PENSION PLAN (UPDATED LOGIC)
+  // MODULE 3: CALCULATOR - PENSION PLAN
   // ===========================================================================
 
   async calculateAndSavePension(userId: string, dto: CreatePensionDto) {
-    // 1. Hitung Logika Pensiun (Future Value & PMT)
     const result = calculatePensionPlan(dto);
-
-    // 2. Simpan Rencana ke Database
     const plan = await this.prisma.pensionPlan.create({
       data: {
         userId,
@@ -287,33 +286,19 @@ export class FinancialService {
         currentSaving: dto.currentSaving,
         inflationRate: dto.inflationRate,
         returnRate: dto.returnRate,
-
-        // Hasil Perhitungan
         totalFundNeeded: result.totalFundNeeded,
         monthlySaving: result.monthlySaving,
       },
     });
-
     return { plan, calculation: result };
   }
 
   // ===========================================================================
-  // MODULE 4: CALCULATOR - INSURANCE PLAN (UPDATED LOGIC)
+  // MODULE 4: CALCULATOR - INSURANCE PLAN
   // ===========================================================================
 
   async calculateAndSaveInsurance(userId: string, dto: CreateInsuranceDto) {
-    /**
-     * 1. Hitung Kebutuhan UP menggunakan Math Utility.
-     * Field 'finalExpense' dikirim ke utilitas agar perhitungan 
-     * 'incomeReplacementValue' dan 'totalNeeded' menjadi akurat dan terpisah.
-     */
     const result = calculateInsurancePlan(dto);
-
-    /**
-     * 2. Simpan Rencana ke Database.
-     * Pastikan field 'finalExpense' disimpan secara eksplisit ke kolom database
-     * agar saat pembuatan PDF, data ini bisa ditarik kembali secara granular.
-     */
     const plan = await this.prisma.insurancePlan.create({
       data: {
         userId,
@@ -323,49 +308,27 @@ export class FinancialService {
         existingDebt: dto.existingDebt,
         existingCoverage: dto.existingCoverage,
         protectionDuration: dto.protectionDuration,
-
-        // [NEW] Simpan Biaya Pemakaman/Duka secara terpisah
         finalExpense: dto.finalExpense ?? 0,
-
-        // [FIX] Simpan Asumsi Makro (Inflasi & Return) agar Slider PDF Berfungsi
-        // Menggunakan nullish coalescing (??) untuk fallback ke default jika undefined
         inflationRate: dto.inflationRate ?? 5,
         returnRate: dto.returnRate ?? 7,
-
-        // Hasil Perhitungan Utama
         coverageNeeded: result.totalNeeded,
         recommendation: result.recommendation,
       },
     });
-
-    /**
-     * Mengembalikan objek gabungan antara data yang tersimpan (plan) 
-     * dan hasil kalkulasi detail (result) untuk langsung ditampilkan di UI.
-     */
     return { plan, calculation: result };
   }
 
   // ===========================================================================
-  // MODULE 5: CALCULATOR - GOAL PLAN (NEW)
+  // MODULE 5: CALCULATOR - GOAL PLAN
   // ===========================================================================
 
-  // Method 1: CALCULATE ONLY (Simulasi Cepat) - Tidak Masuk DB
   simulateGoal(userId: string, dto: SimulateGoalDto) {
-    // Panggil utility math murni
     const result = calculateGoalSimulation(dto);
-
-    return {
-      status: 'success',
-      data: result // { futureValue, monthlySaving }
-    };
+    return { status: 'success', data: result };
   }
 
-  // Method 2: CALCULATE & SAVE (Simpan Rencana)
   async calculateAndSaveGoal(userId: string, dto: CreateGoalDto) {
-    // 1. Hitung PMT Goal (Logic CreateGoalDto basis targetAmount)
     const result = calculateGoalPlan(dto);
-
-    // 2. Simpan Rencana
     const plan = await this.prisma.goalPlan.create({
       data: {
         userId,
@@ -374,27 +337,20 @@ export class FinancialService {
         targetDate: new Date(dto.targetDate),
         inflationRate: dto.inflationRate,
         returnRate: dto.returnRate,
-
-        // Hasil Perhitungan
         futureValue: result.futureTargetAmount,
         monthlySaving: result.monthlySaving,
       },
     });
-
     return { plan, calculation: result };
   }
 
   // ===========================================================================
-  // MODULE 6: CALCULATOR - EDUCATION PLAN (GRANULAR UPDATE)
+  // MODULE 6: CALCULATOR - EDUCATION PLAN
   // ===========================================================================
 
   async calculateAndSaveEducation(userId: string, dto: CreateEducationPlanDto) {
-    // 1. Hitung FV & PMT Pendidikan (Granular Sinking Fund)
     const result = calculateEducationPlan(dto);
-
-    // 2. Simpan Parent Plan & Child Stages (Transaction)
     const savedData = await this.prisma.$transaction(async (tx) => {
-      // A. Create Header Plan
       const plan = await tx.educationPlan.create({
         data: {
           userId,
@@ -406,12 +362,8 @@ export class FinancialService {
         },
       });
 
-      // B. Create Detail Stages (TK, SD, SMP...)
       const stagesData = result.stagesBreakdown.map((stage) => {
-        // --- DATA TRANSFORMATION LOGIC ---
         let dbLevel: SchoolLevel = stage.level;
-
-        //Cek jika level dikirim sebagai string yang perlu di konversi
         const levelCheck = String(stage.level).toUpperCase();
         if (levelCheck === 'KULIAH' || levelCheck === 'PT') {
           dbLevel = SchoolLevel.S1;
@@ -423,39 +375,59 @@ export class FinancialService {
           costType: stage.costType,
           currentCost: stage.currentCost,
           yearsToStart: stage.yearsToStart,
-
-          // FIELD PENTING: Hasil Hitungan Backend
-          futureCost: stage.futureCost,        // FV Item Ini
-          monthlySaving: stage.monthlySaving,  // Tabungan Item Ini
+          futureCost: stage.futureCost,
+          monthlySaving: stage.monthlySaving,
         };
       });
 
-      await tx.educationStage.createMany({
-        data: stagesData,
-      });
-
+      await tx.educationStage.createMany({ data: stagesData });
       return plan;
     });
 
     return { plan: savedData, calculation: result };
   }
 
+  // [FIX] Added missing getEducationPlans method
+  async getEducationPlans(userId: string) {
+    const plans = await this.prisma.educationPlan.findMany({
+      where: { userId },
+      include: { stages: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return plans.map((p) => {
+      const { stages, ...planData } = p;
+      const totalFutureCost = stages.reduce((acc, s) => acc + Number(s.futureCost), 0);
+      const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
+      return {
+        plan: planData,
+        calculation: {
+          totalFutureCost,
+          monthlySaving: totalMonthlySaving,
+          stagesBreakdown: stages,
+        },
+      };
+    });
+  }
+
+  // [FIX] Added missing deleteEducationPlan method
+  async deleteEducationPlan(userId: string, planId: string) {
+    const plan = await this.prisma.educationPlan.findFirst({
+      where: { id: planId, userId },
+    });
+    if (!plan) throw new NotFoundException('Rencana pendidikan tidak ditemukan');
+    return this.prisma.educationPlan.delete({ where: { id: planId } });
+  }
+
   // ===========================================================================
   // MODULE 7: RISK PROFILE CALCULATOR (STATELESS)
   // ===========================================================================
-  // Implementasi: Menerima jawaban, memanggil utility, mengembalikan JSON.
-  // Tidak menyimpan ke database (Stateless) agar ringan dan privasi terjaga.
-  // ===========================================================================
 
   calculateRiskProfile(dto: CalculateRiskProfileDto): RiskProfileResponseDto {
-    // 1. Panggil Logic Pure Function dari Utility
-    //    Ini menjaga Service tetap bersih dan logika terpusat di math util.
     const analysis = calculateRiskProfileAnalysis(dto.answers);
-
-    // 2. Construct Response (Tambahkan Metadata)
     return {
       calculatedAt: new Date().toISOString(),
-      clientName: dto.clientName, // Echo balik nama klien
+      clientName: dto.clientName,
       totalScore: analysis.totalScore,
       riskProfile: analysis.profile,
       riskDescription: analysis.description,
@@ -463,7 +435,143 @@ export class FinancialService {
     };
   }
 
-  // --- PRIVATE HELPERS ---
+  // ===========================================================================
+  // MODULE 8: AGENT BUDGET SIMULATION (PHASE 4 & 5 INTEGRATION)
+  // ===========================================================================
+
+  async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
+    try {
+      // 1. CALCULATE: Panggil Math Utility
+      const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
+        dto.fixedIncome,
+        dto.variableIncome,
+      );
+
+      // 2. PREPARE DATA: Hitung umur klien untuk analitik
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      // 3. DATABASE: Simpan Log Analitik (SimulationLog)
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob,
+
+          // Snapshot Finansial
+          totalIncome: calculationResult.meta.totalIncome,
+          calculatedSurplus: calculationResult.analysis.totalRecommendedSavings,
+
+          // Hasil Diagnosa
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+
+          // Simpan detail angka dalam JSON
+          financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)),
+
+          moduleType: 'BUDGETING',
+        },
+      });
+
+      // 4. FILE GENERATION: PDF
+      const pdfUrl = await this.pdfService.generateSimulationPdf(
+        dto,
+        calculationResult,
+        user.fullName || 'Agen KeuanganKu',
+      );
+
+      // 5. SECURITY: Generate .mgc Token (Signed JSON)
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: {
+          fixedIncome: dto.fixedIncome,
+          variableIncome: dto.variableIncome,
+        },
+        result: calculationResult,
+      });
+
+      // 6. RESPONSE
+      return {
+        message: 'Simulasi berhasil dibuat.',
+        data: {
+          preview: calculationResult,
+          download: {
+            pdf_url: pdfUrl,
+            mgc_token: mgcToken,
+            filename_mgc: `Budget_${dto.clientName.replace(/\s+/g, '')}_${new Date().toISOString().split('T')[0]}.mgc`
+          },
+          recommendation: calculationResult.analysis.variableIncomeRecommendation,
+        },
+      };
+
+    } catch (error) {
+      this.logger.error(`Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Terjadi kesalahan saat memproses simulasi budgeting.');
+    }
+  }
+
+  async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
+    const { simulationToken } = dto;
+
+    // 1. VALIDASI FORMAT
+    if (!simulationToken.includes('.')) {
+      throw new BadRequestException('Format file .mgc tidak valid atau rusak.');
+    }
+
+    const [payloadBase64, providedSignature] = simulationToken.split('.');
+
+    // 2. SECURITY CHECK
+    const expectedSignature = this.createHmacSignature(payloadBase64);
+
+    // 3. COMPARE (Tampering Check)
+    const signatureBuffer = Buffer.from(providedSignature);
+    const expectedBuffer = Buffer.from(expectedSignature);
+
+    // [FIX] Using nodeCrypto to call timingSafeEqual correctly
+    const isValid =
+      signatureBuffer.length === expectedBuffer.length &&
+      nodeCrypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+
+    if (!isValid) {
+      this.logger.warn('Security Alert: Invalid Signature on .mgc import.');
+      throw new BadRequestException(
+        'File simulasi (.mgc) tidak valid atau telah dimodifikasi. Import ditolak demi keamanan data.',
+      );
+    }
+
+    // 4. DECODE
+    try {
+      const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
+      const data = JSON.parse(payloadJson);
+
+      return {
+        message: 'File simulasi berhasil di-import.',
+        data: {
+          client: data.client,
+          financial: data.financial,
+          last_simulation_date: data.meta.generatedAt
+        },
+      };
+    } catch (error) {
+      throw new BadRequestException('Gagal membaca isi file simulasi. Encoding rusak.');
+    }
+  }
+
+  // ===========================================================================
+  // PRIVATE HELPERS
+  // ===========================================================================
+
   private analyzeBudgetHealth(dto: CreateBudgetDto) {
     let score = 100;
     const violations: string[] = [];
@@ -476,8 +584,14 @@ export class FinancialService {
     if (Number(dto.insurance) < base * 0.1) { score -= 10; violations.push('Asuransi < 10%'); }
     if (Number(dto.saving) < base * 0.1) { score -= 20; violations.push('Tabungan < 10%'); }
 
-    const totalExpense = Number(dto.productiveDebt) + Number(dto.consumptiveDebt) + Number(dto.insurance) + Number(dto.saving) + Number(dto.livingCost);
-    if (totalExpense > (Number(dto.fixedIncome) + Number(dto.variableIncome))) {
+    const totalExpense =
+      Number(dto.productiveDebt) +
+      Number(dto.consumptiveDebt) +
+      Number(dto.insurance) +
+      Number(dto.saving) +
+      Number(dto.livingCost);
+
+    if (totalExpense > Number(dto.fixedIncome) + Number(dto.variableIncome)) {
       score -= 30;
       violations.push('DEFISIT! Pengeluaran > Pemasukan');
     }
@@ -494,45 +608,26 @@ export class FinancialService {
     return { score, status, recommendation };
   }
 
-  // --- METHODS UNTUK MANAJEMEN RENCANA PENDIDIKAN ---
+  private generateMgcToken(payload: any): string {
+    const jsonString = JSON.stringify(payload);
+    const payloadBase64 = Buffer.from(jsonString).toString('base64');
+    const signature = this.createHmacSignature(payloadBase64);
 
-  async getEducationPlans(userId: string) {
-    const plans = await this.prisma.educationPlan.findMany({
-      where: { userId },
-      include: {
-        stages: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return plans.map((p) => {
-      const { stages, ...planData } = p;
-
-      const totalFutureCost = stages.reduce((acc, s) => acc + Number(s.futureCost), 0);
-      const totalMonthlySaving = stages.reduce((acc, s) => acc + Number(s.monthlySaving), 0);
-
-      return {
-        plan: planData,
-        calculation: {
-          totalFutureCost,
-          monthlySaving: totalMonthlySaving,
-          stagesBreakdown: stages,
-        },
-      };
-    });
+    return `${payloadBase64}.${signature}`;
   }
 
-  async deleteEducationPlan(userId: string, planId: string) {
-    const plan = await this.prisma.educationPlan.findFirst({
-      where: { id: planId, userId },
-    });
+  private createHmacSignature(data: string): string {
+    // [FIX] Using nodeCrypto correctly
+    return nodeCrypto
+      .createHmac('sha256', this.RETENTION_SECRET)
+      .update(data)
+      .digest('hex');
+  }
 
-    if (!plan) {
-      throw new NotFoundException('Rencana pendidikan tidak ditemukan');
-    }
-
-    return this.prisma.educationPlan.delete({
-      where: { id: planId },
-    });
+  private calculateAge(dobString: string): number {
+    const dob = new Date(dobString);
+    const diffMs = Date.now() - dob.getTime();
+    const ageDt = new Date(diffMs);
+    return Math.abs(ageDt.getUTCFullYear() - 1970);
   }
 }
