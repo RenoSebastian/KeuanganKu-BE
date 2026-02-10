@@ -27,6 +27,8 @@ import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
 import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto';
+// [NEW] Import Goal Simulation DTO
+import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 
 // Services
 import { PdfGeneratorService } from './services/pdf-generator.service';
@@ -445,24 +447,14 @@ export class FinancialService {
 
   /**
    * simulateAgentBudget (Stateless Version)
-   * Mengatur alur simulasi agen:
-   * 1. Menghitung data finansial.
-   * 2. Mencatat log analitik ke DB (tanpa menyimpan file).
-   * 3. Meminta PDF Buffer dari generator.
-   * 4. Membuat security token (.mgc).
-   * 5. Mengembalikan paket Buffer + Token ke Controller.
    */
   async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
     try {
-      // 1. CALCULATE: Engine Matematika
       const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
         dto.fixedIncome,
         dto.variableIncome,
       );
 
-      // 2. LOGGING: Simpan data analitik ke DB (Analytics Purpose)
-      // Kita tetap menyimpan log ini agar Direktur bisa melihat performa agen
-      // meskipun file PDF-nya tidak disimpan di server.
       const clientAge = this.calculateAge(dto.clientDob);
 
       await this.prisma.simulationLog.create({
@@ -473,23 +465,19 @@ export class FinancialService {
           clientJob: dto.clientJob,
           totalIncome: calculationResult.meta.totalIncome,
           calculatedSurplus: calculationResult.analysis.totalRecommendedSavings,
-          healthScore: 100, // Default passing grade untuk simulasi
+          healthScore: 100,
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)),
           moduleType: 'BUDGETING',
         },
       });
 
-      // 3. GENERATE BUFFER: Membuat PDF di RAM
-      // Metode ini harus ada di PdfGeneratorService (hasil revisi Tahap 1)
       const pdfBuffer = await this.pdfService.generateSimulationPdfBuffer(
         dto,
         calculationResult,
         user,
       );
 
-      // 4. SECURITY: Generate .mgc Token (Signed JSON)
-      // Token ini berisi data JSON yang di-sign, digunakan untuk fitur Import kembali.
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
@@ -510,12 +498,9 @@ export class FinancialService {
         result: calculationResult,
       });
 
-      // 5. PACKAGING: Kembalikan objek raw ke Controller
-      // Controller akan menggunakan ini untuk set-header dan streaming.
       return {
         pdfBuffer,
         mgcToken,
-        // Sanitasi nama file agar aman untuk URL/Header
         filename: `Budget_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`
       };
 
@@ -528,17 +513,13 @@ export class FinancialService {
   async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
     const { simulationToken } = dto;
 
-    // 1. Validasi Format Token
     if (!simulationToken.includes('.')) {
       throw new BadRequestException('Format file .mgc tidak valid atau rusak.');
     }
 
     const [payloadBase64, providedSignature] = simulationToken.split('.');
-
-    // 2. Security Check (HMAC Re-computation)
     const expectedSignature = this.createHmacSignature(payloadBase64);
 
-    // 3. Compare Signatures Safe Timing
     const signatureBuffer = Buffer.from(providedSignature);
     const expectedBuffer = Buffer.from(expectedSignature);
 
@@ -553,7 +534,6 @@ export class FinancialService {
       );
     }
 
-    // 4. Decode Payload
     try {
       const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
       const data = JSON.parse(payloadJson);
@@ -570,6 +550,257 @@ export class FinancialService {
       throw new BadRequestException('Gagal membaca isi file simulasi. Encoding rusak.');
     }
   }
+
+  // ===========================================================================
+  // MODULE 9: AGENT INSURANCE SIMULATION (STATELESS)
+  // ===========================================================================
+
+  async simulateAgentInsurance(user: User, dto: CreateInsuranceSimulationDto) {
+    try {
+      const calculationResult = calculateInsurancePlan({
+        type: dto.type,
+        dependentCount: dto.dependentCount,
+        monthlyExpense: dto.monthlyExpense,
+        existingDebt: dto.existingDebt,
+        existingCoverage: dto.existingCoverage,
+        protectionDuration: dto.protectionDuration,
+        finalExpense: dto.finalExpense ?? 0,
+        inflationRate: dto.inflationRate ?? 5,
+        returnRate: dto.returnRate ?? 7,
+      });
+
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob,
+          totalIncome: dto.monthlyExpense * 12,
+          calculatedSurplus: calculationResult.coverageGap,
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+          financialRatios: JSON.parse(JSON.stringify(calculationResult)),
+          moduleType: 'INSURANCE',
+        },
+      });
+
+      const pdfBuffer = await this.pdfService.generateInsurancePdfBuffer(
+        dto,
+        calculationResult,
+        user,
+      );
+
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'INSURANCE',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: { ...dto },
+        result: calculationResult,
+      });
+
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Insurance_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Insurance Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi asuransi.');
+    }
+  }
+
+  // ===========================================================================
+  // MODULE 10: AGENT PENSION SIMULATION (STATELESS)
+  // ===========================================================================
+
+  async simulateAgentPension(user: User, dto: CreatePensionSimulationDto) {
+    try {
+      const calculationResult = calculatePensionPlan({
+        currentAge: dto.currentAge,
+        retirementAge: dto.retirementAge,
+        lifeExpectancy: dto.lifeExpectancy ?? 80,
+        currentExpense: dto.currentExpense,
+        currentSaving: dto.currentSaving ?? 0,
+        inflationRate: dto.inflationRate ?? 5,
+        returnRate: dto.returnRate ?? 8,
+      });
+
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob || '-',
+          totalIncome: dto.currentExpense,
+          calculatedSurplus: calculationResult.shortfall,
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+          financialRatios: JSON.parse(JSON.stringify(calculationResult)),
+          moduleType: 'PENSION',
+        },
+      });
+
+      const pdfBuffer = await this.pdfService.generatePensionPdfBuffer(
+        dto,
+        calculationResult,
+        user,
+      );
+
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'PENSION',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: { ...dto },
+        result: calculationResult,
+      });
+
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Pension_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Pension Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi dana pensiun.');
+    }
+  }
+
+  // ===========================================================================
+  // MODULE 11: AGENT GOAL SIMULATION (STATELESS)
+  // ===========================================================================
+
+  /**
+   * simulateAgentGoal
+   * -----------------
+   * Logika simulasi Tujuan Keuangan (Goals) tanpa menyimpan data ke DB (Stateless).
+   */
+  async simulateAgentGoal(user: User, dto: CreateGoalSimulationDto) {
+    try {
+      // 1. CALCULATE
+      // [FIX] Pass dto.targetDate as string directly
+      const calculationResult = calculateGoalPlan({
+        goalName: dto.goalName,
+        targetAmount: dto.targetAmount,
+        targetDate: dto.targetDate, // Pass string directly
+        inflationRate: dto.inflationRate ?? 5,
+        returnRate: dto.returnRate ?? 6,
+      });
+
+      // --- [MANUAL RE-CALCULATION FOR ACCURACY] ---
+      const yearsDuration = calculationResult.monthsDuration / 12;
+      const rRate = (dto.returnRate ?? 6) / 100;
+
+      // Hitung FV dari Modal Awal
+      const futureExistingFund = (dto.currentSaving || 0) * Math.pow(1 + rRate, yearsDuration);
+
+      // Target Bersih = Target FV - FV Modal Awal
+      const netTarget = Math.max(0, calculationResult.futureTargetAmount - futureExistingFund);
+
+      // Recalculate PMT (Monthly Saving) based on Net Target
+      let realMonthlySaving = 0;
+      if (netTarget > 0) {
+        const monthlyRate = rRate / 12;
+        const months = calculationResult.monthsDuration;
+        if (monthlyRate === 0) {
+          realMonthlySaving = netTarget / months;
+        } else {
+          // PMT Future Value Formula: FV * r / ((1+r)^n - 1)
+          realMonthlySaving = (netTarget * monthlyRate) / (Math.pow(1 + monthlyRate, months) - 1);
+        }
+      }
+
+      // Gabungkan hasil untuk dikirim ke PDF
+      const finalResult = {
+        ...calculationResult,
+        futureExistingFund,
+        netTarget,
+        monthlySaving: realMonthlySaving,
+        yearsDuration
+      };
+
+      // 2. LOGGING
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob || '-',
+          totalIncome: dto.targetAmount,
+          calculatedSurplus: finalResult.monthlySaving,
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+          financialRatios: JSON.parse(JSON.stringify(finalResult)),
+          moduleType: 'GOAL',
+        },
+      });
+
+      // 3. GENERATE BUFFER
+      const pdfBuffer = await this.pdfService.generateGoalSimulationPdfBuffer(
+        dto,
+        finalResult,
+        user,
+      );
+
+      // 4. SECURITY TOKEN
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'GOAL',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: { ...dto },
+        result: finalResult,
+      });
+
+      // 5. PACKAGING
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Goal_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Goal Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi tujuan keuangan.');
+    }
+  }
+
 
   // ===========================================================================
   // PRIVATE HELPERS
@@ -631,196 +862,5 @@ export class FinancialService {
     const diffMs = Date.now() - dob.getTime();
     const ageDt = new Date(diffMs);
     return Math.abs(ageDt.getUTCFullYear() - 1970);
-  }
-
-  // ===========================================================================
-  // MODULE 9: AGENT INSURANCE SIMULATION (STATELESS)
-  // ===========================================================================
-
-  /**
-   * simulateAgentInsurance
-   * ----------------------
-   * Logika simulasi asuransi tanpa menyimpan data ke tabel 'InsurancePlan'.
-   * 1. Hitung kebutuhan UP (Uang Pertanggungan).
-   * 2. Catat log aktivitas anonim ke DB.
-   * 3. Render PDF di Memory (Buffer).
-   * 4. Generate Token .mgc.
-   */
-  async simulateAgentInsurance(user: User, dto: CreateInsuranceSimulationDto) {
-    try {
-      // 1. CALCULATE: Hitung kebutuhan proteksi
-      // Menggunakan utility math yang sama dengan modul kalkulator biasa
-      const calculationResult = calculateInsurancePlan({
-        type: dto.type,
-        dependentCount: dto.dependentCount,
-        monthlyExpense: dto.monthlyExpense,
-        existingDebt: dto.existingDebt,
-        existingCoverage: dto.existingCoverage,
-        protectionDuration: dto.protectionDuration,
-        finalExpense: dto.finalExpense ?? 0,
-        inflationRate: dto.inflationRate ?? 5,
-        returnRate: dto.returnRate ?? 7,
-      });
-
-      // 2. LOGGING: Simpan statistik ke SimulationLog
-      const clientAge = this.calculateAge(dto.clientDob);
-
-      await this.prisma.simulationLog.create({
-        data: {
-          agentId: user.id,
-          clientAge: clientAge,
-          clientCity: dto.clientCity,
-          clientJob: dto.clientJob,
-
-          // Mapping khusus Asuransi:
-          // totalIncome diisi Annual Expense (gaya hidup yang dilindungi)
-          totalIncome: dto.monthlyExpense * 12,
-          // calculatedSurplus diisi Coverage Gap (Kekurangan UP)
-          calculatedSurplus: calculationResult.coverageGap,
-
-          healthScore: 100,
-          status: HealthStatus.SEHAT,
-          financialRatios: JSON.parse(JSON.stringify(calculationResult)), // Simpan detail hitungan
-          moduleType: 'INSURANCE', // [PENTING] Pembeda modul
-        },
-      });
-
-      // 3. GENERATE BUFFER: Membuat PDF di RAM
-      // Note: Pastikan method generateInsurancePdfBuffer dibuat di PdfGeneratorService (Fase 3)
-      const pdfBuffer = await this.pdfService.generateInsurancePdfBuffer(
-        dto,
-        calculationResult,
-        user,
-      );
-
-      // 4. SECURITY: Generate .mgc Token
-      const mgcToken = this.generateMgcToken({
-        meta: {
-          version: '1.0',
-          generatedAt: new Date().toISOString(),
-          agentId: user.id,
-          module: 'INSURANCE',
-        },
-        client: {
-          name: dto.clientName,
-          dob: dto.clientDob,
-          city: dto.clientCity,
-          job: dto.clientJob,
-          phone: dto.clientPhone,
-        },
-        financial: {
-          ...dto, // Menyimpan semua parameter input (expense, debt, etc)
-        },
-        result: calculationResult,
-      });
-
-      // 5. PACKAGING
-      return {
-        pdfBuffer,
-        mgcToken,
-        filename: `Insurance_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
-      };
-
-    } catch (error: any) {
-      this.logger.error(`Insurance Simulation Error: ${error.message}`, error.stack);
-      throw new InternalServerErrorException('Gagal memproses simulasi asuransi.');
-    }
-  }
-
-  // ===========================================================================
-  // MODULE 10: AGENT PENSION SIMULATION (STATELESS)
-  // ===========================================================================
-
-  /**
-   * simulateAgentPension
-   * --------------------
-   * Logika simulasi Dana Pensiun tanpa menyimpan data detail ke tabel 'PensionPlan'.
-   * 1. Hitung kebutuhan dana pensiun (FV & PVAD).
-   * 2. Catat log aktivitas ke SimulationLog (untuk analitik Direktur).
-   * 3. Render PDF Report di Memory.
-   * 4. Generate Token .mgc untuk restore data.
-   */
-  async simulateAgentPension(user: User, dto: CreatePensionSimulationDto) {
-    try {
-      // 1. CALCULATE: Engine Matematika (Reuse logic existing)
-      const calculationResult = calculatePensionPlan({
-        currentAge: dto.currentAge,
-        retirementAge: dto.retirementAge,
-        lifeExpectancy: dto.lifeExpectancy ?? 80, // [FIX] Default 80
-        currentExpense: dto.currentExpense,
-        currentSaving: dto.currentSaving ?? 0,
-        inflationRate: dto.inflationRate ?? 5,
-        returnRate: dto.returnRate ?? 8,
-      });
-
-      // 2. LOGGING: Simpan statistik ke SimulationLog
-      const clientAge = this.calculateAge(dto.clientDob);
-
-      await this.prisma.simulationLog.create({
-        data: {
-          agentId: user.id,
-          clientAge: clientAge,
-          clientCity: dto.clientCity,
-          // [FIX] Berikan default '-' jika clientJob kosong, karena DB mewajibkan string
-          clientJob: dto.clientJob || '-',
-
-          // Mapping khusus Pensiun:
-          // totalIncome diisi Current Expense (Gaya hidup yang ingin dipertahankan)
-          totalIncome: dto.currentExpense,
-
-          // calculatedSurplus diisi SHORTFALL (Kekurangan Dana)
-          // Agar Direktur bisa melihat rata-rata kekurangan dana pensiun nasabah
-          calculatedSurplus: calculationResult.shortfall,
-
-          healthScore: 100,
-          status: HealthStatus.SEHAT,
-
-          // Simpan detail hitungan (Total Needed, FV Expense, Monthly Saving)
-          financialRatios: JSON.parse(JSON.stringify(calculationResult)),
-
-          moduleType: 'PENSION', // [PENTING] Identifikasi Modul
-        },
-      });
-
-      // 3. GENERATE BUFFER: Membuat PDF di RAM
-      // Memanggil method generatePensionPdfBuffer yang sudah dibuat di Fase 3
-      const pdfBuffer = await this.pdfService.generatePensionPdfBuffer(
-        dto,
-        calculationResult,
-        user,
-      );
-
-      // 4. SECURITY: Generate .mgc Token
-      const mgcToken = this.generateMgcToken({
-        meta: {
-          version: '1.0',
-          generatedAt: new Date().toISOString(),
-          agentId: user.id,
-          module: 'PENSION',
-        },
-        client: {
-          name: dto.clientName,
-          dob: dto.clientDob,
-          city: dto.clientCity,
-          job: dto.clientJob,
-          phone: dto.clientPhone,
-        },
-        financial: {
-          ...dto, // Menyimpan semua parameter input (usia, expense, saving, rate)
-        },
-        result: calculationResult,
-      });
-
-      // 5. PACKAGING
-      return {
-        pdfBuffer,
-        mgcToken,
-        filename: `Pension_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
-      };
-
-    } catch (error: any) {
-      this.logger.error(`Pension Simulation Error: ${error.message}`, error.stack);
-      throw new InternalServerErrorException('Gagal memproses simulasi dana pensiun.');
-    }
   }
 }

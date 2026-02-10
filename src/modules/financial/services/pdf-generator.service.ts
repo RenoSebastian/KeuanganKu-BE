@@ -23,6 +23,7 @@ import { agentBudgetReportTemplate } from '../templates/agent-budget-report.temp
 import { CreateBudgetSimulationDto } from '../dto/create-budget-simulation.dto';
 import { CreateInsuranceSimulationDto } from '../dto/create-insurance-simulation.dto';
 import { CreatePensionSimulationDto } from '../dto/create-pension-simulation.dto';
+import { CreateGoalSimulationDto } from '../dto/create-goal-simulation.dto';
 
 import { User } from '@prisma/client';
 
@@ -1053,6 +1054,112 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         } catch (error: any) {
             this.logger.error(`Failed to generate Pension PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF Pensiun.');
+        }
+    }
+
+    // ===========================================================================
+    // [NEW] GOAL SIMULATION (STATELESS)
+    // ===========================================================================
+
+    /**
+     * generateGoalSimulationPdfBuffer
+     * -------------------------------
+     * Membuat PDF simulasi Tujuan Keuangan secara on-the-fly.
+     * Visualisasi: Reality Check Inflasi & Strategi Investasi.
+     */
+    async generateGoalSimulationPdfBuffer(
+        clientData: CreateGoalSimulationDto,
+        calculationResult: any, // Hasil dari calculateGoalPlan (Stateless version logic)
+        agent: User,
+    ): Promise<Buffer> {
+        const fmt = (n: number) =>
+            new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(n);
+
+        // --- 1. DATA MAPPING ---
+        // Hitung durasi detail
+        const years = calculationResult.yearsDuration || 0;
+        const months = Math.round(years * 12);
+
+        // Hitung persentase bar modal awal vs target
+        // Safe division untuk visualisasi bar chart
+        const target = calculationResult.futureTargetAmount || 1;
+        const existing = calculationResult.futureExistingFund || 0;
+        const existingPercentage = Math.min(100, Math.round((existing / target) * 100));
+
+        const context = {
+            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+            documentId: `GOAL-${Math.random().toString(36).substring(7).toUpperCase()}`,
+
+            // Profil Agen
+            agent: {
+                name: agent.fullName,
+                parentCompany: agent.companyName || 'KeuanganKu Pratama',
+                groupAgency: agent.agencyName || 'MaxiPro Group',
+                level: agent.agentLevel || 'Financial Advisor'
+            },
+
+            // Profil Klien
+            client: {
+                name: clientData.clientName,
+                city: clientData.clientCity,
+                job: clientData.clientJob || '-',
+                phone: clientData.clientPhone || '-'
+            },
+
+            // Data Tujuan (Input Snapshot)
+            goal: {
+                name: clientData.goalName,
+                targetAmount: fmt(clientData.targetAmount), // Harga Hari Ini (PV)
+                targetDate: new Date(clientData.targetDate).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
+                currentSaving: fmt(clientData.currentSaving || 0),
+                inflationRate: clientData.inflationRate,
+                returnRate: clientData.returnRate,
+                years: years.toFixed(1),
+
+                // Inflasi Effect (Beda harga nanti - harga sekarang)
+                inflationEffect: fmt(calculationResult.futureTargetAmount - clientData.targetAmount),
+                currentCost: fmt(clientData.targetAmount)
+            },
+
+            // Hasil Kalkulasi (Output)
+            calc: {
+                yearsDuration: years.toFixed(1),
+                monthsDuration: months,
+
+                // Future Values (Harga Nanti)
+                futureTargetAmount: fmt(calculationResult.futureTargetAmount),
+                futureValue: fmt(calculationResult.futureTargetAmount), // Alias for template compatibility
+
+                // Existing Fund Projection (Aset Lama tumbuh jadi berapa?)
+                futureExistingFund: fmt(calculationResult.futureExistingFund),
+                existingPercentage: existingPercentage,
+
+                // The Gap (Kekurangan yang harus dikejar)
+                netTarget: fmt(calculationResult.netTarget),
+
+                // The Solution (Tabungan Bulanan)
+                monthlySaving: fmt(calculationResult.monthlySaving)
+            }
+        };
+
+        try {
+            // Compile Template (Menggunakan goals-report.template.ts yang baru direvisi)
+            const template = handlebars.compile(goalReportTemplate);
+            const html = template(context);
+
+            // Render via Puppeteer
+            const pdfBuffer = await this.generatePdfCore(html, context);
+
+            this.logger.log(`Stateless Goal PDF generated for: ${clientData.clientName}`);
+            return pdfBuffer;
+
+        } catch (error: any) {
+            this.logger.error(`Failed to generate Goal PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF Tujuan Keuangan.');
         }
     }
 } // <-- Kurung tutup Class PdfGeneratorService
