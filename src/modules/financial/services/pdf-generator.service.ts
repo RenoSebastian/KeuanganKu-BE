@@ -18,6 +18,8 @@ import { riskProfileReportTemplate } from '../templates/risk-profile-report.temp
 import { calculateInsurancePlan } from '../utils/financial-math.util';
 import { CreateBudgetSimulationDto } from '../dto/create-budget-simulation.dto';
 import { AgentBudgetSimulationResult } from '../utils/financial-math.util';
+import { agentBudgetReportTemplate } from '../templates/agent-budget-report.template';
+import { User } from '@prisma/client';
 
 @Injectable()
 export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
@@ -747,88 +749,99 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     }
 
     // ===========================================================================
-    // [NEW] AGENT SIMULATION PDF GENERATOR (PHASE 4)
+    // [REVISED] PROFESSIONAL AGENT SIMULATION PDF (PHASE 4 & 5)
     // ===========================================================================
 
     /**
      * generateSimulationPdf
      * ---------------------
-     * Membuat file PDF laporan simulasi budgeting untuk klien agen.
-     * Output: Menyimpan file fisik di folder /uploads dan mengembalikan URL-nya.
+     * Menghasilkan laporan PDF profesional untuk agen dengan layout 2x2,
+     * perbandingan Bulanan vs Tahunan, dan Profil Profesional Konsultan.
      */
     async generateSimulationPdf(
         clientData: CreateBudgetSimulationDto,
         simulationResult: AgentBudgetSimulationResult,
-        agentName: string,
+        agent: User,
     ): Promise<string> {
-        // 1. Pastikan folder upload ada
-        if (!fs.existsSync(this.uploadDir)) {
-            fs.mkdirSync(this.uploadDir, { recursive: true });
-        }
+        const fmt = (n: number) =>
+            new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(n);
+
+        const fmtRaw = (n: number) =>
+            new Intl.NumberFormat('id-ID').format(n);
+
+        // 1. Data Context untuk Handlebars
+        const context = {
+            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+            documentId: `SIM-${Math.random().toString(36).substring(7).toUpperCase()}`,
+
+            // Profil Agen (Request: Nama, PT Induk, Group, Level)
+            agent: {
+                name: agent.fullName,
+                parentCompany: agent.companyName || 'KeuanganKu Pratama',
+                groupAgency: agent.agencyName || 'MaxiPro Group',
+                level: agent.agentLevel || 'Financial Advisor'
+            },
+
+            client: {
+                name: clientData.clientName,
+                city: clientData.clientCity,
+                job: clientData.clientJob
+            },
+
+            // Pendapatan: Bulanan vs Tahunan
+            financial: {
+                fixedMonthly: fmt(simulationResult.meta.fixedIncome),
+                fixedAnnual: fmt(simulationResult.meta.fixedIncome * 12),
+                variableMonthly: fmt(simulationResult.meta.variableIncome),
+                variableAnnual: fmt(simulationResult.meta.variableIncome * 12),
+                totalMonthly: fmt(simulationResult.meta.totalIncome),
+                totalAnnual: fmt(simulationResult.meta.totalIncome * 12)
+            },
+
+            // Alokasi: Bulanan vs Tahunan
+            allocation: {
+                livingMonthly: fmt(simulationResult.allocation.livingCost),
+                livingAnnual: fmtRaw(simulationResult.allocation.livingCost * 12),
+
+                productiveMonthly: fmt(simulationResult.allocation.debtProductive),
+                productiveAnnual: fmt(simulationResult.allocation.debtProductive * 12),
+
+                consumptiveMonthly: fmt(simulationResult.allocation.debtConsumptive),
+                consumptiveAnnual: fmt(simulationResult.allocation.debtConsumptive * 12),
+
+                savingMonthly: fmt(simulationResult.allocation.saving),
+                savingAnnual: fmt(simulationResult.allocation.saving * 12),
+
+                insuranceMonthly: fmt(simulationResult.allocation.insurance),
+                insuranceAnnual: fmt(simulationResult.allocation.insurance * 12),
+            },
+            recommendationText: simulationResult.analysis.variableIncomeRecommendation
+        };
 
         try {
+            const template = handlebars.compile(agentBudgetReportTemplate);
+            const html = template(context);
+
+            // 2. Render via Puppeteer
+            const pdfBuffer = await this.generatePdfCore(html, context);
+
+            // 3. Save to Disk
             const safeName = clientData.clientName.replace(/[^a-zA-Z0-9]/g, '_');
             const fileName = `Simulasi_Budget_${safeName}_${Date.now()}.pdf`;
             const filePath = path.join(this.uploadDir, fileName);
 
-            // TODO: Di masa depan, gunakan this.generatePdfCore() dengan template Handlebars 
-            // agar desainnya cantik seperti report lainnya. 
-            // Untuk Fase ini, kita gunakan Simple Text Report dulu sesuai desain sistem.
+            await fs.promises.writeFile(filePath, pdfBuffer);
 
-            const content = `
-================================================================
-LAPORAN PERENCANAAN ANGGARAN (SIMULASI)
-================================================================
-Agen Perencana : ${agentName}
-Tanggal        : ${new Date().toLocaleDateString('id-ID')}
-
-DATA KLIEN
-Nama           : ${clientData.clientName}
-Umur           : ${this.calculateAgeSimple(clientData.clientDob)} Tahun
-Pekerjaan      : ${clientData.clientJob}
-Kota           : ${clientData.clientCity}
-
-----------------------------------------------------------------
-RINGKASAN PENDAPATAN
-Total Income   : Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.meta.totalIncome)}
-- Tetap        : Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.meta.fixedIncome)}
-- Variabel     : Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.meta.variableIncome)}
-
-----------------------------------------------------------------
-REKOMENDASI ALOKASI (IDEAL)
-
-1. Biaya Hidup (45%)        : Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.allocation.livingCost)}
-2. Hutang Konsumtif (Max 15%): Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.allocation.debtConsumptive)}
-3. Hutang Produktif (Max 20%): Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.allocation.debtProductive)}
-4. Tabungan Rutin (10%)     : Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.allocation.saving)}
-5. Proteksi/Asuransi (10%)  : Rp ${new Intl.NumberFormat('id-ID').format(simulationResult.allocation.insurance)}
-
-----------------------------------------------------------------
-CATATAN ANALIS
-${simulationResult.analysis.variableIncomeRecommendation}
-
-================================================================
-Generated by KeuanganKu System
-            `;
-
-            // Menulis file ke disk
-            await fs.promises.writeFile(filePath, content);
-
-            this.logger.log(`PDF Generated successfully: ${fileName}`);
-
-            // Return relative URL agar Controller bisa mengirimnya ke Frontend
+            this.logger.log(`Professional PDF Generated for Agent: ${agent.fullName}`);
             return `/uploads/${fileName}`;
 
         } catch (error: any) {
-            this.logger.error(`Failed to generate Simulation PDF: ${error.message}`);
-            throw new Error('Gagal membuat laporan PDF simulasi.');
+            this.logger.error(`Failed to generate Agent PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF profesional.');
         }
-    }
-    // [NEW] Helper Khusus untuk PDF Simulasi
-    private calculateAgeSimple(dobString: string): number {
-        const dob = new Date(dobString);
-        const diffMs = Date.now() - dob.getTime();
-        const ageDt = new Date(diffMs);
-        return Math.abs(ageDt.getUTCFullYear() - 1970);
     }
 } // <-- Kurung tutup Class PdfGeneratorService

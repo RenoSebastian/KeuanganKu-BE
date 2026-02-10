@@ -477,7 +477,7 @@ export class FinancialService {
       const pdfUrl = await this.pdfService.generateSimulationPdf(
         dto,
         calculationResult,
-        user.fullName || 'Agen KeuanganKu',
+        user,
       );
 
       // 5. SECURITY: Generate .mgc Token (Signed JSON)
