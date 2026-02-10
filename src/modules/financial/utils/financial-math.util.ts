@@ -1,11 +1,12 @@
 import { CreateFinancialRecordDto } from '../dto/create-financial-record.dto';
 import { CreatePensionDto } from '../dto/create-pension.dto';
+// [UPDATED] Import Simulation DTO untuk Asuransi
 import { CreateInsuranceDto } from '../dto/create-insurance.dto';
-import { CreateGoalDto, SimulateGoalDto } from '../dto/create-goal.dto'; // [UPDATED] Import SimulateGoalDto
+import { CreateInsuranceSimulationDto } from '../dto/create-insurance-simulation.dto';
+import { CreateGoalDto, SimulateGoalDto } from '../dto/create-goal.dto';
 import { CreateEducationPlanDto } from '../dto/create-education.dto';
 import { CreateBudgetDto } from '../dto/create-budget.dto';
 import { SchoolLevel, CostType } from '@prisma/client';
-// Tambahkan 2 baris ini bersama import DTO lainnya
 import { RiskAnswerOption } from '../dto/calculate-risk-profile.dto';
 import { RiskProfileCategory } from '../dto/risk-profile-response.dto';
 import { BUDGET_ALLOCATION_RULES } from '../constants/budgeting-rules.constant';
@@ -561,19 +562,15 @@ export const calculatePensionPlan = (data: CreatePensionDto) => {
 };
 
 /**
- * LOGIKA: ASURANSI JIWA (UP IDEAL) - UPDATED
- * Menggunakan "Income Replacement Method" dengan pendekatan PVAD (Present Value Annuity Due).
- * Rumus sesuai dokumen: PVAD = PMT * [ (1 - (1+r)^-n) / r ] * (1+r)
- * Dimana r = Nett Rate (Investasi - Inflasi).
- */
-/**
  * CALCULATOR: INSURANCE PLAN (Income Replacement Method)
  * Sebagai analis, kita memisahkan kebutuhan menjadi 3 pilar: 
  * 1. Income Replacement (Living Cost)
  * 2. Debt Clearance (Liability)
  * 3. Final Expense (Funeral & Emergency)
+ * * [UPDATED] Menerima Union Type (CreateInsuranceDto | CreateInsuranceSimulationDto)
+ * agar bisa dipakai oleh fitur Database maupun Stateless.
  */
-export const calculateInsurancePlan = (data: CreateInsuranceDto) => {
+export const calculateInsurancePlan = (data: CreateInsuranceDto | CreateInsuranceSimulationDto) => {
   const {
     monthlyExpense,
     existingDebt = 0,
@@ -581,7 +578,6 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto) => {
     protectionDuration = 10,
     inflationRate = 5,
     returnRate = 7,
-    // [NEW] Destrukturisasi langsung dari DTO yang sudah diperbaharui
     finalExpense = 0,
   } = data;
 
@@ -1009,7 +1005,7 @@ export const calculateAgentBudgetSimulation = (
       saving: savingFromFixed, // Ini hanya porsi dari gaji tetap
     },
     analysis: {
-      totalRecommendedSavings, // Ini gabungan (Fixed Saving + Variable)
+      totalRecommendedSavings, // Ini gabungan (Fixed Saving + Variable Income)
       variableIncomeRecommendation,
       notes,
     },
