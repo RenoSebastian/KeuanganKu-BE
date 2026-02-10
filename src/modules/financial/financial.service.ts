@@ -26,6 +26,7 @@ import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
+import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto';
 
 // Services
 import { PdfGeneratorService } from './services/pdf-generator.service';
@@ -715,6 +716,103 @@ export class FinancialService {
     } catch (error: any) {
       this.logger.error(`Insurance Simulation Error: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Gagal memproses simulasi asuransi.');
+    }
+  }
+
+  // ===========================================================================
+  // MODULE 10: AGENT PENSION SIMULATION (STATELESS)
+  // ===========================================================================
+
+  /**
+   * simulateAgentPension
+   * --------------------
+   * Logika simulasi Dana Pensiun tanpa menyimpan data detail ke tabel 'PensionPlan'.
+   * 1. Hitung kebutuhan dana pensiun (FV & PVAD).
+   * 2. Catat log aktivitas ke SimulationLog (untuk analitik Direktur).
+   * 3. Render PDF Report di Memory.
+   * 4. Generate Token .mgc untuk restore data.
+   */
+  async simulateAgentPension(user: User, dto: CreatePensionSimulationDto) {
+    try {
+      // 1. CALCULATE: Engine Matematika (Reuse logic existing)
+      const calculationResult = calculatePensionPlan({
+        currentAge: dto.currentAge,
+        retirementAge: dto.retirementAge,
+        lifeExpectancy: dto.lifeExpectancy,
+        currentExpense: dto.currentExpense,
+        currentSaving: dto.currentSaving || 0,
+        inflationRate: dto.inflationRate || 5,
+        returnRate: dto.returnRate || 8,
+      });
+
+      // 2. LOGGING: Simpan statistik ke SimulationLog
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          // [FIX] Berikan default '-' jika clientJob kosong, karena DB mewajibkan string
+          clientJob: dto.clientJob || '-',
+
+          // Mapping khusus Pensiun:
+          // totalIncome diisi Current Expense (Gaya hidup yang ingin dipertahankan)
+          totalIncome: dto.currentExpense,
+
+          // calculatedSurplus diisi SHORTFALL (Kekurangan Dana)
+          // Agar Direktur bisa melihat rata-rata kekurangan dana pensiun nasabah
+          calculatedSurplus: calculationResult.shortfall,
+
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+
+          // Simpan detail hitungan (Total Needed, FV Expense, Monthly Saving)
+          financialRatios: JSON.parse(JSON.stringify(calculationResult)),
+
+          moduleType: 'PENSION', // [PENTING] Identifikasi Modul
+        },
+      });
+
+      // 3. GENERATE BUFFER: Membuat PDF di RAM
+      // Memanggil method generatePensionPdfBuffer yang sudah dibuat di Fase 3
+      const pdfBuffer = await this.pdfService.generatePensionPdfBuffer(
+        dto,
+        calculationResult,
+        user,
+      );
+
+      // 4. SECURITY: Generate .mgc Token
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'PENSION',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: {
+          ...dto, // Menyimpan semua parameter input (usia, expense, saving, rate)
+        },
+        result: calculationResult,
+      });
+
+      // 5. PACKAGING
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Pension_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Pension Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi dana pensiun.');
     }
   }
 }

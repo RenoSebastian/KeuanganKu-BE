@@ -16,10 +16,14 @@ import { historyCheckupReportTemplate } from '../templates/history-checkup-repor
 // [NEW] Template untuk Risk Profile
 import { riskProfileReportTemplate } from '../templates/risk-profile-report.template';
 import { calculateInsurancePlan } from '../utils/financial-math.util';
-import { CreateBudgetSimulationDto } from '../dto/create-budget-simulation.dto';
-import { CreateInsuranceSimulationDto } from '../dto/create-insurance-simulation.dto';
 import { AgentBudgetSimulationResult } from '../utils/financial-math.util';
 import { agentBudgetReportTemplate } from '../templates/agent-budget-report.template';
+
+//dto 
+import { CreateBudgetSimulationDto } from '../dto/create-budget-simulation.dto';
+import { CreateInsuranceSimulationDto } from '../dto/create-insurance-simulation.dto';
+import { CreatePensionSimulationDto } from '../dto/create-pension-simulation.dto';
+
 import { User } from '@prisma/client';
 
 @Injectable()
@@ -943,6 +947,112 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         } catch (error: any) {
             this.logger.error(`Failed to generate Insurance PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF Asuransi.');
+        }
+    }
+
+    // ===========================================================================
+    // [NEW] PENSION SIMULATION (STATELESS)
+    // ===========================================================================
+
+    /**
+     * generatePensionPdfBuffer
+     * ------------------------
+     * Membuat PDF simulasi Dana Pensiun secara on-the-fly (In-Memory).
+     * Fokus pada visualisasi timeline dan shock therapy inflasi.
+     */
+    async generatePensionPdfBuffer(
+        clientData: CreatePensionSimulationDto,
+        calculationResult: any, // Hasil return dari calculatePensionPlan
+        agent: User,
+    ): Promise<Buffer> {
+        const fmt = (n: number) =>
+            new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(n);
+
+        // --- 1. LOGIC VISUALISASI TIMELINE (CSS WIDTH %) ---
+        // Kita hitung persentase durasi untuk grafik batang di PDF
+        const totalTimeline = calculationResult.yearsToRetire + calculationResult.retirementDuration;
+
+        // Hindari pembagian dengan nol
+        const safeTotal = totalTimeline > 0 ? totalTimeline : 1;
+
+        const workWidth = (calculationResult.yearsToRetire / safeTotal) * 100;
+        const retireWidth = (calculationResult.retirementDuration / safeTotal) * 100;
+
+        // --- 2. DATA CONTEXT FOR HANDLEBARS ---
+        const context = {
+            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+            documentId: `PEN-${Math.random().toString(36).substring(7).toUpperCase()}`,
+
+            // Profil Agen
+            agent: {
+                name: agent.fullName,
+                parentCompany: agent.companyName || 'KeuanganKu Pratama',
+                groupAgency: agent.agencyName || 'MaxiPro Group',
+                level: agent.agentLevel || 'Financial Advisor'
+            },
+
+            // Profil Klien
+            user: {
+                name: clientData.clientName,
+                city: clientData.clientCity,
+                job: clientData.clientJob,
+                dob: clientData.clientDob ? new Date(clientData.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
+            },
+
+            // Data Rencana (Input)
+            plan: {
+                currentAge: clientData.currentAge,
+                retirementAge: clientData.retirementAge,
+                lifeExpectancy: clientData.lifeExpectancy,
+
+                // Format angka keuangan
+                currentExpense: fmt(clientData.currentExpense),
+                currentSaving: fmt(clientData.currentSaving || 0),
+                monthlySaving: fmt(calculationResult.monthlySaving), // Rekomendasi Tabungan
+
+                // Rate
+                inflationRate: clientData.inflationRate,
+                returnRate: clientData.returnRate
+            },
+
+            // Hasil Kalkulasi (Output)
+            calc: {
+                yearsToRetire: calculationResult.yearsToRetire,
+                retirementDuration: calculationResult.retirementDuration,
+
+                // Shock Therapy Numbers
+                futureMonthlyExpense: fmt(calculationResult.futureMonthlyExpense),
+
+                // Financial Gap Analysis
+                totalFundNeeded: fmt(calculationResult.totalFundNeeded),
+                fvExistingFund: fmt(calculationResult.fvExistingFund),
+                shortfall: fmt(calculationResult.shortfall),
+
+                // Visual Widths for CSS
+                workingPercentage: workWidth.toFixed(1),
+                retirementPercentage: retireWidth.toFixed(1)
+            }
+        };
+
+        try {
+            // Compile Template (Menggunakan pension-report.template.ts yang baru direvisi)
+            const template = handlebars.compile(pensionReportTemplate);
+            const html = template(context);
+
+            // Render via Puppeteer
+            const pdfBuffer = await this.generatePdfCore(html, context);
+
+            this.logger.log(`Stateless Pension PDF generated for: ${clientData.clientName}`);
+
+            return pdfBuffer;
+
+        } catch (error: any) {
+            this.logger.error(`Failed to generate Pension PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF Pensiun.');
         }
     }
 } // <-- Kurung tutup Class PdfGeneratorService

@@ -20,7 +20,7 @@ import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagg
 import { FinancialService } from './financial.service';
 import { PdfGeneratorService } from './services/pdf-generator.service';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { AuditService } from '../audit/audit.service'; // [FIX] Import AuditService
+import { AuditService } from '../audit/audit.service';
 
 // DTOs
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -38,6 +38,7 @@ import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
+import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto';
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -51,9 +52,9 @@ import * as client from '@prisma/client'; // Import User type for type-safety
 export class FinancialController {
   constructor(
     private readonly financialService: FinancialService,
-    private readonly pdfGeneratorService: PdfGeneratorService, // [FIX] Renamed from pdfservice to match usage
+    private readonly pdfGeneratorService: PdfGeneratorService,
     private readonly prisma: PrismaService,
-    private readonly auditService: AuditService, // [FIX] Injected AuditService properly
+    private readonly auditService: AuditService,
   ) { }
 
   // ===========================================================================
@@ -95,12 +96,10 @@ export class FinancialController {
   ) {
     // 1. Ambil Data (Reuse logic getCheckupDetail)
     const checkupData = await this.financialService.getLatestCheckup(userId);
-    // *Atau getCheckupDetail(userId, id) jika ingin spesifik history*
 
     if (!checkupData) throw new NotFoundException('Data not found');
 
     // 2. Generate PDF
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generateCheckupPdf(checkupData);
 
     // 3. Stream Response
@@ -128,7 +127,6 @@ export class FinancialController {
     if (!budgetData) throw new NotFoundException('Data budget tidak ditemukan');
 
     // 2. Generate PDF
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generateBudgetPdf(budgetData);
 
     // 3. Return Stream
@@ -155,7 +153,6 @@ export class FinancialController {
     if (!pensionData) throw new NotFoundException('Data rencana pensiun tidak ditemukan');
 
     // 2. Generate PDF
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generatePensionPdf(pensionData);
 
     // 3. Return Stream
@@ -180,7 +177,6 @@ export class FinancialController {
 
     if (!insuranceData) throw new NotFoundException('Data rencana asuransi tidak ditemukan');
 
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generateInsurancePdf(insuranceData);
 
     res.set({
@@ -260,7 +256,6 @@ export class FinancialController {
     if (!goalData) throw new NotFoundException('Data tujuan keuangan tidak ditemukan');
 
     // 2. Generate PDF
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generateGoalPdf(goalData);
 
     // 3. Stream Response
@@ -329,7 +324,6 @@ export class FinancialController {
     });
 
     // 3. Generate PDF
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generateEducationPdf(formattedData);
 
     res.set({
@@ -350,7 +344,6 @@ export class FinancialController {
     if (!checkupDetail) throw new NotFoundException('Data riwayat tidak ditemukan');
 
     // 2. Generate PDF dengan Template History
-    // [FIX] Updated to use pdfGeneratorService
     const buffer = await this.pdfGeneratorService.generateHistoryCheckupPdf(checkupDetail);
 
     // 3. Stream Response
@@ -392,7 +385,6 @@ export class FinancialController {
   ): Promise<StreamableFile> {
 
     // 1. Generate PDF Buffer
-    // [FIX] Menggunakan this.pdfGeneratorService yang sudah benar
     const pdfBuffer = await this.pdfGeneratorService.generateRiskProfilePdf(data);
 
     // 2. Setup Filename yang deskriptif
@@ -406,7 +398,6 @@ export class FinancialController {
     });
 
     // 3. Audit Log
-    // [FIX] Menggunakan this.auditService yang sudah di-inject
     await this.auditService.logActivity({
       userId,
       action: 'EXPORT_PDF',
@@ -502,6 +493,52 @@ export class FinancialController {
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated insurance simulation for client ${dto.clientName}`,
       ip: '0.0.0.0', // Atau ambil dari @Req() jika perlu
+      userAgent: 'AgentSystem'
+    });
+
+    // 3. SET HTTP HEADERS (CRITICAL STEP)
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.pdfBuffer.length,
+
+      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
+      // tanpa harus mengotori body file PDF
+      'X-MGC-Token': result.mgcToken,
+
+      // Mengizinkan Browser/Frontend membaca header custom ini
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+    });
+
+    // 4. STREAM DATA LANGSUNG KE CLIENT
+    res.end(result.pdfBuffer);
+  }
+
+  // ===========================================================================
+  // MODULE 10: AGENT PENSION SIMULATION (STATELESS STREAMING)
+  // ===========================================================================
+
+  @Post('simulation/pension')
+  @ApiOperation({
+    summary: 'Simulasi Pensiun & Download PDF Langsung (Stateless)',
+    description: 'Menghitung kebutuhan dana pensiun, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
+  })
+  async createPensionSimulation(
+    @GetUser() user: client.User,
+    @Body() dto: CreatePensionSimulationDto,
+    @Res() res: express.Response,
+  ) {
+    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
+    const result = await this.financialService.simulateAgentPension(user, dto);
+
+    // 2. Audit Log
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'SIMULATE_PENSION',
+      entity: 'SimulationLog',
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated pension simulation for client ${dto.clientName}`,
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
