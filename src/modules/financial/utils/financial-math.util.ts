@@ -486,80 +486,75 @@ export const calculatePMT = (rate: number, nper: number, pv: number, fv: number 
 };
 
 /**
- * LOGIKA: DANA PENSIUN (CUSTOM LOGIC)
- * - Future Expense: Inflated Value (Nominal)
- * - Existing Fund Growth: Fixed 5.5%
- * - Target Fund: Menggunakan PVAD dengan Nett Rate terhadap Inflated Expense
+ * Kalkulasi Pensiun (Matches Excel "Kalkulator Dana Hari Tua_Rev1.xlsx")
  */
-export const calculatePensionPlan = (data: CreatePensionDto) => {
-  const {
-    currentAge,
-    retirementAge,
-    lifeExpectancy = 80,
-    currentExpense,
-    currentSaving = 0,
-    inflationRate = 5,
-    returnRate = 8
-  } = data;
+export function calculatePensionPlan(data: {
+  currentAge: number;
+  retirementAge: number;
+  lifeExpectancy: number;
+  currentExpense: number;
+  currentSaving: number;
+  inflationRate: number; // Dalam Persen (misal 5)
+  returnRate: number;    // Dalam Persen (misal 10)
+}) {
+  // 1. Parameter Waktu
+  const yearsToRetire = Math.max(1, data.retirementAge - data.currentAge); // n1
+  const retirementDuration = Math.max(1, data.lifeExpectancy - data.retirementAge); // n2
 
-  // --- 1. SETUP WAKTU ---
-  const yearsToRetire = retirementAge - currentAge;
-  const retirementDuration = lifeExpectancy - retirementAge;
+  // 2. Konversi Rate (Excel Logic: r = i - f)
+  const infRate = data.inflationRate / 100;
+  const invRate = data.returnRate / 100;
+  const nettRate = invRate - infRate; // Simple Subtraction (Sesuai Excel)
 
-  if (yearsToRetire <= 0) throw new Error("Usia pensiun harus lebih besar dari usia sekarang");
-  if (retirementDuration <= 0) throw new Error("Usia harapan hidup harus lebih besar dari usia pensiun");
+  // 3. Future Value Expense (Biaya Hidup saat Pensiun)
+  // Rumus: PV * (1 + f)^n1
+  const futureMonthlyExpense = data.currentExpense * Math.pow(1 + infRate, yearsToRetire);
+  const futureAnnualExpense = futureMonthlyExpense * 12;
 
-  // --- 2. SETUP RATE ---
-  const iRate = inflationRate / 100;
-  const rRate = returnRate / 100;
-  const nettRate = rRate - iRate;
-
-  // --- 3. HITUNG BIAYA HIDUP NANTI (FUTURE VALUE) ---
-  const annualExpenseCurrent = currentExpense * 12;
-
-  // [UPDATED] Mengalikan biaya hidup saat ini dengan inflasi sampai usia pensiun
-  const futureAnnualExpense = annualExpenseCurrent * Math.pow(1 + iRate, yearsToRetire);
-
-  // --- 4. HITUNG TOTAL DANA YANG DIBUTUHKAN (TARGET) ---
+  // 4. Total Fund Needed (Gunung Emas) - PVAD Method
+  // Menggunakan Nett Rate untuk mengakomodasi kenaikan biaya hidup selama masa pensiun
+  // Rumus PVAD: PMT * [ (1 - (1+r)^-n2) / r ] * (1+r)
   let totalFundNeeded = 0;
   if (nettRate === 0) {
     totalFundNeeded = futureAnnualExpense * retirementDuration;
   } else {
-    // PV Annuity Due dengan Nett Rate
-    const pvadFactor = (1 - Math.pow(1 + nettRate, -retirementDuration)) / nettRate;
-    totalFundNeeded = futureAnnualExpense * pvadFactor * (1 + nettRate);
+    const factor = (1 - Math.pow(1 + nettRate, -retirementDuration)) / nettRate;
+    totalFundNeeded = futureAnnualExpense * factor * (1 + nettRate);
   }
 
-  // --- 5. HITUNG FV SALDO AWAL (ASET LAMA) ---
-  // [UPDATED] Fixed Growth Rate 5.5% untuk aset lama sesuai request
-  const fixedExistingFundRate = 0.055; // 5.5%
-  const fvExistingFund = currentSaving * Math.pow(1 + fixedExistingFundRate, yearsToRetire);
+  // 5. Future Value Existing Fund (Aset Lama)
+  // PENTING: Menggunakan Investment Rate (invRate), BUKAN Nett Rate
+  // Rumus: PV * (1 + i)^n1
+  const fvExistingFund = data.currentSaving * Math.pow(1 + invRate, yearsToRetire);
 
-  // --- 6. HITUNG KEKURANGAN (SHORTFALL) ---
+  // 6. Shortfall (Gap)
   const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
 
-  // --- 7. HITUNG TABUNGAN BULANAN (PMT) ---
-  let annualSaving = 0;
+  // 7. Monthly Saving (PMT)
+  // Menghitung cicilan untuk mencapai Shortfall
+  let monthlySaving = 0;
   if (shortfall > 0) {
-    if (nettRate === 0) {
-      annualSaving = shortfall / yearsToRetire;
+    const monthlyRate = invRate / 12;
+    const months = yearsToRetire * 12;
+
+    if (monthlyRate === 0) {
+      monthlySaving = shortfall / months;
     } else {
-      // Future Value of Annuity factor (untuk menghitung berapa yg harus ditabung)
-      const sinkingFundFactor = Math.pow(1 + nettRate, yearsToRetire) - 1;
-      annualSaving = (shortfall * nettRate) / sinkingFundFactor;
+      // Rumus PMT Future Value: FV * r / ((1+r)^n - 1)
+      monthlySaving = (shortfall * monthlyRate) / (Math.pow(1 + monthlyRate, months) - 1);
     }
   }
 
   return {
     yearsToRetire,
     retirementDuration,
-    futureMonthlyExpense: futureAnnualExpense / 12, // Nilai di masa depan (sudah kena inflasi)
-    totalFundNeeded,
-    fvExistingFund,
-    shortfall,
-    monthlySaving: annualSaving / 12
+    futureMonthlyExpense, // Untuk Shock Therapy UI
+    totalFundNeeded,      // Target Dana
+    fvExistingFund,       // Aset Lama
+    shortfall,            // Kekurangan
+    monthlySaving         // Solusi
   };
-};
+}
 
 /**
  * CALCULATOR: INSURANCE PLAN (Income Replacement Method)

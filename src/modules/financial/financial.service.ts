@@ -269,11 +269,19 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 3: CALCULATOR - PENSION PLAN
+  // MODULE 3: CALCULATOR - PENSION PLAN (DB BASED)
   // ===========================================================================
 
   async calculateAndSavePension(userId: string, dto: CreatePensionDto) {
-    const result = calculatePensionPlan(dto);
+    // [FIX] Provide default values for optional fields to satisfy math engine requirement
+    const result = calculatePensionPlan({
+      ...dto,
+      lifeExpectancy: dto.lifeExpectancy ?? 80,
+      currentSaving: dto.currentSaving ?? 0,
+      inflationRate: dto.inflationRate ?? 5,
+      returnRate: dto.returnRate ?? 8,
+    });
+
     const plan = await this.prisma.pensionPlan.create({
       data: {
         userId,
@@ -738,11 +746,11 @@ export class FinancialService {
       const calculationResult = calculatePensionPlan({
         currentAge: dto.currentAge,
         retirementAge: dto.retirementAge,
-        lifeExpectancy: dto.lifeExpectancy,
+        lifeExpectancy: dto.lifeExpectancy ?? 80, // [FIX] Default 80
         currentExpense: dto.currentExpense,
-        currentSaving: dto.currentSaving || 0,
-        inflationRate: dto.inflationRate || 5,
-        returnRate: dto.returnRate || 8,
+        currentSaving: dto.currentSaving ?? 0,
+        inflationRate: dto.inflationRate ?? 5,
+        returnRate: dto.returnRate ?? 8,
       });
 
       // 2. LOGGING: Simpan statistik ke SimulationLog
