@@ -17,6 +17,7 @@ import { historyCheckupReportTemplate } from '../templates/history-checkup-repor
 import { riskProfileReportTemplate } from '../templates/risk-profile-report.template';
 import { calculateInsurancePlan } from '../utils/financial-math.util';
 import { CreateBudgetSimulationDto } from '../dto/create-budget-simulation.dto';
+import { CreateInsuranceSimulationDto } from '../dto/create-insurance-simulation.dto';
 import { AgentBudgetSimulationResult } from '../utils/financial-math.util';
 import { agentBudgetReportTemplate } from '../templates/agent-budget-report.template';
 import { User } from '@prisma/client';
@@ -838,6 +839,110 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         } catch (error: any) {
             this.logger.error(`Failed to generate Stateless PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF (Buffer Generation Failed).');
+        }
+    }
+
+    // ===========================================================================
+    // [NEW] INSURANCE SIMULATION (STATELESS)
+    // ===========================================================================
+
+    /**
+     * generateInsurancePdfBuffer
+     * --------------------------
+     * Membuat PDF simulasi asuransi secara on-the-fly (In-Memory).
+     * Menerima hasil kalkulasi dan DTO simulasi, lalu merender PDF tanpa simpan ke disk.
+     */
+    async generateInsurancePdfBuffer(
+        clientData: CreateInsuranceSimulationDto,
+        calculationResult: any, // Menggunakan hasil return dari calculateInsurancePlan
+        agent: User,
+    ): Promise<Buffer> {
+        const fmt = (n: number) =>
+            new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(n);
+
+        // Hitung total dana untuk membersihkan hutang + biaya akhir (Debt Clearance)
+        // Logic: Hutang Sisa + Biaya Pemakaman
+        const debtClearanceTotal = Number(clientData.existingDebt) + Number(clientData.finalExpense || 0);
+
+        // Mapping Data Context untuk Handlebars
+        const context = {
+            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+            documentId: `INS-${Math.random().toString(36).substring(7).toUpperCase()}`,
+
+            // 1. Profil Agen (Professional Header)
+            agent: {
+                name: agent.fullName,
+                parentCompany: agent.companyName || 'KeuanganKu Pratama',
+                groupAgency: agent.agencyName || 'MaxiPro Group',
+                level: agent.agentLevel || 'Financial Advisor'
+            },
+
+            // 2. Profil Klien
+            client: {
+                name: clientData.clientName,
+                city: clientData.clientCity,
+                job: clientData.clientJob,
+                // Format tanggal lahir agar enak dibaca
+                dob: clientData.clientDob ? new Date(clientData.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
+            },
+
+            // 3. Snapshot Input (Parameter yang digunakan)
+            input: {
+                typeLabel: clientData.type === 'LIFE' ? 'Jiwa (Life)' : clientData.type === 'HEALTH' ? 'Kesehatan' : 'Sakit Kritis',
+                dependentCount: clientData.dependentCount,
+                monthlyExpense: fmt(clientData.monthlyExpense),
+                existingDebt: fmt(clientData.existingDebt),
+                existingCoverage: fmt(clientData.existingCoverage),
+                finalExpense: fmt(clientData.finalExpense || 0),
+                protectionDuration: clientData.protectionDuration,
+                inflationRate: clientData.inflationRate || 5, // Default display
+                returnRate: clientData.returnRate || 6       // Default display
+            },
+
+            // 4. Hasil Analisa (Calculation Result)
+            result: {
+                // Pilar A: Income Replacement (Biaya Hidup Keluarga)
+                incomeReplacement: fmt(calculationResult.incomeReplacementValue),
+                annualExpense: fmt(clientData.monthlyExpense * 12),
+
+                // Pilar B: Debt & Final Expense (Dana Bersih-bersih)
+                debtClearance: fmt(debtClearanceTotal),
+
+                // Summary
+                totalNeeded: fmt(calculationResult.totalNeeded), // A + B
+                existing: fmt(clientData.existingCoverage),
+                gap: fmt(calculationResult.coverageGap),
+
+                // Logic Visual (Apakah Surplus atau Defisit?)
+                isGapPositive: calculationResult.coverageGap > 0,
+
+                // Rekomendasi Dinamis
+                recommendation: calculationResult.coverageGap > 0
+                    ? `Klien membutuhkan TAMBAHAN Uang Pertanggungan sebesar ${fmt(calculationResult.coverageGap)} agar keluarga aman 100%.`
+                    : `Selamat! Proteksi klien saat ini sudah mencukupi kebutuhan masa depan.`
+            }
+        };
+
+        try {
+            // Compile Template (Pastikan insurance-report.template.ts sudah direvisi layoutnya)
+            const template = handlebars.compile(insuranceReportTemplate);
+            const html = template(context);
+
+            // Render ke Buffer via Puppeteer
+            const pdfBuffer = await this.generatePdfCore(html, context);
+
+            this.logger.log(`Stateless Insurance PDF generated for: ${clientData.clientName}`);
+
+            // Return Buffer langsung (Zero Disk I/O)
+            return pdfBuffer;
+
+        } catch (error: any) {
+            this.logger.error(`Failed to generate Insurance PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF Asuransi.');
         }
     }
 } // <-- Kurung tutup Class PdfGeneratorService

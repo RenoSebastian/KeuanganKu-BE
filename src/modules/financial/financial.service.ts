@@ -25,6 +25,7 @@ import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 // DTOs - Agent Simulation Feature
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
+import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
 
 // Services
 import { PdfGeneratorService } from './services/pdf-generator.service';
@@ -621,5 +622,99 @@ export class FinancialService {
     const diffMs = Date.now() - dob.getTime();
     const ageDt = new Date(diffMs);
     return Math.abs(ageDt.getUTCFullYear() - 1970);
+  }
+
+  // ===========================================================================
+  // MODULE 9: AGENT INSURANCE SIMULATION (STATELESS)
+  // ===========================================================================
+
+  /**
+   * simulateAgentInsurance
+   * ----------------------
+   * Logika simulasi asuransi tanpa menyimpan data ke tabel 'InsurancePlan'.
+   * 1. Hitung kebutuhan UP (Uang Pertanggungan).
+   * 2. Catat log aktivitas anonim ke DB.
+   * 3. Render PDF di Memory (Buffer).
+   * 4. Generate Token .mgc.
+   */
+  async simulateAgentInsurance(user: User, dto: CreateInsuranceSimulationDto) {
+    try {
+      // 1. CALCULATE: Hitung kebutuhan proteksi
+      // Menggunakan utility math yang sama dengan modul kalkulator biasa
+      const calculationResult = calculateInsurancePlan({
+        type: dto.type,
+        dependentCount: dto.dependentCount,
+        monthlyExpense: dto.monthlyExpense,
+        existingDebt: dto.existingDebt,
+        existingCoverage: dto.existingCoverage,
+        protectionDuration: dto.protectionDuration,
+        finalExpense: dto.finalExpense ?? 0,
+        inflationRate: dto.inflationRate ?? 5,
+        returnRate: dto.returnRate ?? 7,
+      });
+
+      // 2. LOGGING: Simpan statistik ke SimulationLog
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob,
+
+          // Mapping khusus Asuransi:
+          // totalIncome diisi Annual Expense (gaya hidup yang dilindungi)
+          totalIncome: dto.monthlyExpense * 12,
+          // calculatedSurplus diisi Coverage Gap (Kekurangan UP)
+          calculatedSurplus: calculationResult.coverageGap,
+
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+          financialRatios: JSON.parse(JSON.stringify(calculationResult)), // Simpan detail hitungan
+          moduleType: 'INSURANCE', // [PENTING] Pembeda modul
+        },
+      });
+
+      // 3. GENERATE BUFFER: Membuat PDF di RAM
+      // Note: Pastikan method generateInsurancePdfBuffer dibuat di PdfGeneratorService (Fase 3)
+      const pdfBuffer = await this.pdfService.generateInsurancePdfBuffer(
+        dto,
+        calculationResult,
+        user,
+      );
+
+      // 4. SECURITY: Generate .mgc Token
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'INSURANCE',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: {
+          ...dto, // Menyimpan semua parameter input (expense, debt, etc)
+        },
+        result: calculationResult,
+      });
+
+      // 5. PACKAGING
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Insurance_Plan_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Insurance Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi asuransi.');
+    }
   }
 }

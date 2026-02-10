@@ -37,6 +37,7 @@ import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 // [NEW] DTOs - Agent Simulation (Phase 2 & 5)
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
+import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -474,5 +475,51 @@ export class FinancialController {
     });
 
     return this.financialService.verifyAndDecodeSimulationToken(dto);
+  }
+
+  // ===========================================================================
+  // MODULE 9: AGENT INSURANCE SIMULATION (STATELESS STREAMING)
+  // ===========================================================================
+
+  @Post('simulation/insurance')
+  @ApiOperation({
+    summary: 'Simulasi Asuransi & Download PDF Langsung (Stateless)',
+    description: 'Menghitung kebutuhan proteksi, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
+  })
+  async createInsuranceSimulation(
+    @GetUser() user: client.User,
+    @Body() dto: CreateInsuranceSimulationDto,
+    @Res() res: express.Response,
+  ) {
+    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
+    const result = await this.financialService.simulateAgentInsurance(user, dto);
+
+    // 2. Audit Log (Tetap catat aktivitas)
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'SIMULATE_INSURANCE',
+      entity: 'SimulationLog',
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated insurance simulation for client ${dto.clientName}`,
+      ip: '0.0.0.0', // Atau ambil dari @Req() jika perlu
+      userAgent: 'AgentSystem'
+    });
+
+    // 3. SET HTTP HEADERS (CRITICAL STEP)
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.pdfBuffer.length,
+
+      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
+      // tanpa harus mengotori body file PDF
+      'X-MGC-Token': result.mgcToken,
+
+      // Mengizinkan Browser/Frontend membaca header custom ini
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+    });
+
+    // 4. STREAM DATA LANGSUNG KE CLIENT
+    res.end(result.pdfBuffer);
   }
 }
