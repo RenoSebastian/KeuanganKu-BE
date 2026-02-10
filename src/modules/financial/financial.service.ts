@@ -7,8 +7,8 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
-import * as nodeCrypto from 'crypto'; // [FIX] Renamed to nodeCrypto to avoid clash with global Crypto type
-import { SchoolLevel, CostType, HealthStatus, User } from '@prisma/client';
+import * as nodeCrypto from 'crypto';
+import { SchoolLevel, HealthStatus, User } from '@prisma/client';
 
 // DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -46,17 +46,13 @@ import {
 @Injectable()
 export class FinancialService {
   private readonly logger = new Logger(FinancialService.name);
-
-  // [FIX] Added missing property declaration
   private readonly RETENTION_SECRET: string;
 
   constructor(
     private readonly prisma: PrismaService,
-    // [FIX] Added missing injections needed for Phase 4
     private readonly configService: ConfigService,
     private readonly pdfService: PdfGeneratorService,
   ) {
-    // [FIX] Initialize Secret Key
     this.RETENTION_SECRET = this.configService.get<string>(
       'RETENTION_SECRET',
       'DEFAULT_SECRET_DO_NOT_USE_IN_PROD_PLEASE_CHANGE_ME',
@@ -387,7 +383,6 @@ export class FinancialService {
     return { plan: savedData, calculation: result };
   }
 
-  // [FIX] Added missing getEducationPlans method
   async getEducationPlans(userId: string) {
     const plans = await this.prisma.educationPlan.findMany({
       where: { userId },
@@ -410,7 +405,6 @@ export class FinancialService {
     });
   }
 
-  // [FIX] Added missing deleteEducationPlan method
   async deleteEducationPlan(userId: string, planId: string) {
     const plan = await this.prisma.educationPlan.findFirst({
       where: { id: planId, userId },
@@ -436,51 +430,56 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 8: AGENT BUDGET SIMULATION (PHASE 4 & 5 INTEGRATION)
+  // MODULE 8: AGENT BUDGET SIMULATION (STATELESS UPDATE)
   // ===========================================================================
 
+  /**
+   * simulateAgentBudget (Stateless Version)
+   * Mengatur alur simulasi agen:
+   * 1. Menghitung data finansial.
+   * 2. Mencatat log analitik ke DB (tanpa menyimpan file).
+   * 3. Meminta PDF Buffer dari generator.
+   * 4. Membuat security token (.mgc).
+   * 5. Mengembalikan paket Buffer + Token ke Controller.
+   */
   async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
     try {
-      // 1. CALCULATE: Panggil Math Utility
+      // 1. CALCULATE: Engine Matematika
       const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
         dto.fixedIncome,
         dto.variableIncome,
       );
 
-      // 2. PREPARE DATA: Hitung umur klien untuk analitik
+      // 2. LOGGING: Simpan data analitik ke DB (Analytics Purpose)
+      // Kita tetap menyimpan log ini agar Direktur bisa melihat performa agen
+      // meskipun file PDF-nya tidak disimpan di server.
       const clientAge = this.calculateAge(dto.clientDob);
 
-      // 3. DATABASE: Simpan Log Analitik (SimulationLog)
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob,
-
-          // Snapshot Finansial
           totalIncome: calculationResult.meta.totalIncome,
           calculatedSurplus: calculationResult.analysis.totalRecommendedSavings,
-
-          // Hasil Diagnosa
-          healthScore: 100,
+          healthScore: 100, // Default passing grade untuk simulasi
           status: HealthStatus.SEHAT,
-
-          // Simpan detail angka dalam JSON
           financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)),
-
           moduleType: 'BUDGETING',
         },
       });
 
-      // 4. FILE GENERATION: PDF
-      const pdfUrl = await this.pdfService.generateSimulationPdf(
+      // 3. GENERATE BUFFER: Membuat PDF di RAM
+      // Metode ini harus ada di PdfGeneratorService (hasil revisi Tahap 1)
+      const pdfBuffer = await this.pdfService.generateSimulationPdfBuffer(
         dto,
         calculationResult,
         user,
       );
 
-      // 5. SECURITY: Generate .mgc Token (Signed JSON)
+      // 4. SECURITY: Generate .mgc Token (Signed JSON)
+      // Token ini berisi data JSON yang di-sign, digunakan untuk fitur Import kembali.
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
@@ -501,21 +500,16 @@ export class FinancialService {
         result: calculationResult,
       });
 
-      // 6. RESPONSE
+      // 5. PACKAGING: Kembalikan objek raw ke Controller
+      // Controller akan menggunakan ini untuk set-header dan streaming.
       return {
-        message: 'Simulasi berhasil dibuat.',
-        data: {
-          preview: calculationResult,
-          download: {
-            pdf_url: pdfUrl,
-            mgc_token: mgcToken,
-            filename_mgc: `Budget_${dto.clientName.replace(/\s+/g, '')}_${new Date().toISOString().split('T')[0]}.mgc`
-          },
-          recommendation: calculationResult.analysis.variableIncomeRecommendation,
-        },
+        pdfBuffer,
+        mgcToken,
+        // Sanitasi nama file agar aman untuk URL/Header
+        filename: `Budget_${dto.clientName.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`
       };
 
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Simulation Error: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Terjadi kesalahan saat memproses simulasi budgeting.');
     }
@@ -524,21 +518,20 @@ export class FinancialService {
   async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
     const { simulationToken } = dto;
 
-    // 1. VALIDASI FORMAT
+    // 1. Validasi Format Token
     if (!simulationToken.includes('.')) {
       throw new BadRequestException('Format file .mgc tidak valid atau rusak.');
     }
 
     const [payloadBase64, providedSignature] = simulationToken.split('.');
 
-    // 2. SECURITY CHECK
+    // 2. Security Check (HMAC Re-computation)
     const expectedSignature = this.createHmacSignature(payloadBase64);
 
-    // 3. COMPARE (Tampering Check)
+    // 3. Compare Signatures Safe Timing
     const signatureBuffer = Buffer.from(providedSignature);
     const expectedBuffer = Buffer.from(expectedSignature);
 
-    // [FIX] Using nodeCrypto to call timingSafeEqual correctly
     const isValid =
       signatureBuffer.length === expectedBuffer.length &&
       nodeCrypto.timingSafeEqual(signatureBuffer, expectedBuffer);
@@ -550,7 +543,7 @@ export class FinancialService {
       );
     }
 
-    // 4. DECODE
+    // 4. Decode Payload
     try {
       const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
       const data = JSON.parse(payloadJson);
@@ -617,7 +610,6 @@ export class FinancialService {
   }
 
   private createHmacSignature(data: string): string {
-    // [FIX] Using nodeCrypto correctly
     return nodeCrypto
       .createHmac('sha256', this.RETENTION_SECRET)
       .update(data)

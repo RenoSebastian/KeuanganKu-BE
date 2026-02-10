@@ -749,20 +749,20 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     }
 
     // ===========================================================================
-    // [REVISED] PROFESSIONAL AGENT SIMULATION PDF (PHASE 4 & 5)
+    // [REVISED - STATELESS] PROFESSIONAL AGENT SIMULATION PDF
     // ===========================================================================
 
     /**
-     * generateSimulationPdf
-     * ---------------------
-     * Menghasilkan laporan PDF profesional untuk agen dengan layout 2x2,
-     * perbandingan Bulanan vs Tahunan, dan Profil Profesional Konsultan.
+     * generateSimulationPdfBuffer
+     * ---------------------------
+     * Mengembalikan Raw Buffer PDF (tanpa menyimpan ke disk).
+     * Digunakan untuk streaming langsung ke browser user.
      */
-    async generateSimulationPdf(
+    async generateSimulationPdfBuffer(
         clientData: CreateBudgetSimulationDto,
         simulationResult: AgentBudgetSimulationResult,
         agent: User,
-    ): Promise<string> {
+    ): Promise<Buffer> {
         const fmt = (n: number) =>
             new Intl.NumberFormat('id-ID', {
                 style: 'currency',
@@ -778,7 +778,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
             documentId: `SIM-${Math.random().toString(36).substring(7).toUpperCase()}`,
 
-            // Profil Agen (Request: Nama, PT Induk, Group, Level)
+            // Profil Agen
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
@@ -823,25 +823,21 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
 
         try {
+            // 2. Compile Template
             const template = handlebars.compile(agentBudgetReportTemplate);
             const html = template(context);
 
-            // 2. Render via Puppeteer
+            // 3. Render via Puppeteer (In-Memory)
             const pdfBuffer = await this.generatePdfCore(html, context);
 
-            // 3. Save to Disk
-            const safeName = clientData.clientName.replace(/[^a-zA-Z0-9]/g, '_');
-            const fileName = `Simulasi_Budget_${safeName}_${Date.now()}.pdf`;
-            const filePath = path.join(this.uploadDir, fileName);
+            this.logger.log(`Stateless PDF Buffer generated for client: ${clientData.clientName}`);
 
-            await fs.promises.writeFile(filePath, pdfBuffer);
-
-            this.logger.log(`Professional PDF Generated for Agent: ${agent.fullName}`);
-            return `/uploads/${fileName}`;
+            // 4. Return Buffer Langsung (Tanpa fs.writeFile)
+            return pdfBuffer;
 
         } catch (error: any) {
-            this.logger.error(`Failed to generate Agent PDF: ${error.message}`);
-            throw new Error('Gagal memproses laporan PDF profesional.');
+            this.logger.error(`Failed to generate Stateless PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF (Buffer Generation Failed).');
         }
     }
 } // <-- Kurung tutup Class PdfGeneratorService

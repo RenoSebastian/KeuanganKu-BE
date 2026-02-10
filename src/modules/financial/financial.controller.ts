@@ -419,40 +419,52 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 8: AGENT BUDGET SIMULATION (OFFLINE/STATELESS CAPABILITY)
+  // MODULE 8: AGENT BUDGET SIMULATION (STATELESS STREAMING)
   // ===========================================================================
 
   @Post('simulation/budget')
-  @ApiOperation({
-    summary: 'Simulasi Budgeting Agen (Generate PDF & .mgc File)',
-    description: 'Menghitung alokasi budget, menyimpan log analitik (anonim), dan menghasilkan token file .mgc bertanda tangan digital.'
-  })
-  async createBudgetSimulation(@GetUser() user: client.User, @Body() dto: CreateBudgetSimulationDto) {
-    // 1. Eksekusi Service Orchestrator
+  @ApiOperation({ summary: 'Simulasi Budget & Download PDF Langsung (Stateless)' })
+  async createBudgetSimulation(
+    @GetUser() user: client.User,
+    @Body() dto: CreateBudgetSimulationDto,
+    @Res() res: express.Response,
+  ) {
+    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentBudget(user, dto);
 
-    // 2. Audit Log (Security & Tracking)
+    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_BUDGET',
       entity: 'SimulationLog',
-      entityId: 'ANONYMOUS', // Data anonim, ID fisik ada di DB tapi tidak diexpose detailnya ke sini
-      details: `Agent simulated budget for client profile: ${dto.clientJob} in ${dto.clientCity}`
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated stateless simulation for client ${dto.clientName}`,
+      ip: '0.0.0.0', // [FIXED] Changed 'ipAddress' to 'ip'
+      userAgent: 'AgentSystem'
     });
 
-    return result;
+    // 3. SET HTTP HEADERS (CRITICAL STEP)
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.pdfBuffer.length,
+
+      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
+      // tanpa harus mengotori body file PDF
+      'X-MGC-Token': result.mgcToken,
+
+      // Mengizinkan Browser/Frontend membaca header custom ini
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+    });
+
+    // 4. STREAM DATA LANGSUNG KE CLIENT
+    res.end(result.pdfBuffer);
   }
 
   @Post('simulation/decode')
-  @ApiOperation({
-    summary: 'Import & Decode File .mgc',
-    description: 'Memverifikasi signature HMAC file .mgc dan mengembalikan data JSON asli jika valid.'
-  })
+  @ApiOperation({ summary: 'Decode Token Simulasi (.mgc) untuk Import Data' })
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
-    // 1. Eksekusi Service Verifikasi
-    const result = await this.financialService.verifyAndDecodeSimulationToken(dto);
-
-    // 2. Audit Log (Penting untuk mendeteksi percobaan tampering file)
+    // Audit Log untuk Import Action
     await this.auditService.logActivity({
       userId,
       action: 'IMPORT_SIMULATION',
@@ -461,6 +473,6 @@ export class FinancialController {
       details: 'Agent successfully imported a .mgc simulation file'
     });
 
-    return result;
+    return this.financialService.verifyAndDecodeSimulationToken(dto);
   }
 }
