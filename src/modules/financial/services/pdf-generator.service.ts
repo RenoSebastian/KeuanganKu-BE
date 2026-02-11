@@ -24,6 +24,8 @@ import { CreateBudgetSimulationDto } from '../dto/create-budget-simulation.dto';
 import { CreateInsuranceSimulationDto } from '../dto/create-insurance-simulation.dto';
 import { CreatePensionSimulationDto } from '../dto/create-pension-simulation.dto';
 import { CreateGoalSimulationDto } from '../dto/create-goal-simulation.dto';
+import { CreateCheckupSimulationDto } from '../dto/create-checkup-simulation.dto';
+import { HealthAnalysisResult } from '../utils/financial-math.util';
 
 import { User } from '@prisma/client';
 
@@ -1160,6 +1162,185 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         } catch (error: any) {
             this.logger.error(`Failed to generate Goal PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF Tujuan Keuangan.');
+        }
+    }
+
+    // ===========================================================================
+    // [NEW] CHECKUP SIMULATION (STATELESS)
+    // ===========================================================================
+
+    /**
+     * generateCheckupSimulationPdfBuffer
+     * ----------------------------------
+     * Membuat PDF simulasi Financial Checkup (Agent Mode).
+     * Fitur:
+     * - Header Dinamis (Profil Agen)
+     * - Profil Klien Lengkap (Spouse + Children)
+     * - Analisa Kesehatan (Stateless Result)
+     */
+    async generateCheckupSimulationPdfBuffer(
+        clientData: CreateCheckupSimulationDto,
+        analysisResult: HealthAnalysisResult,
+        agent: User,
+    ): Promise<Buffer> {
+        const fmt = (n: number) =>
+            new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(n);
+
+        const num = (n: any) => Number(n) || 0;
+
+        // --- 1. PREPARE ASSETS (LOGO) ---
+        // Baca file logo lokal untuk di-embed ke PDF agar dinamis di template
+        const logoPath = path.join(process.cwd(), 'src/assets/images', 'logokeuanganku.png');
+        let logoUrl = '';
+        try {
+            if (fs.existsSync(logoPath)) {
+                const bitmap = fs.readFileSync(logoPath);
+                logoUrl = `data:image/png;base64,${bitmap.toString('base64')}`;
+            }
+        } catch (e) {
+            this.logger.warn('Failed to load logo for PDF', e);
+        }
+
+        // --- 2. CALCULATE AGES ---
+        const calcAge = (dob?: string) => {
+            if (!dob) return '-';
+            const birthDate = new Date(dob);
+            const ageDifMs = Date.now() - birthDate.getTime();
+            const ageDate = new Date(ageDifMs);
+            return Math.abs(ageDate.getUTCFullYear() - 1970);
+        };
+
+        // --- 3. GROUPING FINANCIAL DATA ---
+        const d = clientData; // alias
+
+        // Assets
+        const assetLiquid = num(d.assetCash);
+        const assetPersonal = num(d.assetHome) + num(d.assetVehicle) + num(d.assetJewelry) + num(d.assetAntique) + num(d.assetPersonalOther);
+        const assetInvest = num(d.assetInvHome) + num(d.assetInvVehicle) + num(d.assetGold) + num(d.assetInvAntique) + num(d.assetStocks) + num(d.assetMutualFund) + num(d.assetBonds) + num(d.assetDeposit) + num(d.assetInvOther);
+        const totalAsset = assetLiquid + assetPersonal + assetInvest;
+
+        // Debts
+        // Jangka Pendek: CC + Koperasi + Konsumtif Lain
+        const debtShort = num(d.debtCC) + num(d.debtCoop) + num(d.debtConsumptiveOther);
+        // Jangka Panjang: KPR + KPM + Bisnis
+        const debtLong = num(d.debtKPR) + num(d.debtKPM) + num(d.debtBusiness);
+        const totalDebt = debtShort + debtLong;
+
+        // Cashflow
+        const incomeFixed = num(d.incomeFixed);
+        const incomeVariable = num(d.incomeVariable);
+        const totalIncome = incomeFixed + incomeVariable;
+
+        const expenseDebt = num(d.installmentKPR) + num(d.installmentKPM) + num(d.installmentCC) + num(d.installmentCoop) + num(d.installmentConsumptiveOther) + num(d.installmentBusiness);
+        const expenseInsurance = num(d.insuranceLife) + num(d.insuranceHealth) + num(d.insuranceHome) + num(d.insuranceVehicle) + num(d.insuranceBPJS) + num(d.insuranceOther);
+        const expenseSaving = num(d.savingEducation) + num(d.savingRetirement) + num(d.savingPilgrimage) + num(d.savingHoliday) + num(d.savingEmergency) + num(d.savingOther);
+        const expenseLiving = num(d.expenseFood) + num(d.expenseSchool) + num(d.expenseTransport) + num(d.expenseCommunication) + num(d.expenseHelpers) + num(d.expenseTax) + num(d.expenseLifestyle);
+        const totalExpense = expenseDebt + expenseInsurance + expenseSaving + expenseLiving;
+
+        // --- 4. DATA CONTEXT ---
+        const context = {
+            checkDate: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+            logoUrl: logoUrl, // Image Base64 passed to template
+
+            // PROFIL AGEN (HEADER)
+            agent: {
+                name: agent.fullName,
+                level: agent.agentLevel || 'Financial Advisor',
+                company: agent.companyName || 'KeuanganKu Pratama',
+                agency: agent.agencyName || 'MaxiPro Group',
+            },
+
+            // PROFIL KLIEN
+            client: {
+                name: d.client.name,
+                age: calcAge(d.client.dob),
+                dob: d.client.dob,
+                religion: d.client.religion || '-',
+                job: d.client.occupation,
+                city: d.client.city,
+                phone: d.client.phone,
+                maritalStatus: d.client.maritalStatus === 'MARRIED' ? 'Menikah' : d.client.maritalStatus === 'SINGLE' ? 'Lajang' : 'Cerai',
+                childrenCount: d.client.childrenCount || 0,
+                dependentParents: d.client.dependentParents || 0,
+            },
+
+            // DATA PASANGAN
+            spouse: {
+                hasSpouse: !!d.spouse,
+                name: d.spouse?.name || '-',
+                age: d.spouse?.dob ? calcAge(d.spouse.dob) : '-',
+                job: d.spouse?.occupation || '-',
+            },
+
+            // FINANCIAL SUMMARY
+            fin: {
+                // Aset
+                assetCash: fmt(assetLiquid),
+                assetPersonal: fmt(assetPersonal),
+                assetInvest: fmt(assetInvest),
+                totalAsset: fmt(totalAsset),
+
+                // Utang (Grouped)
+                debtShort: fmt(debtShort),
+                debtLong: fmt(debtLong),
+                totalDebt: fmt(totalDebt),
+
+                // Net Worth
+                netWorth: fmt(analysisResult.netWorth),
+                netWorthColor: analysisResult.netWorth >= 0 ? 'val-green' : 'val-red',
+
+                // Arus Kas
+                incomeFixed: fmt(incomeFixed),
+                incomeVariable: fmt(incomeVariable),
+                totalIncome: fmt(totalIncome),
+
+                expenseDebt: fmt(expenseDebt),
+                expenseInsurance: fmt(expenseInsurance),
+                expenseSaving: fmt(expenseSaving),
+                expenseLiving: fmt(expenseLiving),
+                totalExpense: fmt(totalExpense),
+
+                surplusDeficit: fmt(analysisResult.surplusDeficit),
+                surplusColor: analysisResult.surplusDeficit >= 0 ? 'val-green' : 'val-red',
+            },
+
+            // DIAGNOSA & SCORING
+            globalStatus: analysisResult.globalStatus,
+            score: analysisResult.score,
+            scoreColor: analysisResult.score >= 80 ? '#22c55e' : analysisResult.score >= 50 ? '#eab308' : '#ef4444',
+
+            // INDIKATOR / RATIOS
+            healthyCount: analysisResult.ratios.filter(r => r.statusColor.includes('GREEN')).length,
+            warningCount: analysisResult.ratios.filter(r => !r.statusColor.includes('GREEN')).length,
+
+            ratios: analysisResult.ratios.map(r => ({
+                label: r.label,
+                statusLabel: r.statusColor.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
+                cssClass: r.statusColor.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red',
+                valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
+                benchmark: r.benchmark,
+                recommendation: r.recommendation
+            }))
+        };
+
+        try {
+            // Compile Template (Menggunakan checkup-report.template.ts yang baru)
+            const template = handlebars.compile(checkupReportTemplate);
+            const html = template(context);
+
+            // Render PDF
+            const pdfBuffer = await this.generatePdfCore(html, context);
+            this.logger.log(`Stateless Checkup PDF generated for: ${d.client.name}`);
+
+            return pdfBuffer;
+
+        } catch (error: any) {
+            this.logger.error(`Failed to generate Checkup PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF Financial Checkup.');
         }
     }
 } // <-- Kurung tutup Class PdfGeneratorService

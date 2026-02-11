@@ -27,8 +27,8 @@ import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
 import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto';
-// [NEW] Import Goal Simulation DTO
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
+import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 
 // Services
 import { PdfGeneratorService } from './services/pdf-generator.service';
@@ -45,6 +45,7 @@ import {
   calculateRiskProfileAnalysis,
   calculateAgentBudgetSimulation,
   AgentBudgetSimulationResult,
+  HealthAnalysisResult,
 } from './utils/financial-math.util';
 
 @Injectable()
@@ -445,9 +446,6 @@ export class FinancialService {
   // MODULE 8: AGENT BUDGET SIMULATION (STATELESS UPDATE)
   // ===========================================================================
 
-  /**
-   * simulateAgentBudget (Stateless Version)
-   */
   async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
     try {
       const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
@@ -543,7 +541,8 @@ export class FinancialService {
         data: {
           client: data.client,
           financial: data.financial,
-          last_simulation_date: data.meta.generatedAt
+          last_simulation_date: data.meta.generatedAt,
+          spouse: data.spouse,
         },
       };
     } catch (error) {
@@ -695,34 +694,22 @@ export class FinancialService {
   // MODULE 11: AGENT GOAL SIMULATION (STATELESS)
   // ===========================================================================
 
-  /**
-   * simulateAgentGoal
-   * -----------------
-   * Logika simulasi Tujuan Keuangan (Goals) tanpa menyimpan data ke DB (Stateless).
-   */
   async simulateAgentGoal(user: User, dto: CreateGoalSimulationDto) {
     try {
-      // 1. CALCULATE
-      // [FIX] Pass dto.targetDate as string directly
       const calculationResult = calculateGoalPlan({
         goalName: dto.goalName,
         targetAmount: dto.targetAmount,
-        targetDate: dto.targetDate, // Pass string directly
+        targetDate: dto.targetDate,
         inflationRate: dto.inflationRate ?? 5,
         returnRate: dto.returnRate ?? 6,
       });
 
-      // --- [MANUAL RE-CALCULATION FOR ACCURACY] ---
       const yearsDuration = calculationResult.monthsDuration / 12;
       const rRate = (dto.returnRate ?? 6) / 100;
 
-      // Hitung FV dari Modal Awal
       const futureExistingFund = (dto.currentSaving || 0) * Math.pow(1 + rRate, yearsDuration);
-
-      // Target Bersih = Target FV - FV Modal Awal
       const netTarget = Math.max(0, calculationResult.futureTargetAmount - futureExistingFund);
 
-      // Recalculate PMT (Monthly Saving) based on Net Target
       let realMonthlySaving = 0;
       if (netTarget > 0) {
         const monthlyRate = rRate / 12;
@@ -730,12 +717,10 @@ export class FinancialService {
         if (monthlyRate === 0) {
           realMonthlySaving = netTarget / months;
         } else {
-          // PMT Future Value Formula: FV * r / ((1+r)^n - 1)
           realMonthlySaving = (netTarget * monthlyRate) / (Math.pow(1 + monthlyRate, months) - 1);
         }
       }
 
-      // Gabungkan hasil untuk dikirim ke PDF
       const finalResult = {
         ...calculationResult,
         futureExistingFund,
@@ -744,7 +729,6 @@ export class FinancialService {
         yearsDuration
       };
 
-      // 2. LOGGING
       const clientAge = this.calculateAge(dto.clientDob);
 
       await this.prisma.simulationLog.create({
@@ -762,14 +746,12 @@ export class FinancialService {
         },
       });
 
-      // 3. GENERATE BUFFER
       const pdfBuffer = await this.pdfService.generateGoalSimulationPdfBuffer(
         dto,
         finalResult,
         user,
       );
 
-      // 4. SECURITY TOKEN
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
@@ -788,7 +770,6 @@ export class FinancialService {
         result: finalResult,
       });
 
-      // 5. PACKAGING
       return {
         pdfBuffer,
         mgcToken,
@@ -801,6 +782,81 @@ export class FinancialService {
     }
   }
 
+  // ===========================================================================
+  // MODULE 12: FINANCIAL CHECKUP SIMULATION (STATELESS & AGENT MODE)
+  // ===========================================================================
+
+  async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
+    try {
+      // 1. CALCULATE
+      const calculationInput: any = {
+        ...dto,
+      };
+
+      const analysisResult: HealthAnalysisResult = calculateFinancialHealth(calculationInput);
+
+      // 2. LOGGING
+      const clientAge = this.calculateAge(dto.client.dob);
+      let dbStatus: HealthStatus = HealthStatus.BAHAYA;
+      if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
+      else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.client.city,
+          clientJob: dto.client.occupation,
+          totalIncome: (dto.incomeFixed + dto.incomeVariable) * 12,
+          calculatedSurplus: analysisResult.surplusDeficit * 12,
+          healthScore: analysisResult.score,
+          status: dbStatus,
+          // [FIX] Explicit serialization/casting for Prisma JSON
+          financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)),
+          moduleType: 'CHECKUP',
+        },
+      });
+
+      // 3. PDF GENERATION
+      const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
+        dto,
+        analysisResult,
+        user,
+      );
+
+      // 4. TOKENIZATION
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'CHECKUP',
+        },
+        client: dto.client,
+        spouse: dto.spouse,
+        financial: {
+          ...Object.fromEntries(Object.entries(dto).filter(([k]) => k !== 'client' && k !== 'spouse'))
+        },
+        result: {
+          score: analysisResult.score,
+          status: analysisResult.globalStatus,
+          netWorth: analysisResult.netWorth
+        }
+      });
+
+      // 5. PACKAGING
+      const cleanName = dto.client.name.replace(/[^a-zA-Z0-9]/g, '_');
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Financial_Checkup_${cleanName}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Checkup Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi Financial Checkup.');
+    }
+  }
 
   // ===========================================================================
   // PRIVATE HELPERS
