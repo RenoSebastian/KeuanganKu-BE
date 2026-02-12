@@ -29,6 +29,7 @@ import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.
 import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto';
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
+import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
 
 // Services
 import { PdfGeneratorService } from './services/pdf-generator.service';
@@ -855,6 +856,79 @@ export class FinancialService {
     } catch (error: any) {
       this.logger.error(`Checkup Simulation Error: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Gagal memproses simulasi Financial Checkup.');
+    }
+  }
+
+  // ===========================================================================
+  // MODULE 13: RISK PROFILE SIMULATION (STATELESS & AGENT MODE)
+  // ===========================================================================
+
+  async simulateAgentRiskProfile(user: User, dto: CreateRiskProfileSimulationDto) {
+    try {
+      // 1. CALCULATE
+      // Reuse logic from 'calculateRiskProfileAnalysis'
+      const analysisResult = calculateRiskProfileAnalysis(dto.answers);
+
+      // 2. LOGGING
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity || '-',
+          clientJob: dto.clientJob || '-',
+          totalIncome: 0, // Not applicable for Risk Profile
+          calculatedSurplus: 0,
+          healthScore: analysisResult.totalScore, // Store score here
+          status: HealthStatus.SEHAT, // Default as risk profile is descriptive
+          financialRatios: {
+            profile: analysisResult.profile,
+            allocation: analysisResult.allocation
+          },
+          moduleType: 'RISK_PROFILE',
+        },
+      });
+
+      // 3. PDF GENERATION
+      const pdfBuffer = await this.pdfService.generateRiskProfileSimulationPdfBuffer(
+        dto,
+        analysisResult,
+        user
+      );
+
+      // 4. TOKENIZATION
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'RISK_PROFILE',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: {
+          answers: dto.answers // Simpan jawaban kuesioner agar bisa direstore
+        },
+        result: analysisResult,
+      });
+
+      // 5. PACKAGING
+      const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Risk_Profile_${cleanName}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Risk Profile Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi Profil Risiko.');
     }
   }
 

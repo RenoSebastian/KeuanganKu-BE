@@ -40,8 +40,8 @@ import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
 import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto';
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
-// [NEW] DTO Checkup Simulation
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
+import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -373,9 +373,52 @@ export class FinancialController {
     return this.financialService.calculateRiskProfile(dto);
   }
 
+  // [NEW] ENDPOINT SIMULASI RISK PROFILE DENGAN PDF STREAM & TOKEN
+  @Post('simulation/risk-profile-pdf')
+  @ApiOperation({
+    summary: 'Simulasi Risk Profile & Download PDF Langsung (Stateless)',
+    description:
+      'Menghitung profil risiko, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.',
+  })
+  async createRiskProfileSimulation(
+    @GetUser() user: client.User,
+    @Body() dto: CreateRiskProfileSimulationDto,
+    @Res() res: express.Response,
+  ) {
+    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
+    const result = await this.financialService.simulateAgentRiskProfile(user, dto);
+
+    // 2. Audit Log
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'SIMULATE_RISK_PROFILE',
+      entity: 'SimulationLog',
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated risk profile simulation for client ${dto.clientName}`,
+      ip: '0.0.0.0', // Bisa diganti dengan req.ip jika tersedia
+      userAgent: 'AgentSystem',
+    });
+
+    // 3. SET HTTP HEADERS (CRITICAL STEP)
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.pdfBuffer.length,
+
+      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
+      'X-MGC-Token': result.mgcToken,
+
+      // Mengizinkan Browser/Frontend membaca header custom ini
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+    });
+
+    // 4. STREAM DATA LANGSUNG KE CLIENT
+    res.end(result.pdfBuffer);
+  }
+
   @Post('export/risk-profile-pdf')
   @ApiOperation({
-    summary: 'Generate PDF Laporan Profil Risiko',
+    summary: 'Generate PDF Laporan Profil Risiko (Legacy/Direct Export)',
     description:
       'Menerima Object Hasil Kalkulasi (RiskProfileResponseDto) dan menghasilkan file PDF untuk diunduh.',
   })
@@ -386,7 +429,6 @@ export class FinancialController {
     @Body() data: RiskProfileResponseDto,
     @Res({ passthrough: true }) res: express.Response,
   ): Promise<StreamableFile> {
-
     // 1. Generate PDF Buffer
     const pdfBuffer = await this.pdfGeneratorService.generateRiskProfilePdf(data);
 
