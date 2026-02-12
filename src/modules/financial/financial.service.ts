@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import * as nodeCrypto from 'crypto';
-import { SchoolLevel, HealthStatus, User, Prisma } from '@prisma/client'; // Added Prisma import for Json types
+import { SchoolLevel, HealthStatus, User, Prisma } from '@prisma/client';
 
 // DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -544,6 +544,9 @@ export class FinancialService {
           financial: data.financial,
           last_simulation_date: data.meta.generatedAt,
           spouse: data.spouse,
+          // [FIX] INCLUDE RESULT OBJECT (Item 1.1 Remediation)
+          // Memastikan data hasil kalkulasi (skor, profil, grafik) dikembalikan ke FE
+          result: data.result || data.financialRatios,
         },
       };
     } catch (error) {

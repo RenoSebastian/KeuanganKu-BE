@@ -22,7 +22,8 @@ export enum RiskProfileCategory {
 
 /**
  * Struktur Data Alokasi Aset.
- * Merepresentasikan rekomendasi pembagian investasi (Pie Chart).
+ * [STANDARDISASI]: Menggunakan suffix 'Risk' (lowRisk, mediumRisk, highRisk)
+ * untuk konsistensi dengan logika Frontend dan mencegah data undefined.
  */
 export class RiskAllocationDto {
     @ApiProperty({ description: 'Persentase alokasi Low Risk (Pasar Uang/Deposito)', example: 20 })
@@ -53,7 +54,7 @@ export class RiskProfileResponseDto {
         description: 'Timestamp waktu simulasi dilakukan (ISO String)',
         example: '2025-11-20T10:00:00Z'
     })
-    @IsString() // Menggunakan IsString agar kompatibel dengan format ISO dari JSON.stringify
+    @IsString()
     calculatedAt: string;
 
     @ApiProperty({ description: 'Nama klien (untuk Header Laporan)', example: 'Budi Santoso' })
