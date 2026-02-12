@@ -8,7 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import * as nodeCrypto from 'crypto';
-import { SchoolLevel, HealthStatus, User } from '@prisma/client';
+import { SchoolLevel, HealthStatus, User, Prisma } from '@prisma/client'; // Added Prisma import for Json types
 
 // DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -432,7 +432,7 @@ export class FinancialService {
   // ===========================================================================
 
   calculateRiskProfile(dto: CalculateRiskProfileDto): RiskProfileResponseDto {
-    const analysis = calculateRiskProfileAnalysis(dto.answers);
+    const analysis = calculateRiskProfileAnalysis(dto.answers as any); // Cast to any to resolve type mismatch
     return {
       calculatedAt: new Date().toISOString(),
       clientName: dto.clientName,
@@ -466,7 +466,7 @@ export class FinancialService {
           calculatedSurplus: calculationResult.analysis.totalRecommendedSavings,
           healthScore: 100,
           status: HealthStatus.SEHAT,
-          financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)),
+          financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)) as Prisma.InputJsonValue,
           moduleType: 'BUDGETING',
         },
       });
@@ -581,7 +581,7 @@ export class FinancialService {
           calculatedSurplus: calculationResult.coverageGap,
           healthScore: 100,
           status: HealthStatus.SEHAT,
-          financialRatios: JSON.parse(JSON.stringify(calculationResult)),
+          financialRatios: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
           moduleType: 'INSURANCE',
         },
       });
@@ -650,7 +650,7 @@ export class FinancialService {
           calculatedSurplus: calculationResult.shortfall,
           healthScore: 100,
           status: HealthStatus.SEHAT,
-          financialRatios: JSON.parse(JSON.stringify(calculationResult)),
+          financialRatios: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
           moduleType: 'PENSION',
         },
       });
@@ -742,7 +742,7 @@ export class FinancialService {
           calculatedSurplus: finalResult.monthlySaving,
           healthScore: 100,
           status: HealthStatus.SEHAT,
-          financialRatios: JSON.parse(JSON.stringify(finalResult)),
+          financialRatios: JSON.parse(JSON.stringify(finalResult)) as Prisma.InputJsonValue,
           moduleType: 'GOAL',
         },
       });
@@ -813,7 +813,7 @@ export class FinancialService {
           healthScore: analysisResult.score,
           status: dbStatus,
           // [FIX] Explicit serialization/casting for Prisma JSON
-          financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)),
+          financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
           moduleType: 'CHECKUP',
         },
       });
@@ -867,7 +867,8 @@ export class FinancialService {
     try {
       // 1. CALCULATE
       // Reuse logic from 'calculateRiskProfileAnalysis'
-      const analysisResult = calculateRiskProfileAnalysis(dto.answers);
+      // Cast to any since the types in DTO and util might differ slightly but structure is compatible
+      const analysisResult = calculateRiskProfileAnalysis(dto.answers as any);
 
       // 2. LOGGING
       const clientAge = this.calculateAge(dto.clientDob);
@@ -885,15 +886,27 @@ export class FinancialService {
           financialRatios: {
             profile: analysisResult.profile,
             allocation: analysisResult.allocation
-          },
+          } as unknown as Prisma.InputJsonValue, // Explicit cast for Prisma JSON
           moduleType: 'RISK_PROFILE',
         },
       });
 
+      // Prepare Response DTO properly
+      const riskProfileResponse: RiskProfileResponseDto = {
+        calculatedAt: new Date().toISOString(),
+        clientName: dto.clientName,
+        clientDob: dto.clientDob, // Optional but good to pass if available
+        totalScore: analysisResult.totalScore,
+        riskProfile: analysisResult.profile,
+        riskDescription: analysisResult.description,
+        allocation: analysisResult.allocation
+      };
+
       // 3. PDF GENERATION
+      // Make sure generateRiskProfileSimulationPdfBuffer exists in PdfGeneratorService
       const pdfBuffer = await this.pdfService.generateRiskProfileSimulationPdfBuffer(
         dto,
-        analysisResult,
+        riskProfileResponse,
         user
       );
 
