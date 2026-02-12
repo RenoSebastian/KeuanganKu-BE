@@ -8,7 +8,8 @@ import { CreateEducationPlanDto } from '../dto/create-education.dto';
 import { CreateBudgetDto } from '../dto/create-budget.dto';
 import { SchoolLevel, CostType } from '@prisma/client';
 import { RiskAnswerOption } from '../dto/calculate-risk-profile.dto';
-import { RiskProfileCategory } from '../dto/risk-profile-response.dto';
+import { RiskProfileAnswerItemDto } from '../dto/create-risk-profile-simulation.dto';
+import { RiskProfileCategory, RiskAllocationDto } from '../dto/risk-profile-response.dto';
 import { BUDGET_ALLOCATION_RULES } from '../constants/budgeting-rules.constant';
 
 // --- INTERFACES (Mirroring FE logic) ---
@@ -839,75 +840,59 @@ export const calculateBudgetSplit = (totalIncome: number) => {
   };
 };
 
-// ============================================================================
-// 5. RISK PROFILE ENGINE (Simulasi Profil Risiko)
-// ============================================================================
+// ===========================================================================
+// [NEW] RISK PROFILE CALCULATION ENGINE
+// ===========================================================================
 
-/**
- * Menganalisa Profil Risiko berdasarkan jawaban kuesioner.
- * Logic:
- * 1. Hitung Total Skor (A=1, B=2, C=3)
- * 2. Klasifikasi Skor ke Kategori (Konservatif/Moderat/Agresif)
- * 3. Return Metadata & Alokasi Aset sesuai BRD
- */
-export const calculateRiskProfileAnalysis = (answers: RiskAnswerOption[]) => {
-  let totalScore = 0;
+export interface RiskAnalysisResult {
+  totalScore: number;
+  profile: RiskProfileCategory;
+  description: string;
+  allocation: RiskAllocationDto;
+}
 
-  // 1. Scoring Engine
-  // Menggunakan loop efisien untuk menjumlahkan bobot
-  for (const answer of answers) {
-    switch (answer) {
-      case RiskAnswerOption.A:
-        totalScore += 1;
-        break;
-      case RiskAnswerOption.B:
-        totalScore += 2;
-        break;
-      case RiskAnswerOption.C:
-        totalScore += 3;
-        break;
-      default:
-        // Fallback aman (Zero-trust input)
-        totalScore += 0;
-    }
-  }
+export const calculateRiskProfileAnalysis = (answers: RiskProfileAnswerItemDto[]): RiskAnalysisResult => {
+  // 1. Hitung Total Skor
+  // Asumsi: Frontend mengirim 'value' yang sudah merupakan bobot (misal: 10, 20, 30, 40)
+  const totalScore = answers.reduce((acc, item) => acc + Number(item.value), 0);
 
-  // 2. Classification Engine
   let profile: RiskProfileCategory;
   let description: string;
-  let allocation: { lowRisk: number; mediumRisk: number; highRisk: number };
+  let allocation: RiskAllocationDto;
 
-  // Logic Threshold sesuai Dokumen BRD (Kuesioner Profil Risiko)
-  // Min Score 10, Max Score 30
-  if (totalScore <= 16) {
-    // Range 10 - 16: KONSERVATIF
+  // 2. Klasifikasi Berdasarkan Range Skor
+  // Note: Range ini bisa disesuaikan dengan aturan bisnis perusahaan Anda
+  // Total Skor Maksimal tergantung jumlah soal (misal 10 soal x 4 poin = 40)
+
+  if (totalScore < 20) {
+    // --- KONSERVATIF ---
     profile = RiskProfileCategory.KONSERVATIF;
     description =
-      'Anda lebih mengutamakan keamanan dana dibandingkan pertumbuhan yang tinggi. Fokus utama pada menjaga nilai uang agar tidak berkurang. Strategi: Dominan di instrumen stabil.';
+      "Anda cenderung menghindari risiko dan lebih memprioritaskan keamanan modal pokok (Principal Protection) daripada imbal hasil tinggi. Anda merasa tidak nyaman dengan fluktuasi pasar jangka pendek.";
     allocation = {
-      lowRisk: 70,    // Dominan Pasar Uang / Deposito
-      mediumRisk: 30, // Obligasi / Pendapatan Tetap
-      highRisk: 0,    // Hindari Saham
+      lowRisk: 80,    // Pasar Uang / Deposito
+      mediumRisk: 20, // Obligasi
+      highRisk: 0     // Saham
     };
-  } else if (totalScore <= 23) {
-    // Range 17 - 23: MODERAT
+  } else if (totalScore >= 20 && totalScore < 35) {
+    // --- MODERAT ---
     profile = RiskProfileCategory.MODERAT;
     description =
-      'Anda berada di posisi seimbang antara keamanan dana dan potensi pertumbuhan. Anda siap menghadapi fluktuasi nilai investasi yang wajar demi hasil yang lebih baik dari inflasi.';
-    allocation = {
-      lowRisk: 40,
-      mediumRisk: 40,
-      highRisk: 20,
-    };
-  } else {
-    // Range 24 - 30: AGRESIF
-    profile = RiskProfileCategory.AGRESIF;
-    description =
-      'Anda siap menghadapi fluktuasi nilai investasi yang tinggi demi potensi hasil jangka panjang yang maksimal. Penurunan jangka pendek dianggap wajar dalam mengejar growth.';
+      "Anda bersedia menerima fluktuasi jangka pendek demi mendapatkan potensi keuntungan yang lebih baik daripada deposito. Anda mencari keseimbangan antara pertumbuhan modal dan stabilitas.";
     allocation = {
       lowRisk: 20,
-      mediumRisk: 30,
-      highRisk: 50, // Dominan Saham
+      mediumRisk: 50,
+      highRisk: 30
+    };
+  } else {
+    // --- AGRESIF ---
+    profile = RiskProfileCategory.AGRESIF;
+    description =
+      "Anda memiliki toleransi tinggi terhadap risiko dan fluktuasi pasar yang tajam. Tujuan utama Anda adalah pertumbuhan modal maksimal dalam jangka panjang (Capital Gain).";
+    allocation = {
+      lowRisk: 0,
+      mediumRisk: 20,
+      highRisk: 80
     };
   }
 
@@ -915,7 +900,7 @@ export const calculateRiskProfileAnalysis = (answers: RiskAnswerOption[]) => {
     totalScore,
     profile,
     description,
-    allocation,
+    allocation
   };
 };
 
