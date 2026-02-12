@@ -277,7 +277,6 @@ export class FinancialService {
   // ===========================================================================
 
   async calculateAndSavePension(userId: string, dto: CreatePensionDto) {
-    // [FIX] Provide default values for optional fields to satisfy math engine requirement
     const result = calculatePensionPlan({
       ...dto,
       lifeExpectancy: dto.lifeExpectancy ?? 80,
@@ -432,7 +431,7 @@ export class FinancialService {
   // ===========================================================================
 
   calculateRiskProfile(dto: CalculateRiskProfileDto): RiskProfileResponseDto {
-    const analysis = calculateRiskProfileAnalysis(dto.answers as any); // Cast to any to resolve type mismatch
+    const analysis = calculateRiskProfileAnalysis(dto.answers as any);
     return {
       calculatedAt: new Date().toISOString(),
       clientName: dto.clientName,
@@ -509,6 +508,89 @@ export class FinancialService {
     }
   }
 
+  // ===========================================================================
+  // [REVISED] FINANCIAL CHECKUP SIMULATION (Item 2.1 & 3.1 & 2.2 Alignment)
+  // ===========================================================================
+
+  async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
+    try {
+      // 1. CALCULATE
+      // [FIX ERROR 2345]: Mapping manual client -> userProfile agar cocok dengan math engine
+      const calculationInput: any = {
+        ...dto,
+        userProfile: dto.client, // Menjembatani perbedaan nama field
+        spouseProfile: dto.spouse,
+      };
+
+      const analysisResult: HealthAnalysisResult = calculateFinancialHealth(calculationInput);
+
+      // 2. LOGGING
+      const clientAge = this.calculateAge(dto.client.dob);
+      let dbStatus: HealthStatus = HealthStatus.BAHAYA;
+      if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
+      else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.client.city,
+          clientJob: dto.client.occupation,
+          totalIncome: (dto.incomeFixed + dto.incomeVariable) * 12,
+          calculatedSurplus: analysisResult.surplusDeficit * 12,
+          healthScore: analysisResult.score,
+          status: dbStatus,
+          financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
+          moduleType: 'CHECKUP',
+        },
+      });
+
+      // 3. PDF GENERATION
+      const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
+        dto,
+        analysisResult,
+        user,
+      );
+
+      // 4. [ITEM 3.1 & FIX ERROR 2790] COMPREHENSIVE TOKEN PACKING
+      // Kita menggunakan destructuring untuk memisahkan client/spouse 
+      // daripada menggunakan 'delete' operator yang dilarang pada non-optional field.
+      const { client, spouse, ...financialData } = dto;
+
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'CHECKUP',
+        },
+        client: client,
+        spouse: spouse,
+        financial: financialData,
+        result: analysisResult
+      });
+
+      // 5. [ITEM 2.1] RETURN EXPLICIT JSON RESULT
+      const cleanName = dto.client.name.replace(/[^a-zA-Z0-9]/g, '_');
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Financial_Checkup_${cleanName}_${Date.now()}.pdf`,
+        data: {
+          client: client,
+          spouse: spouse,
+          financial: financialData,
+          result: analysisResult
+        }
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Checkup Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi Financial Checkup.');
+    }
+  }
+
+
   async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
     const { simulationToken } = dto;
 
@@ -539,12 +621,13 @@ export class FinancialService {
 
       return {
         message: 'File simulasi berhasil di-import.',
+        // [ITEM 2.2] STANDARDISASI OUTPUT IMPORT
         data: {
           client: data.client,
+          spouse: data.spouse,
           financial: data.financial,
           last_simulation_date: data.meta.generatedAt,
-          spouse: data.spouse,
-          // [FIX] RETURN RESULT OBJECT UNTUK FRONTEND CHART
+          // Ekstrak hasil perhitungan tersimpan agar rincian rasio muncul kembali
           result: data.result || data.financialRatios,
         },
       };
@@ -786,93 +869,12 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 12: FINANCIAL CHECKUP SIMULATION (STATELESS & AGENT MODE)
-  // ===========================================================================
-
-  async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
-    try {
-      // 1. CALCULATE
-      const calculationInput: any = {
-        ...dto,
-      };
-
-      const analysisResult: HealthAnalysisResult = calculateFinancialHealth(calculationInput);
-
-      // 2. LOGGING
-      const clientAge = this.calculateAge(dto.client.dob);
-      let dbStatus: HealthStatus = HealthStatus.BAHAYA;
-      if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
-      else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
-
-      await this.prisma.simulationLog.create({
-        data: {
-          agentId: user.id,
-          clientAge: clientAge,
-          clientCity: dto.client.city,
-          clientJob: dto.client.occupation,
-          totalIncome: (dto.incomeFixed + dto.incomeVariable) * 12,
-          calculatedSurplus: analysisResult.surplusDeficit * 12,
-          healthScore: analysisResult.score,
-          status: dbStatus,
-          // [FIX] Explicit serialization/casting for Prisma JSON
-          financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
-          moduleType: 'CHECKUP',
-        },
-      });
-
-      // 3. PDF GENERATION
-      const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
-        dto,
-        analysisResult,
-        user,
-      );
-
-      // 4. TOKENIZATION
-      const mgcToken = this.generateMgcToken({
-        meta: {
-          version: '1.0',
-          generatedAt: new Date().toISOString(),
-          agentId: user.id,
-          module: 'CHECKUP',
-        },
-        client: dto.client,
-        spouse: dto.spouse,
-        financial: {
-          ...Object.fromEntries(Object.entries(dto).filter(([k]) => k !== 'client' && k !== 'spouse'))
-        },
-        result: {
-          score: analysisResult.score,
-          status: analysisResult.globalStatus,
-          netWorth: analysisResult.netWorth
-        }
-      });
-
-      // 5. PACKAGING
-      const cleanName = dto.client.name.replace(/[^a-zA-Z0-9]/g, '_');
-      return {
-        pdfBuffer,
-        mgcToken,
-        filename: `Financial_Checkup_${cleanName}_${Date.now()}.pdf`,
-      };
-
-    } catch (error: any) {
-      this.logger.error(`Checkup Simulation Error: ${error.message}`, error.stack);
-      throw new InternalServerErrorException('Gagal memproses simulasi Financial Checkup.');
-    }
-  }
-
-  // ===========================================================================
   // MODULE 13: RISK PROFILE SIMULATION (STATELESS & AGENT MODE)
   // ===========================================================================
 
   async simulateAgentRiskProfile(user: User, dto: CreateRiskProfileSimulationDto) {
     try {
-      // 1. CALCULATE
-      // Reuse logic from 'calculateRiskProfileAnalysis'
-      // Cast to any since the types in DTO and util might differ slightly but structure is compatible
       const analysisResult = calculateRiskProfileAnalysis(dto.answers as any);
-
-      // 2. LOGGING
       const clientAge = this.calculateAge(dto.clientDob);
 
       await this.prisma.simulationLog.create({
@@ -881,38 +883,34 @@ export class FinancialService {
           clientAge: clientAge,
           clientCity: dto.clientCity || '-',
           clientJob: dto.clientJob || '-',
-          totalIncome: 0, // Not applicable for Risk Profile
+          totalIncome: 0,
           calculatedSurplus: 0,
-          healthScore: analysisResult.totalScore, // Store score here
-          status: HealthStatus.SEHAT, // Default as risk profile is descriptive
+          healthScore: analysisResult.totalScore,
+          status: HealthStatus.SEHAT,
           financialRatios: {
             profile: analysisResult.profile,
             allocation: analysisResult.allocation
-          } as unknown as Prisma.InputJsonValue, // Explicit cast for Prisma JSON
+          } as unknown as Prisma.InputJsonValue,
           moduleType: 'RISK_PROFILE',
         },
       });
 
-      // Prepare Response DTO properly
       const riskProfileResponse: RiskProfileResponseDto = {
         calculatedAt: new Date().toISOString(),
         clientName: dto.clientName,
-        clientDob: dto.clientDob, // Optional but good to pass if available
+        clientDob: dto.clientDob,
         totalScore: analysisResult.totalScore,
         riskProfile: analysisResult.profile,
         riskDescription: analysisResult.description,
         allocation: analysisResult.allocation
       };
 
-      // 3. PDF GENERATION
-      // Make sure generateRiskProfileSimulationPdfBuffer exists in PdfGeneratorService
       const pdfBuffer = await this.pdfService.generateRiskProfileSimulationPdfBuffer(
         dto,
         riskProfileResponse,
         user
       );
 
-      // 4. TOKENIZATION
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
@@ -928,12 +926,11 @@ export class FinancialService {
           phone: dto.clientPhone,
         },
         financial: {
-          answers: dto.answers // Simpan jawaban kuesioner agar bisa direstore
+          answers: dto.answers
         },
         result: analysisResult,
       });
 
-      // 5. PACKAGING
       const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
       return {
         pdfBuffer,
