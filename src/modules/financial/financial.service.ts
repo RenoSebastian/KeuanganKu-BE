@@ -544,8 +544,7 @@ export class FinancialService {
           financial: data.financial,
           last_simulation_date: data.meta.generatedAt,
           spouse: data.spouse,
-          // [FIX] INCLUDE RESULT OBJECT (Item 1.1 Remediation)
-          // Memastikan data hasil kalkulasi (skor, profil, grafik) dikembalikan ke FE
+          // [FIX] RETURN RESULT OBJECT UNTUK FRONTEND CHART
           result: data.result || data.financialRatios,
         },
       };

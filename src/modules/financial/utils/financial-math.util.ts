@@ -870,6 +870,7 @@ export const calculateRiskProfileAnalysis = (answers: RiskProfileAnswerItemDto[]
     description =
       "Anda cenderung menghindari risiko dan lebih memprioritaskan keamanan modal pokok (Principal Protection) daripada imbal hasil tinggi. Anda merasa tidak nyaman dengan fluktuasi pasar jangka pendek.";
     allocation = {
+      // [FIX] Menggunakan key '...Risk' agar konsisten dengan DTO
       lowRisk: 80,    // Pasar Uang / Deposito
       mediumRisk: 20, // Obligasi
       highRisk: 0     // Saham
