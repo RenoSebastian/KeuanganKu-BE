@@ -652,20 +652,20 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (STATELESS STREAMING)
+  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (STATELESS)
   // ===========================================================================
 
   @Post('simulation/checkup')
   @ApiOperation({
-    summary: 'Simulasi Financial Checkup & Download PDF Langsung (Stateless)',
-    description: 'Menghitung kesehatan finansial, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
+    summary: 'Simulasi Financial Checkup & Return JSON (PDF Buffer + Data)',
+    description: 'Mengembalikan Object JSON lengkap berisi hasil analisa, token .mgc, dan buffer PDF untuk ditampilkan di Frontend.'
   })
   async createCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
-    @Res() res: express.Response,
+    // [FIX] Hapus @Res() agar NestJS mengembalikan return value sebagai JSON Body secara otomatis
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
+    // 1. Eksekusi Service -> Dapat Object { pdfBuffer, mgcToken, data: {...} }
     const result = await this.financialService.simulateAgentCheckup(user, dto);
 
     // 2. Audit Log
@@ -679,20 +679,9 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${result.filename}"`,
-      'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
-    });
-
-    // 4. STREAM DATA LANGSUNG KE CLIENT
-    res.end(result.pdfBuffer);
+    // 3. Return Object JSON (NestJS Auto-Serialize)
+    // Note: Buffer PDF akan diserialisasi menjadi { type: 'Buffer', data: [...] }
+    // Frontend harus mengubahnya kembali menjadi Blob/File.
+    return result;
   }
 }
