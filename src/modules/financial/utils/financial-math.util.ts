@@ -637,7 +637,7 @@ export const calculateInsurancePlan = (data: CreateInsuranceDto | CreateInsuranc
       maximumFractionDigits: 0
     }).format(coverageGap);
 
-    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk menjaga standar hidup selama ${n} tahun, melunasi hutang, serta mencadangkan biaya akhir hayat jika terjadi risiko. Disarankan menambah UP Asuransi Jiwa Berjangka (Term Life).`;
+    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk menjaga standar hidup selama ${n} tahun, melunasi hutang, serta mencadangkan biaya akhir hayat jika terjadi risiko.`;
   }
 
   return {
