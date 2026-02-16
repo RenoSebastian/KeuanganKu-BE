@@ -734,16 +734,14 @@ export const calculateGoalSimulation = (data: SimulateGoalDto) => {
  * ------------------------------------------------------------------
  * UPDATE UTAMA: DANA PENDIDIKAN (GRANULAR SINKING FUND)
  * ------------------------------------------------------------------
- * Menggunakan metode "Cashflow Matching" dengan Rumus Annuity (Flat)
- * Sesuai dokumen PAM Jaya:
- * - FV = PV * (1 + i)^n
- * - PMT = (FV * r) / ((1 + r)^n - 1)
+ * Menggunakan metode "Cashflow Matching" sesuai Dokumen Referensi.
+ * Setiap jenjang dihitung mandiri (Sinking Fund terpisah), lalu dijumlahkan.
  */
 export function calculateEducationPlan(dto: CreateEducationPlanDto) {
   const inflationRate = (dto.inflationRate || 10) / 100;
   const returnRate = (dto.returnRate || 12) / 100;
 
-  // Rate investasi bulanan untuk rumus PMT (r)
+  // Rate investasi bulanan untuk rumus PMT
   const rRateMonthly = returnRate / 12;
 
   const stagesBreakdown = dto.stages.map((stage) => {
@@ -752,15 +750,23 @@ export function calculateEducationPlan(dto: CreateEducationPlanDto) {
     // --- CORE LOGIC UPDATE START ---
 
     // 1. LOGIC S2 (MAGISTER) - SINGLE COST RULE
+    // User Requirement: "S2 hanya menghitung satu kali biaya kuliah dari awal masuk"
     if (stage.level === SchoolLevel.S2) {
       // Rumus: FV = PV * (1 + inflasi)^tahun
+      // Tidak peduli apakah user input ANNUAL/ENTRY, S2 dianggap Lump Sum 1x.
       futureCost = Number(stage.currentCost) * Math.pow(1 + inflationRate, stage.yearsToStart);
     }
 
     // 2. LOGIC S1 (SARJANA) - 4 YEARS / 8 SEMESTERS RULE
+    // User Requirement: "S1 menghitung dari semester 1 hingga 8"
     else if (stage.level === SchoolLevel.S1 && stage.costType === CostType.ANNUAL) {
-      // Akumulasi biaya selama 4 tahun kuliah
-      const durationS1 = 4;
+      // Asumsi: Input currentCost adalah "Biaya Per Tahun".
+      // Kita harus mengakumulasi biaya selama 4 tahun kuliah.
+      // Tahun ke-1: Kena inflasi selama (yearsToStart) tahun
+      // Tahun ke-2: Kena inflasi selama (yearsToStart + 1) tahun
+      // dst...
+
+      const durationS1 = 4; // 4 Tahun (8 Semester)
       let totalS1Cost = 0;
 
       for (let i = 0; i < durationS1; i++) {
@@ -780,16 +786,14 @@ export function calculateEducationPlan(dto: CreateEducationPlanDto) {
 
     // --- CORE LOGIC UPDATE END ---
 
-    // Hitung Tabungan Bulanan (PMT) - Metode Annuity Flat
-    // Rumus Dasar: PMT = (FV * r) / ((1 + r)^n - 1)
-    // Fungsi calculatePMT sudah mengimplementasikan rumus ini dengan asumsi PV = 0.
-
+    // Hitung Tabungan Bulanan (PMT)
+    // Jika yearsToStart 0 (masuk tahun ini), PMT = 0 (karena butuh dana tunai sekarang)
+    // Sebaiknya UI menangani ini sebagai "Dana Darurat", tapi disini kita return 0 saving.
     let monthlySavingItem = 0;
     const months = stage.yearsToStart * 12;
 
     if (months > 0) {
       // Menggunakan Math.abs agar hasil positif
-      // Parameter: (rate, nper, pv, fv) -> pv = 0 karena tidak ada current saving
       monthlySavingItem = Math.abs(calculatePMT(rRateMonthly, months, 0, futureCost));
     }
 
