@@ -59,10 +59,15 @@ export class FinancialService {
     private readonly configService: ConfigService,
     private readonly pdfService: PdfGeneratorService,
   ) {
-    this.RETENTION_SECRET = this.configService.get<string>(
-      'RETENTION_SECRET',
-      'DEFAULT_SECRET_DO_NOT_USE_IN_PROD_PLEASE_CHANGE_ME',
-    );
+    // [FIX]: Tampung dulu di variabel sementara agar aman
+    const secretEnv = this.configService.get<string>('RETENTION_SECRET');
+
+    if (!secretEnv) {
+      this.logger.warn('WARNING: RETENTION_SECRET is not set in .env. Using unsafe default secret!');
+      this.RETENTION_SECRET = 'DEFAULT_SECRET_DO_NOT_USE_IN_PROD_PLEASE_CHANGE_ME';
+    } else {
+      this.RETENTION_SECRET = secretEnv;
+    }
   }
 
   // ===========================================================================
@@ -591,48 +596,75 @@ export class FinancialService {
   }
 
 
+  // [TAHAP 2.3] Revised verifyAndDecodeSimulationToken
+  // Robust validation and error handling
   async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
     const { simulationToken } = dto;
 
-    if (!simulationToken.includes('.')) {
-      throw new BadRequestException('Format file .mgc tidak valid atau rusak.');
+    // 1. Validasi Format Dasar (Pencegahan Error Split)
+    // Trim whitespace yang mungkin terbawa dari Frontend/File text
+    const cleanToken = simulationToken?.trim();
+
+    if (!cleanToken || !cleanToken.includes('.')) {
+      // Error ini berarti user mengupload file teks biasa atau file kosong
+      throw new BadRequestException('Format file rusak: Token tidak memiliki struktur yang valid.');
     }
 
-    const [payloadBase64, providedSignature] = simulationToken.split('.');
+    const [payloadBase64, providedSignature] = cleanToken.split('.');
+
+    // 2. Validasi Kelengkapan Bagian
+    if (!payloadBase64 || !providedSignature) {
+      throw new BadRequestException('Format file rusak: Payload atau Signature hilang.');
+    }
+
+    // 3. Re-Calculate Signature (Validasi Integritas)
+    // Server menghitung ulang signature berdasarkan Payload + Secret Key Server
     const expectedSignature = this.createHmacSignature(payloadBase64);
 
+    // Gunakan Buffer untuk perbandingan aman (mencegah timing attack)
     const signatureBuffer = Buffer.from(providedSignature);
     const expectedBuffer = Buffer.from(expectedSignature);
 
+    // Cek apakah panjang buffer sama dulu (karena timingSafeEqual akan error jika beda panjang)
     const isValid =
       signatureBuffer.length === expectedBuffer.length &&
       nodeCrypto.timingSafeEqual(signatureBuffer, expectedBuffer);
 
     if (!isValid) {
-      this.logger.warn('Security Alert: Invalid Signature on .mgc import.');
+      // Log detail untuk Admin/Developer memantau masalah
+      // Jika ini muncul, berarti:
+      // A. File diedit user secara manual
+      // B. Server di-redeploy dan RETENTION_SECRET berubah (Lupa set .env)
+      this.logger.error(`Import Failed: Signature Mismatch.
+        Provided (File): ${providedSignature.substring(0, 10)}...
+        Expected (Server): ${expectedSignature.substring(0, 10)}...
+        Check RETENTION_SECRET consistency in .env file.`);
+
       throw new BadRequestException(
-        'File simulasi (.mgc) tidak valid atau telah dimodifikasi. Import ditolak demi keamanan data.',
+        'Validasi Gagal: File telah dimodifikasi atau Kunci Server tidak cocok.',
       );
     }
 
+    // 4. Decode JSON Payload
     try {
       const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
       const data = JSON.parse(payloadJson);
 
       return {
         message: 'File simulasi berhasil di-import.',
-        // [ITEM 2.2] STANDARDISASI OUTPUT IMPORT
+        // Mapping data agar struktur konsisten saat diterima Frontend
         data: {
           client: data.client,
           spouse: data.spouse,
           financial: data.financial,
-          last_simulation_date: data.meta.generatedAt,
-          // Ekstrak hasil perhitungan tersimpan agar rincian rasio muncul kembali
+          last_simulation_date: data.meta?.generatedAt || new Date(),
+          // Fallback: Support format lama (result) dan baru (financialRatios)
           result: data.result || data.financialRatios,
         },
       };
-    } catch (error) {
-      throw new BadRequestException('Gagal membaca isi file simulasi. Encoding rusak.');
+    } catch (error: any) {
+      this.logger.error(`Import Failed: JSON Parse Error. ${error.message}`);
+      throw new BadRequestException('Gagal membaca data: Isi file (Payload) rusak/corrupt.');
     }
   }
 
