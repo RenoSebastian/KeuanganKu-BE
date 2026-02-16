@@ -10,7 +10,7 @@ import { budgetReportTemplate } from '../templates/budget-report.template';
 import { pensionReportTemplate } from '../templates/pension-report.template';
 import { insuranceReportTemplate } from '../templates/insurance-report.template';
 import { goalReportTemplate } from '../templates/goals-report.template';
-import { educationReportTemplate } from '../templates/education-report.template';
+import { educationSimulationReportTemplate } from '../templates/education-report.template';
 import { historyCheckupReportTemplate } from '../templates/history-checkup-report.template';
 
 // [NEW] Template untuk Risk Profile & Agent Budget
@@ -29,6 +29,7 @@ import { CreateGoalSimulationDto } from '../dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from '../dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from '../dto/create-risk-profile-simulation.dto';
 import { RiskProfileResponseDto } from '../dto/risk-profile-response.dto';
+import { CreateEducationSimulationDto } from '../dto/create-education-simulation.dto';
 
 import { User } from '@prisma/client';
 
@@ -210,7 +211,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     }
 
     async generateEducationPdf(dataArray: any[]): Promise<Buffer> {
-        const template = handlebars.compile(educationReportTemplate);
+        const template = handlebars.compile(educationSimulationReportTemplate);
         const context = this.mapEducationData(dataArray);
         const html = template(context);
         return this.generatePdfCore(html, context);
@@ -1402,6 +1403,116 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         } catch (error: any) {
             this.logger.error(`Failed to generate Risk Profile PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF Profil Risiko.');
+        }
+    }
+
+    // ===========================================================================
+    // [NEW] EDUCATION SIMULATION (STATELESS)
+    // ===========================================================================
+
+    /**
+     * generateEducationSimulationPdf
+     * ------------------------------
+     * Membuat PDF simulasi Pendidikan (Agent Mode).
+     * Menerima array hasil kalkulasi per anak dan merangkumnya.
+     */
+    async generateEducationSimulationPdf(
+        clientData: CreateEducationSimulationDto,
+        simulationResults: any[],
+        totalMonthlyInvestment: number,
+        agent: User
+    ): Promise<Buffer> {
+
+        const fmt = (n: number) =>
+            new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(n);
+
+        // Helper hitung umur simple
+        const calcAge = (dobString: string) => {
+            if (!dobString) return 0;
+            const dob = new Date(dobString);
+            const diffMs = Date.now() - dob.getTime();
+            const ageDt = new Date(diffMs);
+            return Math.abs(ageDt.getUTCFullYear() - 1970);
+        };
+
+        // 1. Hitung Summary Global
+        const totalChildren = simulationResults.length;
+        const totalFutureCostAll = simulationResults.reduce((acc, curr) => acc + curr.summary.totalFutureCost, 0);
+
+        // 2. Data Context untuk Handlebars
+        const context = {
+            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+            documentId: `EDU-${Math.random().toString(36).substring(7).toUpperCase()}`,
+
+            // Profil Agen
+            agent: {
+                name: agent.fullName,
+                level: agent.agentLevel || 'Financial Advisor',
+                company: agent.companyName || 'KeuanganKu Pratama',
+                agency: agent.agencyName || 'MaxiPro Group',
+            },
+
+            // Profil Klien
+            client: {
+                name: clientData.clientName,
+                city: clientData.clientCity,
+                job: clientData.clientJob || '-',
+                phone: clientData.clientPhone || '-',
+                dob: clientData.clientDob ? new Date(clientData.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
+            },
+
+            // Summary Utama (Halaman 1)
+            summary: {
+                totalChildren: totalChildren,
+                totalFutureCost: fmt(totalFutureCostAll),
+                totalMonthlyInvestment: fmt(totalMonthlyInvestment),
+                existingFund: fmt(clientData.currentSaving || 0),
+                // Cek apakah existing fund sudah menutup kebutuhan?
+                shortfall: fmt(Math.max(0, totalFutureCostAll - (clientData.currentSaving || 0)))
+            },
+
+            // Detail Per Anak (Looping di Template)
+            children: simulationResults.map((child, index) => ({
+                index: index + 1,
+                name: child.childName,
+                age: calcAge(child.childDob),
+                dob: new Date(child.childDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }),
+
+                // Summary Per Anak
+                totalFutureCost: fmt(child.summary.totalFutureCost),
+                monthlySaving: fmt(child.summary.totalMonthlySaving),
+
+                // Detail Jenjang Sekolah (TK/SD/SMP/dst)
+                stages: child.detail.stagesBreakdown.map((stage: any) => ({
+                    level: stage.level,
+                    costType: stage.costType === 'ENTRY' ? 'Uang Pangkal' : 'SPP Tahunan',
+                    yearsToStart: stage.yearsToStart,
+                    currentCost: fmt(stage.currentCost),
+                    futureCost: fmt(stage.futureCost),
+                    monthlySaving: fmt(stage.monthlySaving)
+                }))
+            }))
+        };
+
+        try {
+            // 3. Compile Template
+            // NOTE: Variable 'educationSimulationReportTemplate' akan dibuat di langkah selanjutnya
+            const template = handlebars.compile(educationSimulationReportTemplate);
+            const html = template(context);
+
+            // 4. Render PDF
+            const pdfBuffer = await this.generatePdfCore(html, context);
+
+            this.logger.log(`Stateless Education PDF generated for: ${clientData.clientName}`);
+            return pdfBuffer;
+
+        } catch (error: any) {
+            this.logger.error(`Failed to generate Education PDF: ${error.message}`);
+            throw new Error('Gagal memproses laporan PDF Pendidikan.');
         }
     }
 

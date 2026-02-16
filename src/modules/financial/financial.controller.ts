@@ -42,6 +42,7 @@ import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto'
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
+import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto'; // [ADDED] DTO Baru
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -683,5 +684,50 @@ export class FinancialController {
     // Note: Buffer PDF akan diserialisasi menjadi { type: 'Buffer', data: [...] }
     // Frontend harus mengubahnya kembali menjadi Blob/File.
     return result;
+  }
+
+  // ===========================================================================
+  // MODULE 13: AGENT EDUCATION SIMULATION (STATELESS STREAMING)
+  // ===========================================================================
+
+  @Post('simulation/education')
+  @ApiOperation({
+    summary: 'Simulasi Pendidikan & Download PDF Langsung (Stateless)',
+    description: 'Menghitung rencana pendidikan anak, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
+  })
+  async createEducationSimulation(
+    @GetUser() user: client.User,
+    @Body() dto: CreateEducationSimulationDto,
+    @Res() res: express.Response,
+  ) {
+    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
+    const result = await this.financialService.simulateAgentEducation(user, dto);
+
+    // 2. Audit Log
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'SIMULATE_EDUCATION',
+      entity: 'SimulationLog',
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated education simulation for client ${dto.clientName}`,
+      ip: '0.0.0.0',
+      userAgent: 'AgentSystem'
+    });
+
+    // 3. SET HTTP HEADERS (CRITICAL STEP)
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.pdfBuffer.length,
+
+      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
+      'X-MGC-Token': result.mgcToken,
+
+      // Mengizinkan Browser/Frontend membaca header custom ini
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+    });
+
+    // 4. STREAM DATA LANGSUNG KE CLIENT
+    res.end(result.pdfBuffer);
   }
 }

@@ -83,3 +83,5 @@ export class CreateEducationPlanDto {
   @Type(() => CreateEducationStageDto)
   stages: CreateEducationStageDto[];
 }
+
+export { EducationMethod };

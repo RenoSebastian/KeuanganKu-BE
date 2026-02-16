@@ -30,6 +30,7 @@ import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto'
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
+import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto';
 
 // Services
 import { PdfGeneratorService } from './services/pdf-generator.service';
@@ -1036,5 +1037,116 @@ export class FinancialService {
     const diffMs = Date.now() - dob.getTime();
     const ageDt = new Date(diffMs);
     return Math.abs(ageDt.getUTCFullYear() - 1970);
+  }
+
+  // ===========================================================================
+  // MODULE 12: AGENT EDUCATION SIMULATION (STATELESS)
+  // ===========================================================================
+
+  async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
+    try {
+      // 1. ITERATIVE CALCULATION & AGGREGATION
+      // [FIX]: Tambahkan tipe ': any[]' agar tidak dianggap 'never[]'
+      const simulationResults: any[] = [];
+
+      let totalMonthlyInvestment = 0;
+      let totalFutureCostAllChildren = 0;
+
+      // Loop setiap anak yang diinputkan agen
+      for (const childPlan of dto.childrenPlans) {
+        // Mapping input DTO ke format yang dibutuhkan math engine
+        const calculationInput = {
+          ...childPlan,
+          method: childPlan.method || 'GEOMETRIC',
+          inflationRate: childPlan.inflationRate ?? 10,
+          returnRate: childPlan.returnRate ?? 12,
+        };
+
+        // Panggil Core Math Engine
+        const result = calculateEducationPlan(calculationInput as any);
+
+        // Hitung total saving & future cost khusus anak ini
+        const childTotalMonthly = result.stagesBreakdown.reduce((acc, stage) => acc + stage.monthlySaving, 0);
+        const childTotalFuture = result.stagesBreakdown.reduce((acc, stage) => acc + stage.futureCost, 0);
+
+        // Tambahkan ke Total Keluarga
+        totalMonthlyInvestment += childTotalMonthly;
+        totalFutureCostAllChildren += childTotalFuture;
+
+        // Push hasil ke array (Sekarang aman karena sudah di-type 'any[]')
+        simulationResults.push({
+          childName: childPlan.childName,
+          childDob: childPlan.childDob,
+          summary: {
+            totalFutureCost: childTotalFuture,
+            totalMonthlySaving: childTotalMonthly
+          },
+          detail: result
+        });
+      }
+
+      // 2. LOGGING TO DB
+      const clientAge = this.calculateAge(dto.clientDob);
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob || '-',
+          totalIncome: totalFutureCostAllChildren,
+          calculatedSurplus: totalMonthlyInvestment,
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+          moduleType: 'EDUCATION',
+          financialRatios: JSON.parse(JSON.stringify(simulationResults)) as Prisma.InputJsonValue,
+        },
+      });
+
+      // 3. PDF GENERATION
+      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(
+        dto,
+        simulationResults,
+        totalMonthlyInvestment,
+        user,
+      );
+
+      // 4. MGC TOKEN GENERATION
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'EDUCATION',
+        },
+        client: {
+          name: dto.clientName,
+          dob: dto.clientDob,
+          city: dto.clientCity,
+          job: dto.clientJob,
+          phone: dto.clientPhone,
+        },
+        financial: {
+          childrenCount: dto.childrenPlans.length,
+          existingSaving: dto.currentSaving
+        },
+        result: {
+          totalMonthlyInvestment,
+          totalFutureCost: totalFutureCostAllChildren,
+          details: simulationResults
+        },
+      });
+
+      const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Education Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi pendidikan.');
+    }
   }
 }

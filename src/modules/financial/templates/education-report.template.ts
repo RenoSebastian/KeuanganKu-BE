@@ -9,7 +9,7 @@ import * as path from 'path';
 function getImageBase64(filePath: string): string {
   try {
     if (!fs.existsSync(filePath)) {
-      console.error(`[PDF] File not found: ${filePath}`);
+      // Fallback: Return string kosong agar PDF tetap ter-generate meski tanpa gambar
       return '';
     }
     const bitmap = fs.readFileSync(filePath);
@@ -27,50 +27,55 @@ function getImageBase64(filePath: string): string {
 
     return `data:${mimeType};base64,${bitmap.toString('base64')}`;
   } catch (error: any) {
-    console.error(`[PDF] Error base64: ${error.message}`);
+    console.error(`[PDF Assets] Error loading ${filePath}: ${error.message}`);
     return '';
   }
 }
 
-// Sesuaikan path ini dengan server environment Anda (Docker/Local)
+// Path ke folder images (Sesuaikan dengan struktur project Anda)
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 
+// Load images sekali saja saat module di-load
 const assets = {
   logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'logokeuanganku.png')),
-  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendindikan1.webp')),
+  // Pastikan nama file sesuai dengan yang ada di folder assets Anda
+  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendidikan1.webp')),
   headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanapendidikan2.webp'))
 };
 
 /**
  * ------------------------------------------------------------------
- * 2. VIEW LAYER: HTML TEMPLATE
+ * 2. VIEW LAYER: HTML TEMPLATE (AGENT SIMULATION VERSION)
  * ------------------------------------------------------------------
+ * Template ini didesain untuk flow simulasi agen:
+ * - Header memuat info Agen & Company
+ * - Body memuat info Klien
+ * - Menampilkan Summary Total Keluarga
+ * - Menampilkan Detail per Anak
  */
-export const educationReportTemplate = `
+export const educationSimulationReportTemplate = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Education Plan Report</title>
+  <title>Education Simulation Report</title>
   <style>
-    /* [OPTIMISASI] Hapus font eksternal */
-    /* @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans...'); */
-    
     :root {
-      --primary: #0e7490;
-      --primary-dark: #ffffff;
-      --secondary: #64748b;
-      --dark: #0f172a;
-      --border: #e2e8f0;
+      --primary: #0e7490;      /* Cyan 700 */
+      --primary-dark: #155e75; /* Cyan 800 */
+      --secondary: #64748b;    /* Slate 500 */
+      --dark: #0f172a;         /* Slate 900 */
+      --border: #e2e8f0;       /* Slate 200 */
       --bg-soft: #f8fafc;
-      --accent: #f59e0b; /* Amber 500 */
+      --accent: #f59e0b;       /* Amber 500 */
+      --success: #10b981;      /* Emerald 500 */
+      --danger: #ef4444;       /* Red 500 */
     }
 
     * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
 
     body {
       margin: 0; padding: 0;
-      /* [OPTIMISASI] Gunakan System Font */
       font-family: Helvetica, Arial, sans-serif;
       color: var(--dark);
       background-color: #fff;
@@ -78,211 +83,214 @@ export const educationReportTemplate = `
 
     @page {
       size: A4;
-      margin: 15mm 15mm 25mm 15mm;
+      margin: 15mm 15mm 20mm 15mm; /* Top, Right, Bottom, Left */
     }
 
-    /* HEADER */
+    /* --- HEADER SECTION --- */
     .header-grid {
-      display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 110px 70px; gap: 8px; margin-bottom: 30px;
+      display: grid; grid-template-columns: 2fr 1fr; grid-template-rows: 100px 60px; 
+      gap: 6px; margin-bottom: 25px;
     }
     .h-title-box {
-      background-color: var(--accent); color: white; padding: 20px 30px;
-      border-top-left-radius: 20px; display: flex; flex-direction: column; justify-content: center;
+      background-color: var(--primary); color: white; padding: 20px 25px;
+      border-top-left-radius: 16px; display: flex; flex-direction: column; justify-content: center;
     }
-    .h-image-right-top {
+    .h-image-top {
       background-image: url('${assets.headerImg1}'); background-size: cover; background-position: center;
-      border-top-right-radius: 20px; background-color: var(--dark);
+      border-top-right-radius: 16px; background-color: var(--dark);
     }
-    .h-image-left-bottom {
+    .h-image-bottom {
       background-image: url('${assets.headerImg2}'); background-size: cover; background-position: center;
-      border-bottom-left-radius: 20px; background-color: var(--secondary);
+      border-bottom-left-radius: 16px; background-color: var(--secondary);
     }
-   .h-brand-box {
-        background-color: var(--primary-dark);
-        color: white;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 12px;
-        border-bottom-right-radius: 20px;
-        padding: 10px;
+    .h-brand-box {
+      background-color: var(--primary-dark); color: white;
+      display: flex; align-items: center; justify-content: center;
+      border-bottom-right-radius: 16px; padding: 10px;
     }
-   
-    .logo-maxipro { 
-      height: 88px; 
-      width: auto; 
-      display: block;
-    }
-
-    .brand-text { font-weight: 800; letter-spacing: 2px; font-size: 12px; text-transform: uppercase; }
-    .main-heading { 
-      font-family: 'Times New Roman', serif; /* Fallback serif */
-      font-size: 32px; line-height: 1; margin: 0; 
-    }
+    .logo-maxipro { height: 70px; width: auto; display: block; }
+    
+    .main-heading { font-family: 'Times New Roman', serif; font-size: 28px; line-height: 1.1; margin: 0; }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
 
-    /* FOOTER */
+    /* --- AGENT & CLIENT INFO --- */
+    .info-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px;
+    }
+    .info-card {
+      border: 1px solid var(--border); border-radius: 10px; padding: 15px;
+      background: var(--bg-soft);
+    }
+    .info-title {
+      font-size: 10px; font-weight: 700; color: var(--secondary); text-transform: uppercase; 
+      margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px;
+    }
+    .info-row { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; }
+    .info-label { color: var(--secondary); }
+    .info-val { font-weight: 700; color: var(--dark); }
+
+    /* --- EXECUTIVE SUMMARY --- */
+    .summary-section {
+      background: linear-gradient(to right, #ecfeff, #f0fdf4);
+      border: 1px solid #cffafe; border-radius: 12px; padding: 20px;
+      margin-bottom: 30px; position: relative; overflow: hidden;
+    }
+    .summary-section::before {
+      content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 5px; background: var(--primary);
+    }
+    .sum-header { font-size: 12px; font-weight: 800; text-transform: uppercase; color: var(--primary); margin-bottom: 15px; }
+    
+    .sum-metrics { display: flex; justify-content: space-between; gap: 15px; }
+    .metric-box { flex: 1; }
+    .metric-lbl { font-size: 10px; color: var(--secondary); text-transform: uppercase; margin-bottom: 4px; }
+    .metric-val { font-size: 18px; font-weight: 800; color: var(--dark); font-family: monospace; }
+    .metric-val.highlight { color: var(--primary); font-size: 22px; }
+
+    /* --- CHILD DETAIL SECTION --- */
+    .child-section { margin-bottom: 30px; page-break-inside: avoid; }
+    
+    .child-header {
+      background: var(--dark); color: white; padding: 10px 15px;
+      border-top-left-radius: 10px; border-top-right-radius: 10px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+    .child-title { font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; }
+    .child-meta { font-size: 11px; opacity: 0.9; }
+
+    .child-body {
+      border: 1px solid var(--border); border-top: none; 
+      border-bottom-left-radius: 10px; border-bottom-right-radius: 10px;
+      padding: 15px;
+    }
+
+    /* STAGES TABLE */
+    .stages-table { width: 100%; border-collapse: collapse; font-size: 10px; margin-top: 10px; }
+    .stages-table th {
+      text-align: left; background: var(--bg-soft); color: var(--secondary); padding: 8px;
+      border-bottom: 2px solid var(--border); text-transform: uppercase; font-size: 9px;
+    }
+    .stages-table td { padding: 8px; border-bottom: 1px dashed var(--border); color: var(--dark); }
+    .stages-table tr:last-child td { border-bottom: none; }
+    
+    .col-right { text-align: right; }
+    .text-mono { font-family: monospace; font-weight: 600; font-size: 11px; }
+    .text-accent { color: var(--accent); }
+    .text-total { color: var(--primary); font-weight: 800; }
+
+    /* CHILD SUMMARY ROW */
+    .child-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-top: 15px; padding-top: 10px; border-top: 2px solid var(--border);
+    }
+    .cf-label { font-size: 11px; font-weight: 700; color: var(--secondary); text-transform: uppercase; }
+    .cf-value { font-size: 16px; font-weight: 800; color: var(--primary); font-family: monospace; }
+
+    /* --- FOOTER --- */
     .page-footer {
       position: fixed; bottom: 0; left: 0; right: 0;
       height: 10mm; border-top: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
-      font-size: 9px; color: var(--secondary); background: white; padding-top: 2mm;
+      background: white; padding-top: 5px;
     }
-
-    /* --- CHILD CONTAINER --- */
-    .child-section {
-      margin-bottom: 40px;
-      page-break-after: always; /* Ganti halaman tiap anak */
-    }
-    .child-section:last-child { page-break-after: auto; }
-
-    .child-header {
-      display: flex; justify-content: space-between; align-items: flex-end;
-      border-bottom: 3px solid var(--accent); padding-bottom: 12px; margin-bottom: 20px;
-    }
-    .child-name { font-size: 24px; font-weight: 800; color: var(--dark); text-transform: uppercase; line-height: 1; }
-    .child-info { font-size: 11px; color: var(--secondary); margin-top: 4px; font-weight: 500; }
-    
-    .total-badge {
-      text-align: right; background: var(--bg-soft); padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
-    }
-    .total-label { font-size: 9px; text-transform: uppercase; font-weight: 700; color: var(--secondary); }
-    .total-value { font-size: 18px; font-weight: 800; color: var(--accent); font-family: monospace; }
-
-    /* --- SUMMARY STATS --- */
-    .stats-grid {
-      display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 30px;
-    }
-    .stat-card {
-      border: 1px solid var(--border); border-radius: 8px; padding: 12px;
-      display: flex; align-items: center; gap: 10px;
-    }
-    .stat-val { font-weight: 700; color: var(--dark); font-size: 13px; }
-    .stat-lbl { font-size: 9px; color: var(--secondary); text-transform: uppercase; margin-top: 2px; }
-
-    /* --- LEVEL CARD (Grouping) --- */
-    .level-card {
-      border: 1px solid var(--border); border-radius: 12px; 
-      margin-bottom: 20px; overflow: hidden;
-      page-break-inside: avoid; /* Jangan potong card di tengah halaman */
-      box-shadow: 0 2px 4px rgba(0,0,0,0.02);
-    }
-    
-    .level-header {
-      background: var(--dark); color: white;
-      padding: 10px 15px; display: flex; justify-content: space-between; align-items: center;
-    }
-    .level-title { font-weight: 800; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; }
-    .level-summary { font-size: 10px; font-weight: 500; opacity: 0.9; }
-
-    /* TABLE INSIDE CARD */
-    .level-table { width: 100%; border-collapse: collapse; font-size: 10px; }
-    .level-table th { 
-      text-align: left; padding: 8px 15px; background: var(--bg-soft); 
-      color: var(--secondary); font-weight: 700; text-transform: uppercase; font-size: 9px;
-      border-bottom: 1px solid var(--border);
-    }
-    .level-table td { padding: 10px 15px; border-bottom: 1px dashed var(--border); color: var(--dark); }
-    .level-table tr:last-child td { border-bottom: none; }
-    
-    .col-money { text-align: right; font-family: monospace; font-weight: 600; }
-    .text-fv { color: var(--primary); }
-    .text-save { color: var(--accent); font-weight: 700; }
+    .footer-text { font-size: 9px; color: var(--secondary); }
 
   </style>
 </head>
 <body>
 
-  <div class="page-footer">
-    <div>Generated by KeuanganKu System</div>
-    <div>CONFIDENTIAL • Education Planning</div>
-  </div>
-
   <div class="header-grid">
     <div class="h-title-box">
-      <div class="sub-heading">MAXIPRO Financial</div>
-      <h1 class="main-heading">Education Plan</h1>
+      <div class="sub-heading">MAXIPRO FINANCIAL</div>
+      <h1 class="main-heading">Rencana Dana Pendidikan</h1>
     </div>
-    <div class="h-image-right-top"></div>
-    <div class="h-image-left-bottom"></div>
+    <div class="h-image-top"></div>
+    <div class="h-image-bottom"></div>
     <div class="h-brand-box">
       <img src="${assets.logoMaxiPro}" class="logo-maxipro" alt="Logo">
     </div>
   </div>
 
-  {{#each plans}}
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="info-title">Profil Klien (Orang Tua)</div>
+      <div class="info-row"><span class="info-label">Nama</span><span class="info-val">{{client.name}}</span></div>
+      <div class="info-row"><span class="info-label">Usia / Tgl Lahir</span><span class="info-val">{{client.dob}}</span></div>
+      <div class="info-row"><span class="info-label">Kota Domisili</span><span class="info-val">{{client.city}}</span></div>
+      <div class="info-row"><span class="info-label">Pekerjaan</span><span class="info-val">{{client.job}}</span></div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">Disiapkan Oleh</div>
+      <div class="info-row"><span class="info-label">Nama Agen</span><span class="info-val">{{agent.name}}</span></div>
+      <div class="info-row"><span class="info-label">Level</span><span class="info-val">{{agent.level}}</span></div>
+      <div class="info-row"><span class="info-label">Agency</span><span class="info-val">{{agent.agency}}</span></div>
+      <div class="info-row"><span class="info-label">Tanggal</span><span class="info-val">{{generatedAt}}</span></div>
+    </div>
+  </div>
+
+  <div class="summary-section">
+    <div class="sum-header">Ringkasan Total Kebutuhan Keluarga</div>
+    <div class="sum-metrics">
+      <div class="metric-box">
+        <div class="metric-lbl">Total Anak</div>
+        <div class="metric-val">{{summary.totalChildren}}</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-lbl">Total Biaya Masa Depan</div>
+        <div class="metric-val">{{summary.totalFutureCost}}</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-lbl">Dana Tersedia Saat Ini</div>
+        <div class="metric-val">{{summary.existingFund}}</div>
+      </div>
+      <div class="metric-box" style="text-align: right;">
+        <div class="metric-lbl">Total Investasi Rutin / Bulan</div>
+        <div class="metric-val highlight">{{summary.totalMonthlyInvestment}}</div>
+      </div>
+    </div>
+  </div>
+
+  {{#each children}}
   <div class="child-section">
-    
     <div class="child-header">
-      <div>
-        <div class="child-name">{{this.childName}}</div>
-        <div class="child-info">
-          Usia Saat Ini: {{this.childAge}} Tahun • Masuk Kuliah: Thn {{this.uniYear}}
-        </div>
-      </div>
-      <div class="total-badge">
-        <div class="total-label">Total Dana Dibutuhkan</div>
-        <div class="total-value">{{this.totalFutureCost}}</div>
-      </div>
+      <div class="child-title">{{this.index}}. {{this.name}}</div>
+      <div class="child-meta">Usia Saat Ini: {{this.age}} Tahun</div>
     </div>
-
-    <div class="stats-grid">
-      <div class="stat-card">
-        <div style="font-size:24px;">💰</div>
-        <div>
-          <div class="stat-val">{{this.monthlySaving}} /bln</div>
-          <div class="stat-lbl">Total Investasi Rutin</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div style="font-size:24px;">📈</div>
-        <div>
-          <div class="stat-val">Inflasi {{this.inflationRate}}% | Return {{this.returnRate}}%</div>
-          <div class="stat-lbl">Asumsi Ekonomi</div>
-        </div>
-      </div>
-      <div class="stat-card">
-        <div style="font-size:24px;">🧮</div>
-        <div>
-          <div class="stat-val">{{this.method}}</div>
-          <div class="stat-lbl">Metode Perhitungan</div>
-        </div>
-      </div>
-    </div>
-
-    {{#each this.groupedStages}}
-    <div class="level-card">
-      <div class="level-header">
-        <div class="level-title">{{this.levelName}}</div>
-        <div class="level-summary">
-           Mulai dlm {{this.startIn}} Tahun • Total FV: {{this.subTotalCost}}
-        </div>
-      </div>
-      <table class="level-table">
+    <div class="child-body">
+      <table class="stages-table">
         <thead>
           <tr>
-            <th width="30%">Jenis Biaya</th>
-            <th width="20%" class="col-money">Biaya Saat Ini</th>
-            <th width="25%" class="col-money">Biaya Nanti (FV)</th>
-            <th width="25%" class="col-money">Tabungan / Bln</th>
+            <th width="20%">Jenjang</th>
+            <th width="20%">Jenis Biaya</th>
+            <th width="15%">Masuk Dlm</th>
+            <th width="20%" class="col-right">Biaya Sekarang</th>
+            <th width="25%" class="col-right">Biaya Nanti (FV)</th>
           </tr>
         </thead>
         <tbody>
-          {{#each this.items}}
+          {{#each this.stages}}
           <tr>
+            <td><strong>{{this.level}}</strong></td>
             <td>{{this.costType}}</td>
-            <td class="col-money">{{this.currentCost}}</td>
-            <td class="col-money text-fv">{{this.futureCost}}</td>
-            <td class="col-money text-save">{{this.monthlySaving}}</td>
+            <td>{{this.yearsToStart}} Tahun</td>
+            <td class="col-right text-mono">{{this.currentCost}}</td>
+            <td class="col-right text-mono text-total">{{this.futureCost}}</td>
           </tr>
           {{/each}}
         </tbody>
       </table>
+      
+      <div class="child-footer">
+        <div class="cf-label">Rekomendasi Tabungan Rutin (Anak ini)</div>
+        <div class="cf-value">{{this.monthlySaving}} / Bulan</div>
+      </div>
     </div>
-    {{/each}}
-
   </div>
   {{/each}}
+
+  <div class="page-footer">
+    <div class="footer-text">Dokumen Simulasi Internal • Dibuat melalui KeuanganKu Agent Tools</div>
+    <div class="footer-text">ID: {{documentId}} • Page 1 of 1</div>
+  </div>
 
 </body>
 </html>
