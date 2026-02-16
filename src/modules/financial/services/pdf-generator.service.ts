@@ -1470,9 +1470,8 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 totalChildren: totalChildren,
                 totalFutureCost: fmt(totalFutureCostAll),
                 totalMonthlyInvestment: fmt(totalMonthlyInvestment),
-                existingFund: fmt(clientData.currentSaving || 0),
                 // Cek apakah existing fund sudah menutup kebutuhan?
-                shortfall: fmt(Math.max(0, totalFutureCostAll - (clientData.currentSaving || 0)))
+                shortfall: fmt(Math.max(0, totalFutureCostAll))
             },
 
             // Detail Per Anak (Looping di Template)

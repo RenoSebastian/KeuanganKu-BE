@@ -6,14 +6,13 @@ import {
     IsArray,
     ValidateNested,
     Min,
-    Max,
-    IsEnum
+    Max
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { CreateEducationStageDto, EducationMethod } from './create-education.dto';
+import { CreateEducationStageDto } from './create-education.dto';
 
-// --- SUB-DTO: ITEM ANAK (Mirip CreateEducationPlanDto tapi sebagai Item Array) ---
+// --- SUB-DTO: ITEM ANAK ---
 export class EducationSimulationChildItem {
     @ApiProperty({ example: 'Budi Kecil', description: 'Nama Anak' })
     @IsString()
@@ -23,11 +22,8 @@ export class EducationSimulationChildItem {
     @IsDateString()
     childDob: string;
 
-    // --- Opsi Ekonomi per Anak (Bisa dicustom per anak jika perlu) ---
-    @ApiPropertyOptional({ enum: EducationMethod, default: 'GEOMETRIC' })
-    @IsEnum(EducationMethod)
-    @IsOptional()
-    method?: EducationMethod = EducationMethod.GEOMETRIC;
+    // [DELETED] method: EducationMethod; 
+    // Alasan: Metode perhitungan dikunci ke "Flat/Annuity" di Backend (Service Layer).
 
     @ApiPropertyOptional({ example: 10, description: 'Asumsi Inflasi Pendidikan (%)', default: 10 })
     @IsOptional()
@@ -78,18 +74,10 @@ export class CreateEducationSimulationDto {
     @IsString()
     clientPhone: string;
 
-    // 2. KONTEKS FINANSIAL KLIEN (Opsional)
-    @ApiPropertyOptional({
-        example: 50000000,
-        description: 'Tabungan pendidikan yang sudah dimiliki saat ini (Existing Fund)',
-        default: 0
-    })
-    @IsOptional()
-    @IsNumber()
-    @Min(0)
-    currentSaving?: number = 0;
+    // [DELETED] currentSaving 
+    // Alasan: Perhitungan PAM Jaya tidak memperhitungkan tabungan saat ini (Pure Future Value Annuity).
 
-    // 3. DATA RENCANA PENDIDIKAN (Array of Children)
+    // 2. DATA RENCANA PENDIDIKAN (Array of Children)
     @ApiProperty({
         type: [EducationSimulationChildItem],
         description: 'List rencana pendidikan untuk setiap anak'

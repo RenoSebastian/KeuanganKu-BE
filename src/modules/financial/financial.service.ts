@@ -1046,7 +1046,6 @@ export class FinancialService {
   async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
     try {
       // 1. ITERATIVE CALCULATION & AGGREGATION
-      // [FIX]: Tambahkan tipe ': any[]' agar tidak dianggap 'never[]'
       const simulationResults: any[] = [];
 
       let totalMonthlyInvestment = 0;
@@ -1055,14 +1054,14 @@ export class FinancialService {
       // Loop setiap anak yang diinputkan agen
       for (const childPlan of dto.childrenPlans) {
         // Mapping input DTO ke format yang dibutuhkan math engine
+        // [FIX]: Menghapus properti 'method' karena kalkulasi sudah dikunci ke Flat/Annuity
         const calculationInput = {
           ...childPlan,
-          method: childPlan.method || 'GEOMETRIC',
           inflationRate: childPlan.inflationRate ?? 10,
           returnRate: childPlan.returnRate ?? 12,
         };
 
-        // Panggil Core Math Engine
+        // Panggil Core Math Engine (logic baru tanpa method geometric)
         const result = calculateEducationPlan(calculationInput as any);
 
         // Hitung total saving & future cost khusus anak ini
@@ -1073,7 +1072,6 @@ export class FinancialService {
         totalMonthlyInvestment += childTotalMonthly;
         totalFutureCostAllChildren += childTotalFuture;
 
-        // Push hasil ke array (Sekarang aman karena sudah di-type 'any[]')
         simulationResults.push({
           childName: childPlan.childName,
           childDob: childPlan.childDob,
@@ -1094,8 +1092,8 @@ export class FinancialService {
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob || '-',
-          totalIncome: totalFutureCostAllChildren,
-          calculatedSurplus: totalMonthlyInvestment,
+          totalIncome: totalFutureCostAllChildren, // Menyimpan Total Future Cost sebagai acuan nilai
+          calculatedSurplus: totalMonthlyInvestment, // Menyimpan Angsuran Bulanan sebagai 'surplus' yang dibutuhkan
           healthScore: 100,
           status: HealthStatus.SEHAT,
           moduleType: 'EDUCATION',
@@ -1104,6 +1102,7 @@ export class FinancialService {
       });
 
       // 3. PDF GENERATION
+      // Pastikan service PDF juga sudah disesuaikan agar tidak error membaca field yg hilang
       const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(
         dto,
         simulationResults,
@@ -1128,7 +1127,8 @@ export class FinancialService {
         },
         financial: {
           childrenCount: dto.childrenPlans.length,
-          existingSaving: dto.currentSaving
+          // [FIX]: Set existingSaving ke 0 karena input sudah dihapus dari DTO
+          existingSaving: 0
         },
         result: {
           totalMonthlyInvestment,
