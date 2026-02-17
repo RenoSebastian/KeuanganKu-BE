@@ -53,6 +53,8 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: 'Content-Type, Accept, Authorization',
+    // [FIX] Expose Headers agar Frontend bisa baca Token MGC dan Filename PDF
+    exposedHeaders: ['X-MGC-Token', 'Content-Disposition'],
   });
 
   /**
@@ -101,5 +103,4 @@ async function bootstrap() {
   logger.log(`📂 Static Assets Directory (Managed by Module): ${uploadPath}`);
   logger.log(`📄 Swagger Docs available at: http://localhost:${port}/api/docs`);
 }
-
 bootstrap();
