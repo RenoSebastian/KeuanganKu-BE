@@ -916,6 +916,13 @@ export class FinancialService {
         });
       }
 
+      // [UPDATE PHASE 2] Create Output Result Object (Data Kalkulasi Mentah)
+      const outputResult = {
+        totalFutureCost: grandTotalFutureCost,
+        totalMonthlySaving: grandTotalMonthlySaving,
+        childrenPlans: dto.childrenPlans // Sertakan detail plan agar FE bisa render ulang
+      };
+
       // 2. Logging to DB (Stateless Architecture)
       const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
 
@@ -933,10 +940,7 @@ export class FinancialService {
           moduleType: 'EDUCATION',
           // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: {
-            totalFutureCost: grandTotalFutureCost,
-            totalMonthlySaving: grandTotalMonthlySaving
-          } as unknown as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(outputResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -955,10 +959,13 @@ export class FinancialService {
       });
 
       const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+
+      // [UPDATE PHASE 2] Return COMPLETE Object (Data + PDF + Token)
       return {
         pdfBuffer,
         mgcToken,
         filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`,
+        outputResult: outputResult // <--- DATA KALKULASI PENTING UNTUK UI
       };
 
     } catch (error: any) {

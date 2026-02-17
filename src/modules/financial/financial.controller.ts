@@ -42,7 +42,8 @@ import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto'
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
-import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto'; // [ADDED]
+import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto';
+import { EducationSimulationResponseDto } from './dto/education-simulation-response.dto'; // [ADDED] DTO Response
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -604,21 +605,23 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (STATELESS STREAMING)
+  // MODULE 13: AGENT EDUCATION SIMULATION (STATELESS HYBRID)
   // ===========================================================================
 
   @Post('simulation/education')
   @ApiOperation({
-    summary: 'Simulasi Pendidikan & Download PDF Langsung (Stateless)',
-    description: 'Menghitung rencana pendidikan anak, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
+    summary: 'Simulasi Pendidikan (Hybrid: Data + PDF)',
+    description: 'Menghitung rencana pendidikan, mengembalikan Data JSON untuk UI dan PDF Buffer untuk Download.',
   })
+  @ApiResponse({ status: 201, type: EducationSimulationResponseDto })
   async createEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
-    @Res() res: express.Response,
   ) {
+    // 1. Service Call
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
+    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
@@ -629,14 +632,13 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${result.filename}"`,
-      'Content-Length': result.pdfBuffer.length,
-      'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
-    });
-
-    res.end(result.pdfBuffer);
+    // 3. Return JSON Object
+    return {
+      status: 'success',
+      data: result.outputResult, // Data visualisasi UI
+      pdfBuffer: result.pdfBuffer, // File PDF
+      mgcToken: result.mgcToken, // Token Resume
+      filename: result.filename
+    };
   }
 }

@@ -8,11 +8,13 @@ import {
     Min,
     Max,
     IsEnum,
+    IsNotEmpty,
+    IsPhoneNumber
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
-// Menggunakan Enum dari Prisma Client agar sinkron dengan Database
+// Pastikan Prisma Client sudah di-generate: npx prisma generate
 import { SchoolLevel } from '@prisma/client';
 
 // ==============================================================================
@@ -25,6 +27,7 @@ export class EducationSimulationStageItem {
         description: 'Jenjang Sekolah (TK, SD, SMP, SMA, S1, S2)',
     })
     @IsEnum(SchoolLevel)
+    @IsNotEmpty()
     level: SchoolLevel;
 
     @ApiProperty({
@@ -79,14 +82,16 @@ export class EducationSimulationStageItem {
     @Min(0)
     costFull?: number;
 
-    // --- HASIL KALKULASI (Opsional - Dikirim FE agar PDF konsisten dengan layar) ---
+    // --- HASIL KALKULASI FE (Opsional) ---
+    // Backend akan menghitung ulang, tapi field ini berguna jika ingin log
+    // apa yang dilihat user di layar saat tombol diklik.
 
-    @ApiPropertyOptional({ description: 'Nilai Masa Depan (FV) hasil hitungan FE' })
+    @ApiPropertyOptional({ description: 'Nilai Masa Depan (FV) snapshot dari FE' })
     @IsOptional()
     @IsNumber()
     calculatedFutureValue?: number;
 
-    @ApiPropertyOptional({ description: 'Investasi per bulan (PMT) hasil hitungan FE' })
+    @ApiPropertyOptional({ description: 'Investasi per bulan (PMT) snapshot dari FE' })
     @IsOptional()
     @IsNumber()
     calculatedMonthlySaving?: number;
@@ -98,6 +103,7 @@ export class EducationSimulationStageItem {
 export class EducationSimulationChildItem {
     @ApiProperty({ example: 'Budi Kecil', description: 'Nama Anak' })
     @IsString()
+    @IsNotEmpty()
     childName: string;
 
     @ApiProperty({
@@ -105,6 +111,7 @@ export class EducationSimulationChildItem {
         description: 'Tanggal Lahir Anak (YYYY-MM-DD)',
     })
     @IsDateString()
+    @IsNotEmpty()
     childDob: string;
 
     @ApiProperty({
@@ -121,10 +128,11 @@ export class EducationSimulationChildItem {
 // LEVEL 1: MAIN DTO (SIMULASI PENDIDIKAN AGEN)
 // ==============================================================================
 export class CreateEducationSimulationDto {
-    // --- 1. IDENTITAS KLIEN (Untuk Header Laporan & Log Audit) ---
+    // --- 1. IDENTITAS KLIEN ---
 
     @ApiProperty({ example: 'Bapak Budi', description: 'Nama Lengkap Klien' })
     @IsString()
+    @IsNotEmpty()
     clientName: string;
 
     @ApiPropertyOptional({ example: '1985-05-20', description: 'Tanggal Lahir Klien' })
@@ -132,8 +140,9 @@ export class CreateEducationSimulationDto {
     @IsDateString()
     clientDob?: string;
 
-    @ApiProperty({ example: 'Jakarta Selatan', description: 'Domisili Klien (Penting untuk log statistik)' })
+    @ApiProperty({ example: 'Jakarta Selatan', description: 'Domisili Klien' })
     @IsString()
+    @IsNotEmpty()
     clientCity: string;
 
     @ApiPropertyOptional({ example: 'Wiraswasta', description: 'Pekerjaan Klien' })
@@ -146,7 +155,7 @@ export class CreateEducationSimulationDto {
     @IsString()
     clientPhone?: string;
 
-    // --- 2. ASUMSI FINANSIAL GLOBAL ---
+    // --- 2. ASUMSI FINANSIAL ---
 
     @ApiPropertyOptional({
         example: 10,
