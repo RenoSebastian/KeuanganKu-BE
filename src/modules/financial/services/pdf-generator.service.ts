@@ -45,10 +45,32 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
     async onModuleInit() {
         await this.initBrowser();
+        this.registerHandlebarsHelpers(); // [FIX] Panggil registrasi helper disini
     }
 
     async onModuleDestroy() {
         await this.closeBrowser();
+    }
+
+    private registerHandlebarsHelpers() {
+        // Helper 'inc' (increment) untuk nomor urut (index + 1)
+        handlebars.registerHelper('inc', function (value) {
+            return parseInt(value) + 1;
+        });
+
+        // Helper formatting rupiah (jika belum ada/ingin konsistensi)
+        handlebars.registerHelper('formatRupiah', function (value) {
+            return new Intl.NumberFormat('id-ID', {
+                style: 'currency',
+                currency: 'IDR',
+                maximumFractionDigits: 0
+            }).format(Number(value) || 0);
+        });
+
+        // Helper comparison sederhana (opsional, berguna untuk logic if di template)
+        handlebars.registerHelper('eq', function (a, b) {
+            return a === b;
+        });
     }
 
     // Inisialisasi Browser dengan Config Stabil
