@@ -60,7 +60,6 @@ export class FinancialService {
     private readonly configService: ConfigService,
     private readonly pdfService: PdfGeneratorService,
   ) {
-    // [FIX]: Tampung dulu di variabel sementara agar aman
     const secretEnv = this.configService.get<string>('RETENTION_SECRET');
 
     if (!secretEnv) {
@@ -464,6 +463,7 @@ export class FinancialService {
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
+          clientName: dto.clientName,
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob,
@@ -473,6 +473,10 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)) as Prisma.InputJsonValue,
           moduleType: 'BUDGETING',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          // [Optional] Add Output Result
+          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -521,10 +525,9 @@ export class FinancialService {
   async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
     try {
       // 1. CALCULATE
-      // [FIX ERROR 2345]: Mapping manual client -> userProfile agar cocok dengan math engine
       const calculationInput: any = {
         ...dto,
-        userProfile: dto.client, // Menjembatani perbedaan nama field
+        userProfile: dto.client,
         spouseProfile: dto.spouse,
       };
 
@@ -539,6 +542,7 @@ export class FinancialService {
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
+          clientName: dto.client.name,
           clientAge: clientAge,
           clientCity: dto.client.city,
           clientJob: dto.client.occupation,
@@ -548,6 +552,9 @@ export class FinancialService {
           status: dbStatus,
           financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
           moduleType: 'CHECKUP',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -558,9 +565,7 @@ export class FinancialService {
         user,
       );
 
-      // 4. [ITEM 3.1 & FIX ERROR 2790] COMPREHENSIVE TOKEN PACKING
-      // Kita menggunakan destructuring untuk memisahkan client/spouse 
-      // daripada menggunakan 'delete' operator yang dilarang pada non-optional field.
+      // 4. MGC Token
       const { client, spouse, ...financialData } = dto;
 
       const mgcToken = this.generateMgcToken({
@@ -576,7 +581,6 @@ export class FinancialService {
         result: analysisResult
       });
 
-      // 5. [ITEM 2.1] RETURN EXPLICIT JSON RESULT
       const cleanName = dto.client.name.replace(/[^a-zA-Z0-9]/g, '_');
       return {
         pdfBuffer,
@@ -598,68 +602,48 @@ export class FinancialService {
 
 
   // [TAHAP 2.3] Revised verifyAndDecodeSimulationToken
-  // Robust validation and error handling
   async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
     const { simulationToken } = dto;
 
-    // 1. Validasi Format Dasar (Pencegahan Error Split)
-    // Trim whitespace yang mungkin terbawa dari Frontend/File text
     const cleanToken = simulationToken?.trim();
 
     if (!cleanToken || !cleanToken.includes('.')) {
-      // Error ini berarti user mengupload file teks biasa atau file kosong
       throw new BadRequestException('Format file rusak: Token tidak memiliki struktur yang valid.');
     }
 
     const [payloadBase64, providedSignature] = cleanToken.split('.');
 
-    // 2. Validasi Kelengkapan Bagian
     if (!payloadBase64 || !providedSignature) {
       throw new BadRequestException('Format file rusak: Payload atau Signature hilang.');
     }
 
-    // 3. Re-Calculate Signature (Validasi Integritas)
-    // Server menghitung ulang signature berdasarkan Payload + Secret Key Server
     const expectedSignature = this.createHmacSignature(payloadBase64);
 
-    // Gunakan Buffer untuk perbandingan aman (mencegah timing attack)
     const signatureBuffer = Buffer.from(providedSignature);
     const expectedBuffer = Buffer.from(expectedSignature);
 
-    // Cek apakah panjang buffer sama dulu (karena timingSafeEqual akan error jika beda panjang)
     const isValid =
       signatureBuffer.length === expectedBuffer.length &&
       nodeCrypto.timingSafeEqual(signatureBuffer, expectedBuffer);
 
     if (!isValid) {
-      // Log detail untuk Admin/Developer memantau masalah
-      // Jika ini muncul, berarti:
-      // A. File diedit user secara manual
-      // B. Server di-redeploy dan RETENTION_SECRET berubah (Lupa set .env)
-      this.logger.error(`Import Failed: Signature Mismatch.
-        Provided (File): ${providedSignature.substring(0, 10)}...
-        Expected (Server): ${expectedSignature.substring(0, 10)}...
-        Check RETENTION_SECRET consistency in .env file.`);
-
+      this.logger.error(`Import Failed: Signature Mismatch.`);
       throw new BadRequestException(
         'Validasi Gagal: File telah dimodifikasi atau Kunci Server tidak cocok.',
       );
     }
 
-    // 4. Decode JSON Payload
     try {
       const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
       const data = JSON.parse(payloadJson);
 
       return {
         message: 'File simulasi berhasil di-import.',
-        // Mapping data agar struktur konsisten saat diterima Frontend
         data: {
           client: data.client,
           spouse: data.spouse,
           financial: data.financial,
           last_simulation_date: data.meta?.generatedAt || new Date(),
-          // Fallback: Support format lama (result) dan baru (financialRatios)
           result: data.result || data.financialRatios,
         },
       };
@@ -692,6 +676,7 @@ export class FinancialService {
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
+          clientName: dto.clientName,
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob,
@@ -701,6 +686,9 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
           moduleType: 'INSURANCE',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -761,6 +749,7 @@ export class FinancialService {
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
+          clientName: dto.clientName,
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob || '-',
@@ -770,6 +759,9 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
           moduleType: 'PENSION',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -853,6 +845,7 @@ export class FinancialService {
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
+          clientName: dto.clientName,
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob || '-',
@@ -862,6 +855,9 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(finalResult)) as Prisma.InputJsonValue,
           moduleType: 'GOAL',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          outputResult: JSON.parse(JSON.stringify(finalResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -902,6 +898,76 @@ export class FinancialService {
   }
 
   // ===========================================================================
+  // MODULE 12: AGENT EDUCATION SIMULATION (STATELESS - NEW LOGIC)
+  // ===========================================================================
+
+  async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
+    try {
+      // 1. Calculate Aggregated Summaries for Database Log
+      let grandTotalFutureCost = 0;
+      let grandTotalMonthlySaving = 0;
+
+      if (dto.childrenPlans) {
+        dto.childrenPlans.forEach((child) => {
+          child.stages.forEach((stage) => {
+            grandTotalFutureCost += (stage.calculatedFutureValue || 0);
+            grandTotalMonthlySaving += (stage.calculatedMonthlySaving || 0);
+          });
+        });
+      }
+
+      // 2. Logging to DB (Stateless Architecture)
+      const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
+
+      await this.prisma.simulationLog.create({
+        data: {
+          agentId: user.id,
+          clientName: dto.clientName,
+          clientAge: clientAge,
+          clientCity: dto.clientCity,
+          clientJob: dto.clientJob || '-',
+          totalIncome: grandTotalFutureCost,
+          calculatedSurplus: grandTotalMonthlySaving,
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
+          moduleType: 'EDUCATION',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          outputResult: {
+            totalFutureCost: grandTotalFutureCost,
+            totalMonthlySaving: grandTotalMonthlySaving
+          } as unknown as Prisma.InputJsonValue
+        },
+      });
+
+      // 3. PDF Generation
+      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(dto, user);
+
+      // 4. MGC Token Generation
+      const mgcToken = this.generateMgcToken({
+        meta: {
+          version: '1.0',
+          generatedAt: new Date().toISOString(),
+          agentId: user.id,
+          module: 'EDUCATION',
+        },
+        data: dto
+      });
+
+      const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+      return {
+        pdfBuffer,
+        mgcToken,
+        filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`,
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Education Simulation Error: ${error.message}`, error.stack);
+      throw new InternalServerErrorException('Gagal memproses simulasi pendidikan.');
+    }
+  }
+
+  // ===========================================================================
   // MODULE 13: RISK PROFILE SIMULATION (STATELESS & AGENT MODE)
   // ===========================================================================
 
@@ -913,6 +979,7 @@ export class FinancialService {
       await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
+          clientName: dto.clientName,
           clientAge: clientAge,
           clientCity: dto.clientCity || '-',
           clientJob: dto.clientJob || '-',
@@ -925,6 +992,9 @@ export class FinancialService {
             allocation: analysisResult.allocation
           } as unknown as Prisma.InputJsonValue,
           moduleType: 'RISK_PROFILE',
+          // [FIX] Add Input Payload (Required by Schema)
+          inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue
         },
       });
 
@@ -1037,116 +1107,5 @@ export class FinancialService {
     const diffMs = Date.now() - dob.getTime();
     const ageDt = new Date(diffMs);
     return Math.abs(ageDt.getUTCFullYear() - 1970);
-  }
-
-  // ===========================================================================
-  // MODULE 12: AGENT EDUCATION SIMULATION (STATELESS)
-  // ===========================================================================
-
-  async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
-    try {
-      // 1. ITERATIVE CALCULATION & AGGREGATION
-      const simulationResults: any[] = [];
-
-      let totalMonthlyInvestment = 0;
-      let totalFutureCostAllChildren = 0;
-
-      // Loop setiap anak yang diinputkan agen
-      for (const childPlan of dto.childrenPlans) {
-        // Mapping input DTO ke format yang dibutuhkan math engine
-        // [FIX]: Menghapus properti 'method' karena kalkulasi sudah dikunci ke Flat/Annuity
-        const calculationInput = {
-          ...childPlan,
-          inflationRate: childPlan.inflationRate ?? 10,
-          returnRate: childPlan.returnRate ?? 12,
-        };
-
-        // Panggil Core Math Engine (logic baru tanpa method geometric)
-        const result = calculateEducationPlan(calculationInput as any);
-
-        // Hitung total saving & future cost khusus anak ini
-        const childTotalMonthly = result.stagesBreakdown.reduce((acc, stage) => acc + stage.monthlySaving, 0);
-        const childTotalFuture = result.stagesBreakdown.reduce((acc, stage) => acc + stage.futureCost, 0);
-
-        // Tambahkan ke Total Keluarga
-        totalMonthlyInvestment += childTotalMonthly;
-        totalFutureCostAllChildren += childTotalFuture;
-
-        simulationResults.push({
-          childName: childPlan.childName,
-          childDob: childPlan.childDob,
-          summary: {
-            totalFutureCost: childTotalFuture,
-            totalMonthlySaving: childTotalMonthly
-          },
-          detail: result
-        });
-      }
-
-      // 2. LOGGING TO DB
-      const clientAge = this.calculateAge(dto.clientDob);
-
-      await this.prisma.simulationLog.create({
-        data: {
-          agentId: user.id,
-          clientAge: clientAge,
-          clientCity: dto.clientCity,
-          clientJob: dto.clientJob || '-',
-          totalIncome: totalFutureCostAllChildren, // Menyimpan Total Future Cost sebagai acuan nilai
-          calculatedSurplus: totalMonthlyInvestment, // Menyimpan Angsuran Bulanan sebagai 'surplus' yang dibutuhkan
-          healthScore: 100,
-          status: HealthStatus.SEHAT,
-          moduleType: 'EDUCATION',
-          financialRatios: JSON.parse(JSON.stringify(simulationResults)) as Prisma.InputJsonValue,
-        },
-      });
-
-      // 3. PDF GENERATION
-      // Pastikan service PDF juga sudah disesuaikan agar tidak error membaca field yg hilang
-      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(
-        dto,
-        simulationResults,
-        totalMonthlyInvestment,
-        user,
-      );
-
-      // 4. MGC TOKEN GENERATION
-      const mgcToken = this.generateMgcToken({
-        meta: {
-          version: '1.0',
-          generatedAt: new Date().toISOString(),
-          agentId: user.id,
-          module: 'EDUCATION',
-        },
-        client: {
-          name: dto.clientName,
-          dob: dto.clientDob,
-          city: dto.clientCity,
-          job: dto.clientJob,
-          phone: dto.clientPhone,
-        },
-        financial: {
-          childrenCount: dto.childrenPlans.length,
-          // [FIX]: Set existingSaving ke 0 karena input sudah dihapus dari DTO
-          existingSaving: 0
-        },
-        result: {
-          totalMonthlyInvestment,
-          totalFutureCost: totalFutureCostAllChildren,
-          details: simulationResults
-        },
-      });
-
-      const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
-      return {
-        pdfBuffer,
-        mgcToken,
-        filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`,
-      };
-
-    } catch (error: any) {
-      this.logger.error(`Education Simulation Error: ${error.message}`, error.stack);
-      throw new InternalServerErrorException('Gagal memproses simulasi pendidikan.');
-    }
   }
 }

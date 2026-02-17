@@ -22,7 +22,7 @@ import { PdfGeneratorService } from './services/pdf-generator.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
-// DTOs
+// DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
@@ -42,7 +42,7 @@ import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto'
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
-import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto'; // [ADDED] DTO Baru
+import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto'; // [ADDED]
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -84,7 +84,6 @@ export class FinancialController {
     return this.financialService.getCheckupHistory(userId);
   }
 
-  // [NEW] Endpoint Detail Checkup (Roadmap Part 1)
   @Get('checkup/detail/:id')
   @ApiOperation({ summary: 'Ambil detail checkup spesifik berdasarkan ID' })
   async getCheckupDetail(@GetUser('id') userId: string, @Param('id') id: string) {
@@ -98,15 +97,12 @@ export class FinancialController {
     @GetUser('id') userId: string,
     @Res() res: express.Response
   ) {
-    // 1. Ambil Data (Reuse logic getCheckupDetail)
     const checkupData = await this.financialService.getLatestCheckup(userId);
 
     if (!checkupData) throw new NotFoundException('Data not found');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generateCheckupPdf(checkupData);
 
-    // 3. Stream Response
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Financial-Checkup-${id}.pdf`,
@@ -116,11 +112,9 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [UPDATED] Endpoint Download Budget PDF
   @Get('budget/pdf/:id')
   @ApiOperation({ summary: 'Download Budget PDF Report' })
   async downloadBudgetPdf(@Param('id') id: string, @Res() res: express.Response) {
-    // 1. Ambil Data Budget + User Profile
     const budgetData = await this.prisma.budgetPlan.findUnique({
       where: { id },
       include: {
@@ -130,10 +124,8 @@ export class FinancialController {
 
     if (!budgetData) throw new NotFoundException('Data budget tidak ditemukan');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generateBudgetPdf(budgetData);
 
-    // 3. Return Stream
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Budget-Report-${id}.pdf`,
@@ -142,24 +134,20 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [NEW] Endpoint Download Pension PDF
   @Get('pension/pdf/:id')
   @ApiOperation({ summary: 'Download Pension Plan PDF Report' })
   async downloadPensionPdf(@Param('id') id: string, @Res() res: express.Response) {
-    // 1. Ambil Data Pension berdasarkan ID, include User
     const pensionData = await this.prisma.pensionPlan.findUnique({
       where: { id },
       include: {
-        user: true // Include data user untuk ambil nama
+        user: true
       }
     });
 
     if (!pensionData) throw new NotFoundException('Data rencana pensiun tidak ditemukan');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generatePensionPdf(pensionData);
 
-    // 3. Return Stream
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Pension-Plan-${id}.pdf`,
@@ -168,7 +156,6 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [NEW] Endpoint Download Insurance PDF
   @Get('insurance/pdf/:id')
   @ApiOperation({ summary: 'Download Insurance Plan PDF Report' })
   async downloadInsurancePdf(@Param('id') id: string, @Res() res: express.Response) {
@@ -198,8 +185,6 @@ export class FinancialController {
   @Post('budget')
   @ApiOperation({ summary: 'Simpan rencana anggaran bulanan (Auto-Calculate supported)' })
   async createBudget(@GetUser('id') userId: string, @Body() dto: CreateBudgetDto) {
-    // Controller akan mengembalikan objek { budget, analysis } 
-    // yang sudah berisi angka hasil kalkulasi otomatis dari Service
     return this.financialService.createBudget(userId, dto);
   }
 
@@ -245,11 +230,9 @@ export class FinancialController {
     return this.financialService.calculateAndSaveGoal(userId, dto);
   }
 
-  // [NEW] Endpoint Download Goal PDF
   @Get('goals/pdf/:id')
   @ApiOperation({ summary: 'Download Financial Goal PDF Report' })
   async downloadGoalPdf(@Param('id') id: string, @Res() res: express.Response) {
-    // 1. Ambil Data Goal
     const goalData = await this.prisma.goalPlan.findUnique({
       where: { id },
       include: {
@@ -259,10 +242,8 @@ export class FinancialController {
 
     if (!goalData) throw new NotFoundException('Data tujuan keuangan tidak ditemukan');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generateGoalPdf(goalData);
 
-    // 3. Stream Response
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Goal-Plan-${id}.pdf`,
@@ -278,7 +259,6 @@ export class FinancialController {
   @Post('calculator/education')
   @ApiOperation({ summary: 'Hitung & Simpan Rencana Pendidikan Anak' })
   async calculateEducation(@GetUser('id') userId: string, @Body() dto: CreateEducationPlanDto) {
-    // Method ini mengembalikan { plan, calculation: { total, monthly, stagesBreakdown } }
     return this.financialService.calculateAndSaveEducation(userId, dto);
   }
 
@@ -294,7 +274,6 @@ export class FinancialController {
     return this.financialService.deleteEducationPlan(userId, id);
   }
 
-  // [UPDATED] Endpoint Download Education PDF (Family Report)
   @Get('education/pdf')
   @ApiOperation({ summary: 'Download Education Plan PDF (All Children)' })
   async downloadEducationPdf(@GetUser('id') userId: string, @Res() res: express.Response) {
@@ -312,7 +291,6 @@ export class FinancialController {
       throw new NotFoundException('Belum ada rencana pendidikan yang dibuat.');
     }
 
-    // 2. Transform Data Structure
     const formattedData = educationPlans.map(p => {
       const totalFutureCost = p.stages.reduce((sum, stage) => sum + Number(stage.futureCost), 0);
       const totalMonthlySaving = p.stages.reduce((sum, stage) => sum + Number(stage.monthlySaving), 0);
@@ -327,7 +305,6 @@ export class FinancialController {
       };
     });
 
-    // 3. Generate PDF
     const buffer = await this.pdfGeneratorService.generateEducationPdf(formattedData);
 
     res.set({
@@ -338,19 +315,15 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [NEW] Endpoint Download PDF from History Detail
   @Get('checkup/history/pdf/:id')
   @ApiOperation({ summary: 'Download History PDF Report' })
   async downloadHistoryPdf(@Param('id') id: string, @GetUser('id') userId: string, @Res() res: express.Response) {
-    // 1. Ambil Data Detail (Gabungan Raw + Analisa)
     const checkupDetail = await this.financialService.getCheckupDetail(userId, id);
 
     if (!checkupDetail) throw new NotFoundException('Data riwayat tidak ditemukan');
 
-    // 2. Generate PDF dengan Template History
     const buffer = await this.pdfGeneratorService.generateHistoryCheckupPdf(checkupDetail);
 
-    // 3. Stream Response
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Checkup-Report-${id}.pdf`,
@@ -374,7 +347,6 @@ export class FinancialController {
     return this.financialService.calculateRiskProfile(dto);
   }
 
-  // [NEW] ENDPOINT SIMULASI RISK PROFILE DENGAN PDF STREAM & TOKEN
   @Post('simulation/risk-profile-pdf')
   @ApiOperation({
     summary: 'Simulasi Risk Profile & Download PDF Langsung (Stateless)',
@@ -386,34 +358,26 @@ export class FinancialController {
     @Body() dto: CreateRiskProfileSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentRiskProfile(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_RISK_PROFILE',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated risk profile simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0', // Bisa diganti dengan req.ip jika tersedia
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem',
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -430,10 +394,8 @@ export class FinancialController {
     @Body() data: RiskProfileResponseDto,
     @Res({ passthrough: true }) res: express.Response,
   ): Promise<StreamableFile> {
-    // 1. Generate PDF Buffer
     const pdfBuffer = await this.pdfGeneratorService.generateRiskProfilePdf(data);
 
-    // 2. Setup Filename yang deskriptif
     const cleanName = data.clientName.replace(/[^a-zA-Z0-9]/g, '_');
     const filename = `RiskProfile_${cleanName}_${new Date().getTime()}.pdf`;
 
@@ -443,16 +405,14 @@ export class FinancialController {
       'Content-Length': pdfBuffer.length,
     });
 
-    // 3. Audit Log
     await this.auditService.logActivity({
       userId,
       action: 'EXPORT_PDF',
-      entity: 'RiskProfileSimulation', // Virtual Entity
+      entity: 'RiskProfileSimulation',
       entityId: 'STATELESS',
       details: `Agent generated Risk Profile PDF for client: ${data.clientName} (Profile: ${data.riskProfile})`,
     });
 
-    // 4. Return Stream
     return new StreamableFile(pdfBuffer);
   }
 
@@ -467,42 +427,32 @@ export class FinancialController {
     @Body() dto: CreateBudgetSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentBudget(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_BUDGET',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated stateless simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0', // [FIXED] Changed 'ipAddress' to 'ip'
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
   @Post('simulation/decode')
   @ApiOperation({ summary: 'Decode Token Simulasi (.mgc) untuk Import Data' })
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
-    // Audit Log untuk Import Action
     await this.auditService.logActivity({
       userId,
       action: 'IMPORT_SIMULATION',
@@ -528,35 +478,26 @@ export class FinancialController {
     @Body() dto: CreateInsuranceSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentInsurance(user, dto);
 
-    // 2. Audit Log (Tetap catat aktivitas)
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_INSURANCE',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated insurance simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0', // Atau ambil dari @Req() jika perlu
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -574,10 +515,8 @@ export class FinancialController {
     @Body() dto: CreatePensionSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentPension(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_PENSION',
@@ -588,21 +527,14 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -620,10 +552,8 @@ export class FinancialController {
     @Body() dto: CreateGoalSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentGoal(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_GOAL',
@@ -634,21 +564,14 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -664,12 +587,9 @@ export class FinancialController {
   async createCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
-    // [FIX] Hapus @Res() agar NestJS mengembalikan return value sebagai JSON Body secara otomatis
   ) {
-    // 1. Eksekusi Service -> Dapat Object { pdfBuffer, mgcToken, data: {...} }
     const result = await this.financialService.simulateAgentCheckup(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_CHECKUP',
@@ -680,9 +600,6 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. Return Object JSON (NestJS Auto-Serialize)
-    // Note: Buffer PDF akan diserialisasi menjadi { type: 'Buffer', data: [...] }
-    // Frontend harus mengubahnya kembali menjadi Blob/File.
     return result;
   }
 
@@ -700,10 +617,8 @@ export class FinancialController {
     @Body() dto: CreateEducationSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
@@ -714,20 +629,14 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 }

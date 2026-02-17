@@ -94,18 +94,18 @@ model UnitKerja {
 // =========================================================
 
 model User {
-  id           String @id @default(uuid())
+  id           String  @id @default(uuid())
   unitKerjaId  String? @map("unit_kerja_id")
   nip          String? @unique
-  email        String @unique
-  passwordHash String @map("password_hash")
-  fullName     String @map("full_name")
+  email        String  @unique
+  passwordHash String  @map("password_hash")
+  fullName     String  @map("full_name")
 
   // --- [NEW] FIELD TAMBAHAN PROFIL (Fase 1) ---
-  gender       String?               // "Laki-laki" | "Perempuan"
-  address      String?   @db.Text    // Alamat Domisili (Text agar muat panjang)
-  agencyName   String?   @map("agency_name") // Nama Perusahaan Agen (PT Asuransi X)
-  agentLevel   String?   @map("agent_level") // Jabatan (Agent, Senior Agent, Manager)
+  gender      String? @db.VarChar(50)   // "Laki-laki" | "Perempuan"
+  address     String? @db.Text    // Alamat Domisili (Text agar muat panjang)
+  agencyName  String? @map("agency_name") // Nama Perusahaan Agen (PT Asuransi X)
+  agentLevel  String? @map("agent_level") // Jabatan (Agent, Senior Agent, Manager)
   companyName String? @map("company_name") // Nama Perusahaan (Parent Company)
   goals       String? @db.Text             // Tujuan/Goals (Text Input)
   // ---------------------------------------------
@@ -114,10 +114,10 @@ model User {
   avatar String? @db.Text
 
   dateOfBirth    DateTime? @map("date_of_birth") // Penting untuk pensiun
-  dependentCount Int      @default(0) @map("dependent_count")
-  role           Role     @default(USER)
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  dependentCount Int       @default(0) @map("dependent_count")
+  role           Role      @default(USER)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
 
   // Relasi Master Data
   unitKerja UnitKerja? @relation(fields: [unitKerjaId], references: [id])
@@ -414,13 +414,13 @@ model GoldPriceHistory {
 
 // Update pada model RetentionLog
 model RetentionLog {
-  id           String   @id @default(uuid())
-  executorId   String   @map("executor_id")
-  entityType   String   @map("entity_type")
+  id            String   @id @default(uuid())
+  executorId    String   @map("executor_id")
+  entityType    String   @map("entity_type")
   
   // [NEW] Status Eksekusi untuk Idempotency & Crash Recovery
   // Values: 'STARTED', 'DB_DELETED', 'COMPLETED', 'FAILED'
-  status       String   @default("STARTED") 
+  status        String   @default("STARTED") 
   
   recordsDeleted Int      @default(0) @map("records_deleted")
   cutoffDate     DateTime @map("cutoff_date")
@@ -429,7 +429,7 @@ model RetentionLog {
   completedAt  DateTime? @map("completed_at")
   
   // Metadata menyimpan list file yang "akan" dihapus untuk recovery jika crash
-  metadata     Json?    
+  metadata      Json?     
 
   executor User @relation(fields: [executorId], references: [id])
 
@@ -442,21 +442,21 @@ model RetentionLog {
 // =========================================================
 
 model EducationCategory {
-  id           String   @id @default(uuid())
-  name         String
-  slug         String   @unique
+  id            String   @id @default(uuid())
+  name          String
+  slug          String   @unique
   
   // [NEW] Menambahkan deskripsi agar sesuai dengan DTO & Service
-  description  String?  @db.VarChar(255) 
+  description   String?  @db.VarChar(255) 
   
-  iconUrl      String   @map("icon_url")
-  displayOrder Int      @default(0) @map("display_order")
-  isActive     Boolean  @default(true) @map("is_active")
+  iconUrl       String   @map("icon_url")
+  displayOrder  Int      @default(0) @map("display_order")
+  isActive      Boolean  @default(true) @map("is_active")
 
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
-  modules      EducationModule[]
+  modules       EducationModule[]
 
   @@map("education_categories")
 }
@@ -468,10 +468,10 @@ enum EducationLevel {
 }
 
 model EducationModule {
-  id           String                @id @default(uuid())
-  categoryId   String                @map("category_id")
-  title        String
-  slug         String                @unique
+  id                 String                @id @default(uuid())
+  categoryId         String                @map("category_id")
+  title              String
+  slug               String                @unique
   
   /// [STORAGE STRATEGY] 
   /// Kolom ini menyimpan Relative Path ke Local Storage.
@@ -479,26 +479,26 @@ model EducationModule {
   /// Frontend wajib menambahkan Base URL API sebelum menampilkannya.
   thumbnailUrl String                @map("thumbnail_url")
   
-  excerpt      String                @db.Text
-  readingTime  Int                   @default(5) @map("reading_time")
+  excerpt       String                @db.Text
+  readingTime   Int                   @default(5) @map("reading_time")
 
   // [NEW] Tambahkan dua field ini:
-  level        EducationLevel        @default(BEGINNER)
-  points       Int                   @default(0)
+  level         EducationLevel        @default(BEGINNER)
+  points        Int                   @default(0)
   
-  status       EducationModuleStatus @default(DRAFT)
-  publishedAt  DateTime?             @map("published_at")
+  status        EducationModuleStatus @default(DRAFT)
+  publishedAt   DateTime?             @map("published_at")
 
-  createdAt    DateTime              @default(now()) @map("created_at")
-  updatedAt    DateTime              @updatedAt @map("updated_at")
+  createdAt     DateTime              @default(now()) @map("created_at")
+  updatedAt     DateTime              @updatedAt @map("updated_at")
 
   // Relasi
-  category     EducationCategory     @relation(fields: [categoryId], references: [id])
-  sections     ModuleSection[]
-  userProgress UserEducationProgress[]
+  category      EducationCategory     @relation(fields: [categoryId], references: [id])
+  sections      ModuleSection[]
+  userProgress  UserEducationProgress[]
   
   // [NEW] Relasi ke Quiz (1-to-0..1)
-  quiz         Quiz?
+  quiz          Quiz?
 
   @@index([categoryId])
   @@index([status])
@@ -508,54 +508,54 @@ model EducationModule {
 }
 
 model ModuleSection {
-  id              String   @id @default(uuid())
-  moduleId        String   @map("module_id")
+  id               String   @id @default(uuid())
+  moduleId         String   @map("module_id")
   
-  sectionOrder    Int      @map("section_order")
-  title           String?  
-  contentMarkdown String   @map("content_markdown") @db.Text
+  sectionOrder     Int      @map("section_order")
+  title            String?  
+  contentMarkdown  String   @map("content_markdown") @db.Text
   
   /// [STORAGE STRATEGY]
   /// Kolom ini menyimpan Relative Path (Optional).
   /// Format: "uploads/{uuid}.{ext}" atau null.
-  illustrationUrl String?  @map("illustration_url")
+  illustrationUrl  String?  @map("illustration_url")
 
-  createdAt       DateTime @default(now()) @map("created_at")
-  updatedAt       DateTime @updatedAt @map("updated_at")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
 
-  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  progressLogs    UserEducationProgress[]
+  module           EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progressLogs     UserEducationProgress[]
 
   @@index([moduleId])
   @@map("module_sections")
 }
 
 model UserEducationProgress {
-  userId            String                  @map("user_id")
-  moduleId          String                  @map("module_id")
+  userId             String                  @map("user_id")
+  moduleId           String                  @map("module_id")
   
-  status            EducationProgressStatus @default(STARTED)
-  lastReadSectionId String?                 @map("last_read_section_id")
+  status             EducationProgressStatus @default(STARTED)
+  lastReadSectionId  String?                 @map("last_read_section_id")
   
   // [NEW] Fields untuk Quiz Tracking
-  quizScore         Int?                    @map("quiz_score") // Null jika belum pernah submit
-  quizAttempts      Int                     @default(0) @map("quiz_attempts")
-  isPassed          Boolean                 @default(false) @map("is_passed")
-  lastQuizDate      DateTime?               @map("last_quiz_date")
+  quizScore          Int?                    @map("quiz_score") // Null jika belum pernah submit
+  quizAttempts       Int                     @default(0) @map("quiz_attempts")
+  isPassed           Boolean                 @default(false) @map("is_passed")
+  lastQuizDate       DateTime?               @map("last_quiz_date")
   
-  completedAt       DateTime?               @map("completed_at")
-  updatedAt         DateTime                @updatedAt @map("updated_at")
-  startedAt         DateTime?               @map("started_at")
+  completedAt        DateTime?               @map("completed_at")
+  updatedAt          DateTime                @updatedAt @map("updated_at")
+  startedAt          DateTime?               @map("started_at")
 
   // Relasi
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   
   // [CRITICAL UPDATE] Mengubah onDelete menjadi Restrict.
   // Ini mencegah penghapusan Modul jika masih ada user yang memiliki progress/history belajar.
   // Strategi Retention harus menangani ini secara eksplisit (seperti yang sudah kita refactor).
-  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  module           EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
   
-  lastReadSection ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
+  lastReadSection  ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
 
   @@id([userId, moduleId])
   @@map("user_education_progress")
@@ -566,59 +566,59 @@ model UserEducationProgress {
 // =========================================================
 
 model Quiz {
-  id           String   @id @default(uuid())
-  moduleId     String   @unique @map("module_id") // Strict 1-to-1: Satu modul hanya boleh punya satu quiz aktif
+  id            String   @id @default(uuid())
+  moduleId      String   @unique @map("module_id") // Strict 1-to-1: Satu modul hanya boleh punya satu quiz aktif
   
-  passingScore Int      @default(70) @map("passing_score") // Persentase kelulusan (0-100)
-  timeLimit    Int      @default(0) @map("time_limit") // Dalam menit. 0 = Tidak ada batas waktu
-  maxAttempts  Int      @default(3) @map("max_attempts") // Kesempatan mengulang
-  description  String?  @db.Text // Instruksi sebelum mulai quiz
+  passingScore  Int      @default(70) @map("passing_score") // Persentase kelulusan (0-100)
+  timeLimit     Int      @default(0) @map("time_limit") // Dalam menit. 0 = Tidak ada batas waktu
+  maxAttempts   Int      @default(3) @map("max_attempts") // Kesempatan mengulang
+  description   String?  @db.Text // Instruksi sebelum mulai quiz
 
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
 
   // Relasi
-  module       EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  questions    QuizQuestion[]
+  module        EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  questions     QuizQuestion[]
 
   @@map("quizzes")
 }
 
 model QuizQuestion {
-  id           String           @id @default(uuid())
-  quizId       String           @map("quiz_id")
+  id             String           @id @default(uuid())
+  quizId         String           @map("quiz_id")
   
-  questionText String           @map("question_text") @db.Text
-  type         QuizQuestionType @default(SINGLE_CHOICE)
+  questionText   String           @map("question_text") @db.Text
+  type           QuizQuestionType @default(SINGLE_CHOICE)
   
   // [NEW] Kolom Media & Poin
-  imageUrl     String?          @map("image_url") // Menyimpan path gambar soal
-  points       Int              @default(10)      // Bobot nilai per soal
+  imageUrl       String?          @map("image_url") // Menyimpan path gambar soal
+  points         Int              @default(10)      // Bobot nilai per soal
   
-  orderIndex   Int              @map("order_index") 
-  explanation  String?          @db.Text 
+  orderIndex     Int              @map("order_index") 
+  explanation    String?          @db.Text 
 
   // Relasi
-  quiz         Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  options      QuizOption[]
+  quiz           Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  options        QuizOption[]
 
   @@index([quizId])
   @@map("quiz_questions")
 }
 
 model QuizOption {
-  id          String       @id @default(uuid())
-  questionId  String       @map("question_id")
+  id            String       @id @default(uuid())
+  questionId    String       @map("question_id")
   
-  optionText  String       @map("option_text") @db.Text
-  isCorrect   Boolean      @default(false) @map("is_correct")
+  optionText    String       @map("option_text") @db.Text
+  isCorrect     Boolean      @default(false) @map("is_correct")
   
   // [NEW] Kolom Media & Urutan Opsi
-  imageUrl    String?      @map("image_url")   // Menyimpan path gambar pada pilihan jawaban
-  orderIndex  Int          @default(0) @map("order_index")
+  imageUrl      String?      @map("image_url")    // Menyimpan path gambar pada pilihan jawaban
+  orderIndex    Int          @default(0) @map("order_index")
 
   // Relasi
-  question    QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  question      QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@index([questionId])
   @@map("quiz_options")
@@ -629,50 +629,44 @@ model QuizOption {
 // =========================================================
 
 model SimulationLog {
-  id        String   @id @default(uuid())
-  agentId   String   @map("agent_id")
+  id          String   @id @default(uuid())
+  agentId     String   @map("agent_id")
 
-  // --- DEMOGRAFI KLIEN (ANONIM) ---
-  // Digunakan untuk filter statistik (e.g., "Rata-rata pengeluaran umur 30 di Jakarta")
-  clientAge     Int      @map("client_age")
-  clientCity    String   @map("client_city") // e.g., "Jakarta Selatan"
-  clientJob     String   @map("client_job")  // e.g., "PNS", "Wiraswasta"
-
-  // --- SNAPSHOT FINANSIAL ---
-  // Menggunakan Decimal(15,2) untuk akurasi mata uang.
-  // totalIncome = Fixed Income + Variable Income
-  totalIncome   Decimal  @map("total_income") @db.Decimal(15, 2)
+  // --- [NEW] IDENTITAS KLIEN (Stateless/Non-Persisten) ---
+  clientName  String   @map("client_name")
   
-  // Surplus ideal yang dihitung sistem (bukan input user)
-  // Berguna untuk melihat potensi tabungan rata-rata klien
-  calculatedSurplus Decimal @map("calculated_surplus") @db.Decimal(15, 2)
+  // Field Demografi dibuat OPTIONAL agar fleksibel untuk semua jenis modul simulasi
+  clientAge   Int?     @map("client_age")
+  clientCity  String?  @map("client_city") 
+  clientJob   String?  @map("client_job")  
 
-  // --- HASIL DIAGNOSA ---
-  healthScore   Int          @map("health_score")
-  // Menggunakan Enum HealthStatus agar konsisten dengan modul FinancialCheckup
-  status        HealthStatus @default(BAHAYA) 
+  // --- [NEW] INTI STATELESS ARCHITECTURE ---
+  // inputPayload: Menyimpan seluruh data mentah simulasi (misal: list anak, jenjang, biaya) dalam JSON.
+  // Ini memungkinkan "Replay" atau audit detail tanpa perlu struktur tabel relasional yang kaku.
+  inputPayload  Json   @map("input_payload") 
+  
+  // outputResult: Menyimpan hasil kalkulasi final (misal: Total Future Value, Monthly Investment)
+  outputResult  Json?  @map("output_result") 
 
-  // --- DETAIL RASIO (JSON) ---
-  // Menyimpan breakdown detail seperti:
-  // {
-  //   "savingsRatio": 10.5,
-  //   "debtRatio": 35.0,
-  //   "variableIncome": 5000000,
-  //   "fixedIncome": 10000000
-  // }
-  financialRatios Json @map("financial_ratios")
+  // --- FIELD STATISTIK (OPTIONAL) ---
+  // Dibiarkan ada untuk backward compatibility modul Budgeting, 
+  // tapi dibuat optional agar modul Education tidak error saat insert.
+  totalIncome       Decimal?      @map("total_income") @db.Decimal(15, 2)
+  calculatedSurplus Decimal?      @map("calculated_surplus") @db.Decimal(15, 2)
+  healthScore       Int?          @map("health_score")
+  status            HealthStatus? @default(BAHAYA)
+  financialRatios   Json?         @map("financial_ratios")
 
   // Metadata System
-  moduleType    String   @default("BUDGETING") @map("module_type")
-  createdAt     DateTime @default(now()) @map("created_at")
+  moduleType     String   @default("BUDGETING") @map("module_type") // Values: "BUDGETING", "EDUCATION", "PENSION"
+  simulationDate DateTime @default(now()) @map("simulation_date")
+  createdAt      DateTime @default(now()) @map("created_at")
 
   // Relasi ke Agen (User)
-  agent         User     @relation(fields: [agentId], references: [id])
+  agent          User     @relation(fields: [agentId], references: [id])
 
-  // --- INDEXING STRATEGY ---
-  // 1. [clientCity, clientJob]: Query statistik demografi paling umum.
-  // 2. [agentId]: Tracking performa agen (berapa simulasi yang dibuat).
-  // 3. [createdAt]: Query trend waktu (bulan ke bulan).
+  // --- INDEXING ---
+  // Index untuk performa query reporting/dashboard direksi
   @@index([clientCity, clientJob])
   @@index([agentId])
   @@index([createdAt])
