@@ -43,7 +43,7 @@ import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
 import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto';
-import { EducationSimulationResponseDto } from './dto/education-simulation-response.dto'; // [IMPORTANT] DTO Response
+// Note: EducationSimulationResponseDto tidak lagi wajib dipakai di return type controller karena struktur dynamic
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -254,7 +254,7 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 6: CALCULATOR - EDUCATION PLAN
+  // MODULE 6: CALCULATOR - EDUCATION PLAN (EXISTING)
   // ===========================================================================
 
   @Post('calculator/education')
@@ -605,20 +605,19 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (STATELESS HYBRID)
+  // MODULE 13: AGENT EDUCATION SIMULATION (SCENARIO B: SPLIT ENDPOINTS)
   // ===========================================================================
 
-  @Post('simulation/education')
+  @Post('simulation/education/calculate')
   @ApiOperation({
-    summary: 'Simulasi Pendidikan (Hybrid: Data + PDF)',
-    description: 'Menghitung rencana pendidikan, mengembalikan Data JSON untuk UI dan PDF Buffer untuk Download.',
+    summary: 'Simulasi Pendidikan - Hitung (JSON Only)',
+    description: 'Menghitung rencana pendidikan, menyimpan log, dan mengembalikan hasil angka + simulationId untuk UI.',
   })
-  @ApiResponse({ status: 201, type: EducationSimulationResponseDto })
-  async createEducationSimulation(
+  async calculateEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
-  ): Promise<EducationSimulationResponseDto> {
-    // 1. Service Call
+  ) {
+    // 1. Service Call (Hitung & Simpan)
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
     // 2. Audit Log
@@ -626,19 +625,44 @@ export class FinancialController {
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
-      entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated education simulation for client ${dto.clientName}`,
+      entityId: result.simulationId, // Log ID simulasi yang baru dibuat
+      details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    // 3. Return JSON Object
-    return {
-      status: 'success',
-      data: result.outputResult, // Data visualisasi UI
-      pdfBuffer: result.pdfBuffer as any, // File PDF (Nest will serialize Buffer to JSON {type, data})
-      mgcToken: result.mgcToken, // Token Resume
-      filename: result.filename
-    };
+    return result;
+  }
+
+  @Get('simulation/education/:id/pdf')
+  @ApiOperation({
+    summary: 'Simulasi Pendidikan - Download PDF (Stream)',
+    description: 'Mengunduh file PDF berdasarkan ID simulasi yang didapat dari tahap kalkulasi.',
+  })
+  async downloadEducationPdfById(
+    @Param('id') id: string,
+    @GetUser() user: client.User,
+    @Res() res: express.Response,
+  ) {
+    // 1. Service Call (Generate PDF on-demand)
+    const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
+
+    // 2. Audit Log (Download Event)
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'DOWNLOAD_SIMULATION_PDF',
+      entity: 'SimulationLog',
+      entityId: id,
+      details: `Agent ${user.fullName} downloaded education PDF ${id}`,
+    });
+
+    // 3. Return Stream
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Education_Plan_${id}.pdf"`,
+      'Content-Length': pdfBuffer.length,
+    });
+
+    res.end(pdfBuffer);
   }
 }

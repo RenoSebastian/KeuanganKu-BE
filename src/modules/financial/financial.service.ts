@@ -898,14 +898,12 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT EDUCATION SIMULATION (STATELESS - NEW LOGIC)
+  // MODULE 12: AGENT EDUCATION SIMULATION (SCENARIO B: CALCULATE & SAVE)
   // ===========================================================================
 
   async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
     try {
-      // 1. Calculate Aggregated Summaries for Database Log
-      // Kita hitung total biaya masa depan dan total tabungan bulanan dari semua anak
-      // Data ini didapat dari hasil kalkulasi Frontend yang dikirim via DTO
+      // 1. Calculate Aggregated Summaries (Logic Hitungan)
       let grandTotalFutureCost = 0;
       let grandTotalMonthlySaving = 0;
 
@@ -918,72 +916,104 @@ export class FinancialService {
         });
       }
 
-      // [UPDATE PHASE 2] Create Output Result Object (Data Kalkulasi Mentah)
-      // Object ini SANGAT PENTING karena akan dikirim ke Frontend untuk menampilkan
-      // angka di Grafik/Ringkasan tanpa perlu download PDF dulu.
+      // Prepare Output Result untuk UI
       const outputResult = {
         totalFutureCost: grandTotalFutureCost,
         totalMonthlySaving: grandTotalMonthlySaving,
-        childrenPlans: dto.childrenPlans // Sertakan detail plan agar FE bisa render ulang jika perlu
+        childrenPlans: dto.childrenPlans
       };
 
-      // 2. Logging to DB (Stateless Architecture)
-      // Simpan log aktivitas ke database untuk keperluan audit/monitoring agent
+      // 2. Logging to DB (Stateful Architecture)
+      // Kita menyimpan snapshot lengkap input user ke kolom 'inputPayload'
+      // Ini akan digunakan nanti untuk generate PDF saat tombol download diklik
       const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
 
-      await this.prisma.simulationLog.create({
+      const log = await this.prisma.simulationLog.create({
         data: {
           agentId: user.id,
           clientName: dto.clientName,
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob || '-',
-          // Mapping total biaya pendidikan ke kolom totalIncome di log
           totalIncome: grandTotalFutureCost,
-          // Mapping saving bulanan ke kolom calculatedSurplus di log
           calculatedSurplus: grandTotalMonthlySaving,
-          healthScore: 100, // Default score untuk simulasi pendidikan
-          status: HealthStatus.SEHAT, // Default status
+          healthScore: 100,
+          status: HealthStatus.SEHAT,
           moduleType: 'EDUCATION',
-          // [FIX] Add Input Payload (Required by Schema) - Simpan apa yang diinput user
+          // [CRITICAL] Simpan input payload agar bisa di-retrieve untuk generate PDF nanti
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          // [FIX] Add Output Result - Simpan hasil hitungan
           outputResult: JSON.parse(JSON.stringify(outputResult)) as Prisma.InputJsonValue
         },
       });
 
-      // 3. PDF Generation
-      // Generate file PDF menggunakan service PDF Generator
-      // Pastikan method ini mengembalikan Buffer, bukan Stream
-      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(dto, user);
-
-      // 4. MGC Token Generation
-      // Buat token terenkripsi agar file bisa di-load ulang (State Recovery) di masa depan
+      // 3. MGC Token Generation (Optional - untuk fitur Load File nanti)
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
           generatedAt: new Date().toISOString(),
           agentId: user.id,
           module: 'EDUCATION',
+          simulationId: log.id
         },
-        data: dto // Payload input user disimpan utuh dalam token
+        data: dto
       });
 
       const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
 
-      // [UPDATE PHASE 2] Return COMPLETE Object (Data + PDF + Token)
-      // Controller akan memetakan ini menjadi response JSON standard.
-      // outputResult ini yang akan masuk ke properti 'data' di JSON response.
+      // 4. Return JSON Only (Sangat Cepat, Tanpa Buffer PDF)
+      // Frontend akan menerima ID ini dan menggunakannya untuk tombol download
       return {
-        pdfBuffer,
-        mgcToken,
-        filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`,
-        outputResult: outputResult // <--- DATA KALKULASI PENTING UNTUK UI
+        status: 'success',
+        data: outputResult,
+        simulationId: log.id, // Tiket untuk download
+        mgcToken: mgcToken,
+        filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`
       };
 
     } catch (error: any) {
       this.logger.error(`Education Simulation Error: ${error.message}`, error.stack);
       throw new InternalServerErrorException('Gagal memproses simulasi pendidikan.');
+    }
+  }
+
+  // ===========================================================================
+  // NEW METHOD: DOWNLOAD PDF BY ID (ON-DEMAND)
+  // ===========================================================================
+
+  async downloadEducationPdfById(simulationId: string, user: User) {
+    try {
+      // 1. Cari data simulasi di DB
+      // Pastikan agentId cocok agar user tidak bisa download data milik agent lain
+      const log = await this.prisma.simulationLog.findFirst({
+        where: {
+          id: simulationId,
+          agentId: user.id
+        }
+      });
+
+      if (!log) {
+        throw new NotFoundException('Data simulasi tidak ditemukan atau Anda tidak memiliki akses.');
+      }
+
+      // 2. Ambil (Rehydrate) Input Payload dari JSON DB
+      const originalInput = log.inputPayload as unknown as CreateEducationSimulationDto;
+
+      if (!originalInput) {
+        throw new BadRequestException('Data input simulasi rusak/hilang.');
+      }
+
+      // 3. Generate PDF menggunakan data yang diambil dari DB
+      // Proses berat ini hanya terjadi saat user benar-benar klik download
+      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(originalInput, user);
+
+      return pdfBuffer;
+
+    } catch (error: any) {
+      this.logger.error(`PDF Generation Error for ID ${simulationId}: ${error.message}`);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Gagal men-generate file PDF.');
     }
   }
 
