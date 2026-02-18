@@ -244,7 +244,7 @@ export const goalReportTemplate = `
     
     <div class="header-grid">
       <div class="h-title-box">
-        <div class="sub-heading">MAXIPRO FINANCIAL</div>
+        <div class="sub-heading">Keuanganku Financial Conversation Tools</div>
         <h1 class="main-heading">Perencanaan<br>Tujuan Keuangan</h1>
       </div>
       <div class="h-image-top"></div>

@@ -248,7 +248,7 @@ export const historyCheckupReportTemplate = `
   <div class="page">
     <div class="header-grid">
       <div class="h-title-box">
-        <div class="sub-heading">MAXIPRO Financial</div>
+        <div class="sub-heading">Keuanganku Financial Conversation Tools</div>
         <h1 class="main-heading">Checkup History</h1>
       </div>
       <div class="h-image-right-top"></div>
