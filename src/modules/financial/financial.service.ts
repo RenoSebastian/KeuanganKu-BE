@@ -904,6 +904,8 @@ export class FinancialService {
   async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
     try {
       // 1. Calculate Aggregated Summaries for Database Log
+      // Kita hitung total biaya masa depan dan total tabungan bulanan dari semua anak
+      // Data ini didapat dari hasil kalkulasi Frontend yang dikirim via DTO
       let grandTotalFutureCost = 0;
       let grandTotalMonthlySaving = 0;
 
@@ -917,13 +919,16 @@ export class FinancialService {
       }
 
       // [UPDATE PHASE 2] Create Output Result Object (Data Kalkulasi Mentah)
+      // Object ini SANGAT PENTING karena akan dikirim ke Frontend untuk menampilkan
+      // angka di Grafik/Ringkasan tanpa perlu download PDF dulu.
       const outputResult = {
         totalFutureCost: grandTotalFutureCost,
         totalMonthlySaving: grandTotalMonthlySaving,
-        childrenPlans: dto.childrenPlans // Sertakan detail plan agar FE bisa render ulang
+        childrenPlans: dto.childrenPlans // Sertakan detail plan agar FE bisa render ulang jika perlu
       };
 
       // 2. Logging to DB (Stateless Architecture)
+      // Simpan log aktivitas ke database untuk keperluan audit/monitoring agent
       const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
 
       await this.prisma.simulationLog.create({
@@ -933,21 +938,27 @@ export class FinancialService {
           clientAge: clientAge,
           clientCity: dto.clientCity,
           clientJob: dto.clientJob || '-',
+          // Mapping total biaya pendidikan ke kolom totalIncome di log
           totalIncome: grandTotalFutureCost,
+          // Mapping saving bulanan ke kolom calculatedSurplus di log
           calculatedSurplus: grandTotalMonthlySaving,
-          healthScore: 100,
-          status: HealthStatus.SEHAT,
+          healthScore: 100, // Default score untuk simulasi pendidikan
+          status: HealthStatus.SEHAT, // Default status
           moduleType: 'EDUCATION',
-          // [FIX] Add Input Payload (Required by Schema)
+          // [FIX] Add Input Payload (Required by Schema) - Simpan apa yang diinput user
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+          // [FIX] Add Output Result - Simpan hasil hitungan
           outputResult: JSON.parse(JSON.stringify(outputResult)) as Prisma.InputJsonValue
         },
       });
 
       // 3. PDF Generation
+      // Generate file PDF menggunakan service PDF Generator
+      // Pastikan method ini mengembalikan Buffer, bukan Stream
       const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(dto, user);
 
       // 4. MGC Token Generation
+      // Buat token terenkripsi agar file bisa di-load ulang (State Recovery) di masa depan
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
@@ -955,12 +966,14 @@ export class FinancialService {
           agentId: user.id,
           module: 'EDUCATION',
         },
-        data: dto
+        data: dto // Payload input user disimpan utuh dalam token
       });
 
       const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
 
       // [UPDATE PHASE 2] Return COMPLETE Object (Data + PDF + Token)
+      // Controller akan memetakan ini menjadi response JSON standard.
+      // outputResult ini yang akan masuk ke properti 'data' di JSON response.
       return {
         pdfBuffer,
         mgcToken,

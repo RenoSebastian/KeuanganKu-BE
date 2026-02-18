@@ -34,7 +34,7 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { CalculateRiskProfileDto } from './dto/calculate-risk-profile.dto';
 import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 
-// [NEW] DTOs - Agent Simulation (Phase 2 & 5)
+// DTOs - Agent Simulation (Phase 2 & 5)
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
@@ -43,7 +43,7 @@ import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
 import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto';
-import { EducationSimulationResponseDto } from './dto/education-simulation-response.dto'; // [ADDED] DTO Response
+import { EducationSimulationResponseDto } from './dto/education-simulation-response.dto'; // [IMPORTANT] DTO Response
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -617,7 +617,7 @@ export class FinancialController {
   async createEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
-  ) {
+  ): Promise<EducationSimulationResponseDto> {
     // 1. Service Call
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
@@ -636,7 +636,7 @@ export class FinancialController {
     return {
       status: 'success',
       data: result.outputResult, // Data visualisasi UI
-      pdfBuffer: result.pdfBuffer, // File PDF
+      pdfBuffer: result.pdfBuffer as any, // File PDF (Nest will serialize Buffer to JSON {type, data})
       mgcToken: result.mgcToken, // Token Resume
       filename: result.filename
     };
