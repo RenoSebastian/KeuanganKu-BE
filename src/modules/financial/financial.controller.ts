@@ -43,7 +43,6 @@ import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
 import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto';
-// Note: EducationSimulationResponseDto tidak lagi wajib dipakai di return type controller karena struktur dynamic
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -451,17 +450,22 @@ export class FinancialController {
     res.end(result.pdfBuffer);
   }
 
+  // [UPDATED] Decoding Endpoint - now supports Smart Resolver for Education
   @Post('simulation/decode')
-  @ApiOperation({ summary: 'Decode Token Simulasi (.mgc) untuk Import Data' })
+  @ApiOperation({
+    summary: 'Decode Token Simulasi (.mgc) untuk Import Data',
+    description: 'Mendukung format token baru (Education dengan auto-mapping) dan format lama.'
+  })
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
     await this.auditService.logActivity({
       userId,
       action: 'IMPORT_SIMULATION',
       entity: 'SimulationToken',
       entityId: 'STATELESS',
-      details: 'Agent successfully imported a .mgc simulation file'
+      details: 'Agent imported a .mgc simulation file'
     });
 
+    // Panggil Service yang sudah di-update dengan Logic Smart Resolver
     return this.financialService.verifyAndDecodeSimulationToken(dto);
   }
 
@@ -611,13 +615,14 @@ export class FinancialController {
   @Post('simulation/education/calculate')
   @ApiOperation({
     summary: 'Simulasi Pendidikan - Hitung (JSON Only)',
-    description: 'Menghitung rencana pendidikan, menyimpan log, dan mengembalikan hasil angka + simulationId untuk UI.',
+    description: 'Menghitung rencana pendidikan, menyimpan log, dan mengembalikan hasil angka + mgcToken + simulationId.',
   })
   async calculateEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
   ) {
     // 1. Service Call (Hitung & Simpan)
+    // Return: { status, data, simulationId, mgcToken, filename }
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
     // 2. Audit Log

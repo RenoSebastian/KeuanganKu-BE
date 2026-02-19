@@ -600,8 +600,7 @@ export class FinancialService {
     }
   }
 
-
-  // [TAHAP 2.3] Revised verifyAndDecodeSimulationToken
+  // [TAHAP 2.3] Revised verifyAndDecodeSimulationToken - Clean Code Version
   async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
     const { simulationToken } = dto;
 
@@ -618,7 +617,6 @@ export class FinancialService {
     }
 
     const expectedSignature = this.createHmacSignature(payloadBase64);
-
     const signatureBuffer = Buffer.from(providedSignature);
     const expectedBuffer = Buffer.from(expectedSignature);
 
@@ -635,18 +633,26 @@ export class FinancialService {
 
     try {
       const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
-      const data = JSON.parse(payloadJson);
+      const decoded = JSON.parse(payloadJson);
 
+      // [NEW LOGIC] Deteksi Tipe Modul & Delegasi ke Helper
+      if (decoded.meta?.module === 'EDUCATION') {
+        return this.mapEducationPayloadToResponse(decoded);
+      }
+
+      // CASE B: Default Modules (Checkup, Budget, Insurance, Pension, Goal)
       return {
         message: 'File simulasi berhasil di-import.',
         data: {
-          client: data.client,
-          spouse: data.spouse,
-          financial: data.financial,
-          last_simulation_date: data.meta?.generatedAt || new Date(),
-          result: data.result || data.financialRatios,
+          client: decoded.client,
+          spouse: decoded.spouse,
+          financial: decoded.financial,
+          last_simulation_date: decoded.meta?.generatedAt || new Date(),
+          result: decoded.result || decoded.financialRatios,
+          meta: decoded.meta,
         },
       };
+
     } catch (error: any) {
       this.logger.error(`Import Failed: JSON Parse Error. ${error.message}`);
       throw new BadRequestException('Gagal membaca data: Isi file (Payload) rusak/corrupt.');
@@ -1157,5 +1163,31 @@ export class FinancialService {
     const diffMs = Date.now() - dob.getTime();
     const ageDt = new Date(diffMs);
     return Math.abs(ageDt.getUTCFullYear() - 1970);
+  }
+
+  // [FIX] UPDATE METHOD INI (Biasanya ada di paling bawah file)
+  private mapEducationPayloadToResponse(decoded: any) {
+    // Mengambil object DTO mentah dari key 'data'
+    // Struktur rawData ini sudah: { clientName: "...", childrenPlans: [...], inflationRate: 10 }
+    const rawData = decoded.data;
+
+    return {
+      message: 'File simulasi Pendidikan berhasil di-import.',
+      data: {
+        // -------------------------------------------------------------------
+        // [FIX - CRITICAL CHANGE]
+        // Kembalikan struktur FLAT (Sejajar) agar sesuai dengan Form Schema Frontend.
+        // Jangan dibungkus ke dalam 'client' atau 'financial'.
+        // -------------------------------------------------------------------
+
+        // 1. Spread semua data mentah (clientName, childrenPlans, dll) ke root object
+        ...rawData,
+
+        // 2. Tambahan Metadata untuk Frontend
+        result: null, // Diset null agar Frontend mentrigger kalkulasi ulang (Auto-Calc)
+        last_simulation_date: decoded.meta?.generatedAt || new Date(),
+        meta: decoded.meta,
+      },
+    };
   }
 }

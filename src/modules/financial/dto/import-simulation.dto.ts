@@ -1,4 +1,5 @@
 import { IsNotEmpty, IsString } from 'class-validator';
+import { ApiProperty } from '@nestjs/swagger';
 
 /**
  * ImportSimulationDto
@@ -13,6 +14,11 @@ export class ImportSimulationDto {
      * Token / Content File .mgc
      * Format: "Base64Payload.HMACSignature"
      */
+    @ApiProperty({
+        description: 'String Token penuh dari dalam file .mgc (Format: PayloadBase64.Signature)',
+        example: 'eyJtZXRhIjp7InZlcnNpb24iOiIxLjAifX0=.a1b2c3d4e5f6...',
+        required: true,
+    })
     @IsNotEmpty({ message: 'Konten file simulasi (.mgc) tidak boleh kosong.' })
     @IsString({ message: 'Format token tidak valid.' })
     simulationToken: string;
