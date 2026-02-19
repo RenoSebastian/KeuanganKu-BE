@@ -1165,33 +1165,26 @@ export class FinancialService {
     return Math.abs(ageDt.getUTCFullYear() - 1970);
   }
 
+  // [FIX] UPDATE METHOD INI (Biasanya ada di paling bawah file)
   private mapEducationPayloadToResponse(decoded: any) {
-    // Mengambil object DTO mentah dari key 'data' (sesuai struktur saat generate)
+    // Mengambil object DTO mentah dari key 'data'
+    // Struktur rawData ini sudah: { clientName: "...", childrenPlans: [...], inflationRate: 10 }
     const rawData = decoded.data;
 
     return {
       message: 'File simulasi Pendidikan berhasil di-import.',
       data: {
-        // 1. Mapping Client Info (Flat -> Structured)
-        client: {
-          name: rawData.clientName,
-          dob: rawData.clientDob,
-          city: rawData.clientCity,
-          job: rawData.clientJob,
-          phone: rawData.clientPhone,
-        },
+        // -------------------------------------------------------------------
+        // [FIX - CRITICAL CHANGE]
+        // Kembalikan struktur FLAT (Sejajar) agar sesuai dengan Form Schema Frontend.
+        // Jangan dibungkus ke dalam 'client' atau 'financial'.
+        // -------------------------------------------------------------------
 
-        // 2. Mapping Financial Data (Specific to Education)
-        financial: {
-          childrenPlans: rawData.childrenPlans,
-          inflationRate: rawData.inflationRate,
-          returnRate: rawData.returnRate,
-        },
+        // 1. Spread semua data mentah (clientName, childrenPlans, dll) ke root object
+        ...rawData,
 
-        // 3. Result & Meta
-        // Result diset null agar Frontend ter-trigger untuk melakukan kalkulasi ulang (Re-Calc)
-        // berdasarkan data input yang baru saja di-load.
-        result: null,
+        // 2. Tambahan Metadata untuk Frontend
+        result: null, // Diset null agar Frontend mentrigger kalkulasi ulang (Auto-Calc)
         last_simulation_date: decoded.meta?.generatedAt || new Date(),
         meta: decoded.meta,
       },
