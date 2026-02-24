@@ -30,6 +30,12 @@ export class AuthService {
           fullName: dto.fullName,
           passwordHash: hash,
           role: 'USER', // Tetap set default role USER
+          usage: {
+            create: {
+              clientLimit: 5, // Jatah bawaan saat daftar
+              clientCount: 0,
+            },
+          },
         },
       });
 

@@ -140,6 +140,7 @@ model User {
   // --- RELASI BARU UNTUK SUBSCRIPTION ---
   subscription          UserSubscription?       // Relasi One-to-One (Active Sub)
   subscriptionOrders    SubscriptionOrder[]     // Relasi One-to-Many (History)
+  usage     UserUsage?
 
   // [OPTIMIZATION] Index FK untuk mempercepat JOIN Unit Kerja
   @@index([unitKerjaId])
@@ -759,4 +760,22 @@ model UserSubscription {
   @@index([userId])
   @@index([status])
   @@index([endDate]) 
+}
+
+// Tambahkan model baru UserUsage
+model UserUsage {
+  id              String   @id @default(uuid())
+  userId          String   @unique @map("user_id")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Kolom kuota (Bisa ditambah sesuai kebutuhan fitur lain)
+  clientCount     Int      @default(0) @map("client_count")
+  clientLimit     Int      @default(5) @map("client_limit") // Jatah bawaan FREE
+  
+  simulationCount Int      @default(0) @map("simulation_count")
+
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("user_usages")
 }

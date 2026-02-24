@@ -32,9 +32,9 @@ export class AdminSubscriptionService {
     }
 
     /**
-     * Core Logic: Admin Validator
-     * Jika VALID -> Biarkan.
-     * Jika INVALID -> Revoke akses user (Matikan Subscription).
+     * Core Logic: Admin Validator dengan Sinkronisasi Kuota
+     * Jika VALID -> Tetapkan limit PRO (9999).
+     * Jika INVALID -> Revoke akses & kembalikan limit ke FREE (5).
      */
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
         // 1. Ambil Order Target
@@ -51,45 +51,60 @@ export class AdminSubscriptionService {
             throw new BadRequestException('Order ini sudah diproses sebelumnya');
         }
 
-        // 2. Update Status Order
-        const updatedOrder = await this.prisma.subscriptionOrder.update({
-            where: { id: dto.orderId },
-            data: {
-                verificationStatus: dto.status,
-                adminNotes: dto.adminNotes,
-                updatedAt: new Date(),
-                // Idealnya kita simpan adminId siapa yang memvalidasi di field auditorId (jika ada)
-            },
-        });
-
-        // 3. Logic Branching: Revocation
-        if (dto.status === VerificationStatus.INVALID) {
-            // Cari Subscription Aktif User Ini
-            const currentSub = await this.prisma.userSubscription.findUnique({
-                where: { userId: order.userId },
+        return this.prisma.$transaction(async (tx) => {
+            // 2. Update Status Order
+            const updatedOrder = await tx.subscriptionOrder.update({
+                where: { id: dto.orderId },
+                data: {
+                    verificationStatus: dto.status,
+                    adminNotes: dto.adminNotes,
+                    updatedAt: new Date(),
+                },
             });
 
-            // SAFETY CHECK:
-            // Kita hanya membatalkan subscription jika 'lastOrderId'-nya adalah order yang sedang kita tolak ini.
-            // Jika user sudah melakukan order BARU lagi setelah order ini, jangan batalkan yang baru.
-            if (currentSub && currentSub.lastOrderId === order.id) {
-                await this.prisma.userSubscription.update({
+            // 3. Logic Branching berdasarkan keputusan Admin
+            if (dto.status === VerificationStatus.INVALID) {
+                const currentSub = await tx.userSubscription.findUnique({
                     where: { userId: order.userId },
-                    data: {
-                        status: SubscriptionStatus.REVOKED,
-                        // Opsional: Set endDate ke waktu lampau agar pasti expired
-                        endDate: new Date(),
+                });
+
+                // Revoke akses jika order terakhir adalah yang sedang ditolak
+                if (currentSub && currentSub.lastOrderId === order.id) {
+                    await tx.userSubscription.update({
+                        where: { userId: order.userId },
+                        data: {
+                            status: SubscriptionStatus.REVOKED,
+                            endDate: new Date(), // Langsung kedaluwarsa
+                        },
+                    });
+
+                    // Kembalikan jatah limit ke standar FREE
+                    await tx.userUsage.update({
+                        where: { userId: order.userId },
+                        data: { clientLimit: 5 },
+                    });
+                }
+            } else if (dto.status === VerificationStatus.VALID) {
+                // Jika VALID, pastikan jatah limit sudah diset ke PRO (unlimited/9999)
+                // Hal ini memperkuat 'Optimistic Activation' yang dilakukan di SubscriptionService
+                await tx.userUsage.upsert({
+                    where: { userId: order.userId },
+                    update: { clientLimit: 9999 },
+                    create: {
+                        userId: order.userId,
+                        clientLimit: 9999,
+                        clientCount: 0,
                     },
                 });
             }
-        }
 
-        return updatedOrder;
+            return updatedOrder;
+        });
     }
 
     /**
      * Manual Override (Super User Feature)
-     * Admin memberikan paket secara manual tanpa pembayaran/bukti.
+     * Admin memberikan paket PRO secara manual dan otomatis menaikkan limit.
      */
     async manualOverride(userId: string, planId: string, durationMonths?: number) {
         const plan = await this.prisma.subscriptionPlan.findUnique({
@@ -102,27 +117,60 @@ export class AdminSubscriptionService {
         const endDate = new Date();
         endDate.setMonth(endDate.getMonth() + (durationMonths || plan.durationMonths));
 
-        // Kita tidak membuat SubscriptionOrder karena ini manual override
-        // Atau bisa buat dummy order jika audit strict diperlukan
+        return this.prisma.$transaction(async (tx) => {
+            // Upsert Status Berlangganan
+            const subscription = await tx.userSubscription.upsert({
+                where: { userId },
+                update: {
+                    status: SubscriptionStatus.ACTIVE,
+                    planId: plan.id,
+                    startDate,
+                    endDate,
+                },
+                create: {
+                    userId,
+                    status: SubscriptionStatus.ACTIVE,
+                    planId: plan.id,
+                    startDate,
+                    endDate,
+                    lastOrderId: '', // Dummy/Empty untuk manual override
+                },
+            });
 
-        return this.prisma.userSubscription.upsert({
+            // Set jatah limit ke PRO
+            await tx.userUsage.upsert({
+                where: { userId },
+                update: { clientLimit: 9999 },
+                create: {
+                    userId,
+                    clientLimit: 9999,
+                    clientCount: 0,
+                },
+            });
+
+            return subscription;
+        });
+    }
+
+    /**
+     * Menambahkan Bonus Kuota (The Balance Logic)
+     * Admin menambah jatah 'clientLimit' tanpa mengubah status subscription.
+     */
+    async addBonusQuota(userId: string, bonusAmount: number) {
+        const usage = await this.prisma.userUsage.findUnique({
             where: { userId },
-            update: {
-                status: SubscriptionStatus.ACTIVE,
-                planId: plan.id,
-                startDate,
-                endDate,
-                // lastOrderId dibiarkan tetap (atau null jika skema mengizinkan)
-            },
-            create: {
-                userId,
-                status: SubscriptionStatus.ACTIVE,
-                planId: plan.id,
-                startDate,
-                endDate,
-                lastOrderId: '', // Perlu handle constraint ini jika required. 
-                // Solusi: Buat dummy order sistem atau ubah schema lastOrderId jadi optional.
-                // Untuk sekarang kita asumsikan admin override jarang dipakai di fase awal.
+        });
+
+        if (!usage) {
+            throw new NotFoundException('Data penggunaan user (UserUsage) tidak ditemukan');
+        }
+
+        return this.prisma.userUsage.update({
+            where: { userId },
+            data: {
+                clientLimit: {
+                    increment: bonusAmount,
+                },
             },
         });
     }
