@@ -4,6 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
   BadRequestException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -71,7 +72,75 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 1: FINANCIAL CHECKUP (The "Medical" Check)
+  // [CORE LOGIC] QUOTA & IDEMPOTENCY VALIDATION
+  // ===========================================================================
+
+  /**
+   * Helper method untuk mengecek hak akses simulasi.
+   * Logic:
+   * 1. Cek Subscription (PRO = Bypass).
+   * 2. Cek Idempotency/Session (Revisi = Gratis).
+   * 3. Cek Token (Free User = Bayar 1 Token).
+   */
+  private async validateAndDeductQuota(userId: string, sessionId: string): Promise<boolean> {
+    // 1. Cek Status PRO (Unlimited Pass)
+    const subscription = await this.prisma.userSubscription.findUnique({
+      where: { userId },
+    });
+
+    if (subscription && subscription.status === 'ACTIVE') {
+      return true; // Bypass untuk User PRO
+    }
+
+    // 2. Cek Riwayat Session (Idempotency Check - Revisi Gratis)
+    // Kita cari apakah user ini sudah pernah melakukan simulasi dengan Session ID yang sama
+    const existingSession = await this.prisma.simulationLog.findFirst({
+      where: {
+        agentId: userId,
+        sessionId: sessionId,
+      },
+    });
+
+    if (existingSession) {
+      return true; // Revisi Gratis (Sudah pernah bayar untuk sesi ini)
+    }
+
+    // 3. Logic Token untuk User FREE
+    return this.prisma.$transaction(async (tx) => {
+      let usage = await tx.userUsage.findUnique({
+        where: { userId },
+      });
+      
+
+      // Handle jika user belum punya record usage (Edge Case)
+      if (!usage) {
+        // USER LAMA DETECTED: Buatkan record secara otomatis (Welcome Bonus)
+        usage = await tx.userUsage.create({
+          data: { userId, simulationQuota: 3, totalUsed: 0 }
+        });
+      }
+
+      if (usage.simulationQuota <= 0) {
+        throw new ForbiddenException(
+          'Kuota simulasi gratis Anda telah habis. Silakan Upgrade ke PRO untuk akses tanpa batas.',
+        );
+      }
+
+      // Potong 1 Token
+      await tx.userUsage.update({
+        where: { userId },
+        data: {
+          simulationQuota: { decrement: 1 },
+          totalUsed: { increment: 1 },
+        },
+      });
+
+      return true; // Sukses potong kuota
+    });
+  }
+
+  // ===========================================================================
+  // MODULE 1: FINANCIAL CHECKUP (Legacy / Self-Checkup)
   // ===========================================================================
 
   async createCheckup(userId: string, dto: CreateFinancialRecordDto) {
@@ -208,7 +277,7 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 2: BUDGET PLAN (The "Monthly" Plan)
+  // MODULE 2: BUDGET PLAN (Legacy)
   // ===========================================================================
 
   async createBudget(userId: string, dto: CreateBudgetDto) {
@@ -448,10 +517,13 @@ export class FinancialService {
   }
 
   // ===========================================================================
-  // MODULE 8: AGENT BUDGET SIMULATION (STATELESS UPDATE)
+  // MODULE 8: AGENT BUDGET SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
       const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
         dto.fixedIncome,
@@ -473,10 +545,10 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)) as Prisma.InputJsonValue,
           moduleType: 'BUDGETING',
-          // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          // [Optional] Add Output Result
-          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID for Idempotency
+          sessionId: dto.sessionId,
         },
       });
 
@@ -514,17 +586,21 @@ export class FinancialService {
 
     } catch (error: any) {
       this.logger.error(`Simulation Error: ${error.message}`, error.stack);
+      // Jika errornya Forbidden (Kuota Habis), throw langsung
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Terjadi kesalahan saat memproses simulasi budgeting.');
     }
   }
 
   // ===========================================================================
-  // [REVISED] FINANCIAL CHECKUP SIMULATION (Item 2.1 & 3.1 & 2.2 Alignment)
+  // MODULE 9: FINANCIAL CHECKUP SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
-      // 1. CALCULATE
       const calculationInput: any = {
         ...dto,
         userProfile: dto.client,
@@ -533,7 +609,6 @@ export class FinancialService {
 
       const analysisResult: HealthAnalysisResult = calculateFinancialHealth(calculationInput);
 
-      // 2. LOGGING
       const clientAge = this.calculateAge(dto.client.dob);
       let dbStatus: HealthStatus = HealthStatus.BAHAYA;
       if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
@@ -552,20 +627,19 @@ export class FinancialService {
           status: dbStatus,
           financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
           moduleType: 'CHECKUP',
-          // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID
+          sessionId: dto.sessionId,
         },
       });
 
-      // 3. PDF GENERATION
       const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
         dto,
         analysisResult,
         user,
       );
 
-      // 4. MGC Token
       const { client, spouse, ...financialData } = dto;
 
       const mgcToken = this.generateMgcToken({
@@ -596,74 +670,19 @@ export class FinancialService {
 
     } catch (error: any) {
       this.logger.error(`Checkup Simulation Error: ${error.message}`, error.stack);
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Gagal memproses simulasi Financial Checkup.');
     }
   }
 
-  // [TAHAP 2.3] Revised verifyAndDecodeSimulationToken - Clean Code Version
-  async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
-    const { simulationToken } = dto;
-
-    const cleanToken = simulationToken?.trim();
-
-    if (!cleanToken || !cleanToken.includes('.')) {
-      throw new BadRequestException('Format file rusak: Token tidak memiliki struktur yang valid.');
-    }
-
-    const [payloadBase64, providedSignature] = cleanToken.split('.');
-
-    if (!payloadBase64 || !providedSignature) {
-      throw new BadRequestException('Format file rusak: Payload atau Signature hilang.');
-    }
-
-    const expectedSignature = this.createHmacSignature(payloadBase64);
-    const signatureBuffer = Buffer.from(providedSignature);
-    const expectedBuffer = Buffer.from(expectedSignature);
-
-    const isValid =
-      signatureBuffer.length === expectedBuffer.length &&
-      nodeCrypto.timingSafeEqual(signatureBuffer, expectedBuffer);
-
-    if (!isValid) {
-      this.logger.error(`Import Failed: Signature Mismatch.`);
-      throw new BadRequestException(
-        'Validasi Gagal: File telah dimodifikasi atau Kunci Server tidak cocok.',
-      );
-    }
-
-    try {
-      const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
-      const decoded = JSON.parse(payloadJson);
-
-      // [NEW LOGIC] Deteksi Tipe Modul & Delegasi ke Helper
-      if (decoded.meta?.module === 'EDUCATION') {
-        return this.mapEducationPayloadToResponse(decoded);
-      }
-
-      // CASE B: Default Modules (Checkup, Budget, Insurance, Pension, Goal)
-      return {
-        message: 'File simulasi berhasil di-import.',
-        data: {
-          client: decoded.client,
-          spouse: decoded.spouse,
-          financial: decoded.financial,
-          last_simulation_date: decoded.meta?.generatedAt || new Date(),
-          result: decoded.result || decoded.financialRatios,
-          meta: decoded.meta,
-        },
-      };
-
-    } catch (error: any) {
-      this.logger.error(`Import Failed: JSON Parse Error. ${error.message}`);
-      throw new BadRequestException('Gagal membaca data: Isi file (Payload) rusak/corrupt.');
-    }
-  }
-
   // ===========================================================================
-  // MODULE 9: AGENT INSURANCE SIMULATION (STATELESS)
+  // MODULE 10: AGENT INSURANCE SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentInsurance(user: User, dto: CreateInsuranceSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
       const calculationResult = calculateInsurancePlan({
         type: dto.type,
@@ -692,9 +711,10 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
           moduleType: 'INSURANCE',
-          // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID
+          sessionId: dto.sessionId,
         },
       });
 
@@ -730,15 +750,19 @@ export class FinancialService {
 
     } catch (error: any) {
       this.logger.error(`Insurance Simulation Error: ${error.message}`, error.stack);
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Gagal memproses simulasi asuransi.');
     }
   }
 
   // ===========================================================================
-  // MODULE 10: AGENT PENSION SIMULATION (STATELESS)
+  // MODULE 11: AGENT PENSION SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentPension(user: User, dto: CreatePensionSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
       const calculationResult = calculatePensionPlan({
         currentAge: dto.currentAge,
@@ -765,9 +789,10 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
           moduleType: 'PENSION',
-          // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID
+          sessionId: dto.sessionId,
         },
       });
 
@@ -803,15 +828,19 @@ export class FinancialService {
 
     } catch (error: any) {
       this.logger.error(`Pension Simulation Error: ${error.message}`, error.stack);
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Gagal memproses simulasi dana pensiun.');
     }
   }
 
   // ===========================================================================
-  // MODULE 11: AGENT GOAL SIMULATION (STATELESS)
+  // MODULE 12: AGENT GOAL SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentGoal(user: User, dto: CreateGoalSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
       const calculationResult = calculateGoalPlan({
         goalName: dto.goalName,
@@ -861,9 +890,10 @@ export class FinancialService {
           status: HealthStatus.SEHAT,
           financialRatios: JSON.parse(JSON.stringify(finalResult)) as Prisma.InputJsonValue,
           moduleType: 'GOAL',
-          // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: JSON.parse(JSON.stringify(finalResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(finalResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID
+          sessionId: dto.sessionId,
         },
       });
 
@@ -899,17 +929,21 @@ export class FinancialService {
 
     } catch (error: any) {
       this.logger.error(`Goal Simulation Error: ${error.message}`, error.stack);
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Gagal memproses simulasi tujuan keuangan.');
     }
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT EDUCATION SIMULATION (SCENARIO B: CALCULATE & SAVE)
+  // MODULE 13: AGENT EDUCATION SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
-      // 1. Calculate Aggregated Summaries (Logic Hitungan)
+      // Logic Hitungan
       let grandTotalFutureCost = 0;
       let grandTotalMonthlySaving = 0;
 
@@ -922,16 +956,12 @@ export class FinancialService {
         });
       }
 
-      // Prepare Output Result untuk UI
       const outputResult = {
         totalFutureCost: grandTotalFutureCost,
         totalMonthlySaving: grandTotalMonthlySaving,
         childrenPlans: dto.childrenPlans
       };
 
-      // 2. Logging to DB (Stateful Architecture)
-      // Kita menyimpan snapshot lengkap input user ke kolom 'inputPayload'
-      // Ini akan digunakan nanti untuk generate PDF saat tombol download diklik
       const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
 
       const log = await this.prisma.simulationLog.create({
@@ -946,13 +976,13 @@ export class FinancialService {
           healthScore: 100,
           status: HealthStatus.SEHAT,
           moduleType: 'EDUCATION',
-          // [CRITICAL] Simpan input payload agar bisa di-retrieve untuk generate PDF nanti
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: JSON.parse(JSON.stringify(outputResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(outputResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID
+          sessionId: dto.sessionId,
         },
       });
 
-      // 3. MGC Token Generation (Optional - untuk fitur Load File nanti)
       const mgcToken = this.generateMgcToken({
         meta: {
           version: '1.0',
@@ -966,68 +996,29 @@ export class FinancialService {
 
       const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
 
-      // 4. Return JSON Only (Sangat Cepat, Tanpa Buffer PDF)
-      // Frontend akan menerima ID ini dan menggunakannya untuk tombol download
       return {
         status: 'success',
         data: outputResult,
-        simulationId: log.id, // Tiket untuk download
+        simulationId: log.id,
         mgcToken: mgcToken,
         filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`
       };
 
     } catch (error: any) {
       this.logger.error(`Education Simulation Error: ${error.message}`, error.stack);
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Gagal memproses simulasi pendidikan.');
     }
   }
 
   // ===========================================================================
-  // NEW METHOD: DOWNLOAD PDF BY ID (ON-DEMAND)
-  // ===========================================================================
-
-  async downloadEducationPdfById(simulationId: string, user: User) {
-    try {
-      // 1. Cari data simulasi di DB
-      // Pastikan agentId cocok agar user tidak bisa download data milik agent lain
-      const log = await this.prisma.simulationLog.findFirst({
-        where: {
-          id: simulationId,
-          agentId: user.id
-        }
-      });
-
-      if (!log) {
-        throw new NotFoundException('Data simulasi tidak ditemukan atau Anda tidak memiliki akses.');
-      }
-
-      // 2. Ambil (Rehydrate) Input Payload dari JSON DB
-      const originalInput = log.inputPayload as unknown as CreateEducationSimulationDto;
-
-      if (!originalInput) {
-        throw new BadRequestException('Data input simulasi rusak/hilang.');
-      }
-
-      // 3. Generate PDF menggunakan data yang diambil dari DB
-      // Proses berat ini hanya terjadi saat user benar-benar klik download
-      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(originalInput, user);
-
-      return pdfBuffer;
-
-    } catch (error: any) {
-      this.logger.error(`PDF Generation Error for ID ${simulationId}: ${error.message}`);
-      if (error instanceof NotFoundException || error instanceof BadRequestException) {
-        throw error;
-      }
-      throw new InternalServerErrorException('Gagal men-generate file PDF.');
-    }
-  }
-
-  // ===========================================================================
-  // MODULE 13: RISK PROFILE SIMULATION (STATELESS & AGENT MODE)
+  // MODULE 14: RISK PROFILE SIMULATION (SMART LOGIC ENABLED)
   // ===========================================================================
 
   async simulateAgentRiskProfile(user: User, dto: CreateRiskProfileSimulationDto) {
+    // 1. [CORE] Check Quota & Idempotency
+    await this.validateAndDeductQuota(user.id, dto.sessionId);
+
     try {
       const analysisResult = calculateRiskProfileAnalysis(dto.answers as any);
       const clientAge = this.calculateAge(dto.clientDob);
@@ -1048,9 +1039,10 @@ export class FinancialService {
             allocation: analysisResult.allocation
           } as unknown as Prisma.InputJsonValue,
           moduleType: 'RISK_PROFILE',
-          // [FIX] Add Input Payload (Required by Schema)
           inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-          outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue
+          outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue,
+          // [CORE] Save Session ID
+          sessionId: dto.sessionId,
         },
       });
 
@@ -1099,7 +1091,100 @@ export class FinancialService {
 
     } catch (error: any) {
       this.logger.error(`Risk Profile Simulation Error: ${error.message}`, error.stack);
+      if (error instanceof ForbiddenException) throw error;
       throw new InternalServerErrorException('Gagal memproses simulasi Profil Risiko.');
+    }
+  }
+
+  // ===========================================================================
+  // UTILITY METHODS (PDF Download, Import, etc)
+  // ===========================================================================
+
+  async downloadEducationPdfById(simulationId: string, user: User) {
+    try {
+      const log = await this.prisma.simulationLog.findFirst({
+        where: {
+          id: simulationId,
+          agentId: user.id
+        }
+      });
+
+      if (!log) {
+        throw new NotFoundException('Data simulasi tidak ditemukan atau Anda tidak memiliki akses.');
+      }
+
+      const originalInput = log.inputPayload as unknown as CreateEducationSimulationDto;
+
+      if (!originalInput) {
+        throw new BadRequestException('Data input simulasi rusak/hilang.');
+      }
+
+      const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(originalInput, user);
+
+      return pdfBuffer;
+
+    } catch (error: any) {
+      this.logger.error(`PDF Generation Error for ID ${simulationId}: ${error.message}`);
+      if (error instanceof NotFoundException || error instanceof BadRequestException) {
+        throw error;
+      }
+      throw new InternalServerErrorException('Gagal men-generate file PDF.');
+    }
+  }
+
+  async verifyAndDecodeSimulationToken(dto: ImportSimulationDto) {
+    const { simulationToken } = dto;
+
+    const cleanToken = simulationToken?.trim();
+
+    if (!cleanToken || !cleanToken.includes('.')) {
+      throw new BadRequestException('Format file rusak: Token tidak memiliki struktur yang valid.');
+    }
+
+    const [payloadBase64, providedSignature] = cleanToken.split('.');
+
+    if (!payloadBase64 || !providedSignature) {
+      throw new BadRequestException('Format file rusak: Payload atau Signature hilang.');
+    }
+
+    const expectedSignature = this.createHmacSignature(payloadBase64);
+    const signatureBuffer = Buffer.from(providedSignature);
+    const expectedBuffer = Buffer.from(expectedSignature);
+
+    const isValid =
+      signatureBuffer.length === expectedBuffer.length &&
+      nodeCrypto.timingSafeEqual(signatureBuffer, expectedBuffer);
+
+    if (!isValid) {
+      this.logger.error(`Import Failed: Signature Mismatch.`);
+      throw new BadRequestException(
+        'Validasi Gagal: File telah dimodifikasi atau Kunci Server tidak cocok.',
+      );
+    }
+
+    try {
+      const payloadJson = Buffer.from(payloadBase64, 'base64').toString('utf-8');
+      const decoded = JSON.parse(payloadJson);
+
+      if (decoded.meta?.module === 'EDUCATION') {
+        return this.mapEducationPayloadToResponse(decoded);
+      }
+
+      return {
+        message: 'File simulasi berhasil di-import.',
+        data: {
+          client: decoded.client,
+          spouse: decoded.spouse,
+          financial: decoded.financial,
+          last_simulation_date: decoded.meta?.generatedAt || new Date(),
+          result: decoded.result || decoded.financialRatios,
+          meta: decoded.meta,
+        },
+      };
+
+    } catch (error: any) {
+      this.logger.error(`Import Failed: JSON Parse Error. ${error.message}`);
+      throw new BadRequestException('Gagal membaca data: Isi file (Payload) rusak/corrupt.');
     }
   }
 
@@ -1165,31 +1250,16 @@ export class FinancialService {
     return Math.abs(ageDt.getUTCFullYear() - 1970);
   }
 
-  // [FIX] UPDATE METHOD INI (Biasanya ada di paling bawah file)
   private mapEducationPayloadToResponse(decoded: any) {
-    // Mengambil object DTO mentah dari key 'data'
-    // Struktur rawData ini sudah: { clientName: "...", childrenPlans: [...], inflationRate: 10 }
     const rawData = decoded.data;
-
     return {
       message: 'File simulasi Pendidikan berhasil di-import.',
       data: {
-        // -------------------------------------------------------------------
-        // [FIX - CRITICAL CHANGE]
-        // Kembalikan struktur FLAT (Sejajar) agar sesuai dengan Form Schema Frontend.
-        // Jangan dibungkus ke dalam 'client' atau 'financial'.
-        // -------------------------------------------------------------------
-
-        // 1. Spread semua data mentah (clientName, childrenPlans, dll) ke root object
         ...rawData,
-
-        // 2. Tambahan Metadata untuk Frontend
-        result: null, // Diset null agar Frontend mentrigger kalkulasi ulang (Auto-Calc)
+        result: null,
         last_simulation_date: decoded.meta?.generatedAt || new Date(),
         meta: decoded.meta,
       },
     };
   }
-
-  
 }

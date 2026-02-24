@@ -75,7 +75,7 @@ export class MediaController {
         }
 
         // Delegasi ke Service
-        const result = await this.mediaService.uploadFile(file);
+        const result = await this.mediaService.uploadFile(file, 'media');
 
         return {
             status: 'success',

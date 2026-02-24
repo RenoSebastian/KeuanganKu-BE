@@ -34,7 +34,7 @@ export class AdminSubscriptionService {
     /**
      * Core Logic: Admin Validator dengan Sinkronisasi Kuota
      * Jika VALID -> Tetapkan limit PRO (9999).
-     * Jika INVALID -> Revoke akses & kembalikan limit ke FREE (5).
+     * Jika INVALID -> Revoke akses & kembalikan limit ke FREE (3).
      */
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
         // 1. Ambil Order Target
@@ -78,22 +78,22 @@ export class AdminSubscriptionService {
                         },
                     });
 
-                    // Kembalikan jatah limit ke standar FREE
+                    // [FIX] Kembalikan jatah ke standar FREE (3 Token)
                     await tx.userUsage.update({
                         where: { userId: order.userId },
-                        data: { clientLimit: 5 },
+                        data: { simulationQuota: 3 },
                     });
                 }
             } else if (dto.status === VerificationStatus.VALID) {
-                // Jika VALID, pastikan jatah limit sudah diset ke PRO (unlimited/9999)
-                // Hal ini memperkuat 'Optimistic Activation' yang dilakukan di SubscriptionService
+                // [FIX] Jika VALID, set kuota ke angka tinggi (9999)
+                // Meskipun User PRO di-bypass logic kuotanya, ini visual yang bagus di DB
                 await tx.userUsage.upsert({
                     where: { userId: order.userId },
-                    update: { clientLimit: 9999 },
+                    update: { simulationQuota: 9999 },
                     create: {
                         userId: order.userId,
-                        clientLimit: 9999,
-                        clientCount: 0,
+                        simulationQuota: 9999,
+                        totalUsed: 0,
                     },
                 });
             }
@@ -137,14 +137,14 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // Set jatah limit ke PRO
+            // [FIX] Set jatah limit ke PRO (9999)
             await tx.userUsage.upsert({
                 where: { userId },
-                update: { clientLimit: 9999 },
+                update: { simulationQuota: 9999 },
                 create: {
                     userId,
-                    clientLimit: 9999,
-                    clientCount: 0,
+                    simulationQuota: 9999,
+                    totalUsed: 0,
                 },
             });
 
@@ -153,23 +153,24 @@ export class AdminSubscriptionService {
     }
 
     /**
-     * Menambahkan Bonus Kuota (The Balance Logic)
-     * Admin menambah jatah 'clientLimit' tanpa mengubah status subscription.
+     * [NEW METHOD] Top Up Quota (Safety Net)
+     * Admin menambahkan token kuota untuk user (misal: penanganan komplain).
+     * Endpoint: PATCH /admin/subscription/topup-quota/:userId
      */
-    async addBonusQuota(userId: string, bonusAmount: number) {
+    async topUpQuota(userId: string, amount: number) {
         const usage = await this.prisma.userUsage.findUnique({
             where: { userId },
         });
 
         if (!usage) {
-            throw new NotFoundException('Data penggunaan user (UserUsage) tidak ditemukan');
+            throw new NotFoundException('Data penggunaan user (UserUsage) tidak ditemukan. User mungkin belum diinisialisasi.');
         }
 
         return this.prisma.userUsage.update({
             where: { userId },
             data: {
-                clientLimit: {
-                    increment: bonusAmount,
+                simulationQuota: {
+                    increment: amount,
                 },
             },
         });

@@ -1,8 +1,20 @@
-import { IsNotEmpty, IsString, IsNumber, IsOptional, Min, IsDateString } from 'class-validator';
+import { IsNotEmpty, IsString, IsNumber, IsOptional, Min, IsDateString, IsUUID } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateBudgetSimulationDto {
+    // ===========================================================================
+    // GROUP 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
+
     // ===========================================================================
     // GROUP 1: CLIENT IDENTITY (Untuk PDF & File .mgc)
     // ===========================================================================

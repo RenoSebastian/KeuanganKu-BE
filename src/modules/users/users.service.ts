@@ -28,7 +28,11 @@ export class UsersService {
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
-      include: { unitKerja: true },
+      include: {
+        unitKerja: true,
+        usage: true,        // [PHASE 6 UPDATE] Sertakan data kuota/token
+        subscription: true, // [PHASE 6 UPDATE] Sertakan status berlangganan aktif
+      },
     });
 
     if (!user) throw new NotFoundException(`User not found`);
@@ -53,12 +57,10 @@ export class UsersService {
     const { search, role } = params;
     const where: any = {};
 
-    // Filter by Role
     if (role) {
       where.role = role;
     }
 
-    // Filter by Search (Name / Email)
     if (search) {
       where.OR = [
         { fullName: { contains: search, mode: 'insensitive' } },
@@ -79,6 +81,7 @@ export class UsersService {
             namaUnit: true
           }
         },
+        usage: true, // [NEW] Admin juga bisa memantau sisa kuota user
         createdAt: true,
       },
     });
@@ -86,7 +89,6 @@ export class UsersService {
 
   // 2. Create User (Admin)
   async createUser(dto: CreateUserDto) {
-    // Cek duplikat
     const existing = await this.prisma.user.findFirst({
       where: {
         OR: [{ email: dto.email }, { nip: dto.nip }],
@@ -97,14 +99,19 @@ export class UsersService {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    // [FIXED] Hapus jobTitle dari destructuring karena field tersebut sudah dihapus dari DTO
     const { password, dateOfBirth, ...rest } = dto;
 
     const data: any = {
       ...rest,
       passwordHash: hashedPassword,
-      // [FIX 500 ERROR] Pastikan dateOfBirth selalu ada
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : new Date('1990-01-01'),
+      // [PHASE 3 RE-INTEGRATION] Inisialisasi Usage saat admin membuat user baru
+      usage: {
+        create: {
+          simulationQuota: 3,
+          totalUsed: 0,
+        },
+      },
     };
 
     try {
@@ -121,11 +128,15 @@ export class UsersService {
     }
   }
 
-  // 3. Get Detail
+  // 3. Get Detail (Admin)
   async findOne(id: string) {
     const user = await this.prisma.user.findUnique({
       where: { id },
-      include: { unitKerja: true },
+      include: {
+        unitKerja: true,
+        usage: true,        // [NEW] Untuk admin monitor kuota
+        subscription: true, // [NEW] Untuk admin monitor subscription
+      },
     });
     if (!user) throw new NotFoundException('User not found');
     const { passwordHash, ...result } = user;
@@ -150,10 +161,8 @@ export class UsersService {
 
   private async processUpdate(userId: string, dto: any) {
     try {
-      // [FIXED] Hapus jobTitle dari sini juga
       const { password, dateOfBirth, dependentCount, ...restData } = dto;
 
-      // Bersihkan undefined/empty values dari restData
       const updatePayload: any = {};
 
       Object.keys(restData).forEach(key => {
@@ -201,19 +210,14 @@ export class UsersService {
         subtitle: user.email,
         role: user.role,
         unitKerjaId: user.unitKerjaId,
-
-        // [NEW - PHASE 3] Indexing Data Tambahan
         agentLevel: user.agentLevel,
         agencyName: user.agencyName,
         address: user.address,
         gender: user.gender,
-
-        // [NEW] Field Perusahaan & Goals (Agar searchable)
         companyName: user.companyName,
         goals: user.goals,
       };
 
-      // Fire & Forget sync
       this.searchService
         .addDocuments('global_search', [searchPayload])
         .catch((e) => this.logger.warn(`Search sync error: ${e.message}`));

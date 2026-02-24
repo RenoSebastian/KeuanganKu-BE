@@ -62,4 +62,9 @@ export class SubscriptionController {
         // Logic: Panggil service untuk proses transaksi & aktivasi instan
         return this.subscriptionService.subscribe(user.id, dto, file);
     }
+
+    @Get('orders')
+    async getMyOrders(@GetUser('id') userId: string) {
+        return this.subscriptionService.getMyOrders(userId);
+    }
 }

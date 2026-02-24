@@ -1,7 +1,7 @@
 // File: src/modules/auth/auth.service.ts
 
 import { ForbiddenException, Injectable } from '@nestjs/common';
-import { PrismaService } from '../../../prisma/prisma.service';
+import { PrismaService } from '../../../prisma/prisma.service'; // Sesuaikan path jika berbeda struktur foldernya
 import { RegisterDto, LoginDto } from './dto/auth.dto';
 import * as argon from 'argon2';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
@@ -16,37 +16,38 @@ export class AuthService {
     private config: ConfigService,
   ) { }
 
-  // --- REGISTER (Simplified Flow) ---
+  // --- REGISTER (Updated for Phase 3: User Onboarding Logic) ---
   async register(dto: RegisterDto) {
     // 1. Hash Password
     const hash = await argon.hash(dto.password);
 
     try {
-      // 2. Simpan ke DB dengan data minimal (Nama, Email, Password)
-      // Field lain seperti unitKerjaId, nip, dan dateOfBirth akan otomatis NULL
+      // 2. Simpan ke DB
       const user = await this.prisma.user.create({
         data: {
           email: dto.email,
           fullName: dto.fullName,
           passwordHash: hash,
-          role: 'USER', // Tetap set default role USER
+          role: 'USER', // Default Role
+
+          // [PHASE 3 UPDATE] Inisialisasi Kuota (Welcome Bonus)
+          // Kita menggunakan Nested Write untuk membuat UserUsage sekaligus saat User dibuat.
           usage: {
             create: {
-              clientLimit: 5, // Jatah bawaan saat daftar
-              clientCount: 0,
+              simulationQuota: 3, // Welcome Bonus: 3 Token Gratis
+              totalUsed: 0,       // Counter penggunaan dimulai dari 0
             },
           },
         },
       });
 
       // 3. Return Token
-      // user.unitKerjaId akan bernilai null, ini tidak masalah bagi JWT
+      // Saat baru daftar, unitKerjaId pasti null.
       return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
 
     } catch (error) {
       if (error instanceof PrismaClientKnownRequestError) {
         if (error.code === 'P2002') {
-          // Hanya Email yang dicek karena NIP tidak dikirim saat register
           throw new ForbiddenException('Email sudah terdaftar');
         }
       }
@@ -54,7 +55,7 @@ export class AuthService {
     }
   }
 
-  // --- LOGIN (Tetap Sama, tapi mendukung unitKerjaId null) ---
+  // --- LOGIN (Tetap Sama) ---
   async login(dto: LoginDto) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
@@ -68,14 +69,13 @@ export class AuthService {
     return this.signToken(user.id, user.email, user.role, user.unitKerjaId);
   }
 
-  // --- HELPER: SIGN TOKEN (Updated with Nullable unitKerjaId) ---
-  // unitKerjaId diubah tipe datanya menjadi string | null
+  // --- HELPER: SIGN TOKEN ---
   async signToken(userId: string, email: string, role: string, unitKerjaId: string | null) {
     const payload = {
       sub: userId,
       email,
       role,
-      unitKerjaId // Akan berisi null jika belum diisi
+      unitKerjaId // Bisa null
     };
 
     const secret = this.config.get('JWT_SECRET');

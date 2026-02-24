@@ -22,6 +22,22 @@ export class SubscriptionService {
     }
 
     /**
+     * [TAMBAHKAN METHOD INI]
+     * Mengambil riwayat seluruh order/transaksi milik user
+     */
+    async getMyOrders(userId: string) {
+        return this.prisma.subscriptionOrder.findMany({
+            where: { userId },
+            include: {
+                plan: true, // Sertakan info paket agar FE bisa menampilkan nama paket
+            },
+            orderBy: {
+                createdAt: 'desc', // Urutkan dari yang terbaru
+            },
+        });
+    }
+
+    /**
      * Mengambil status subscription aktif milik user saat ini
      */
     async getMySubscription(userId: string) {
