@@ -8,9 +8,10 @@ import {
     UseInterceptors,
     ParseFilePipe,
     MaxFileSizeValidator,
-    FileTypeValidator,
     HttpStatus,
     HttpCode,
+    FileValidator,
+    Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import {
@@ -22,9 +23,41 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../modules/auth/guards/jwt-auth.guard';
 import { GetUser } from '../../../common/decorators/get-user.decorator';
-import * as client from '@prisma/client';
+// [FIX] Gunakan 'import type' karena User dari prisma adalah Interface/Type, bukan Class value
+import type { User } from '@prisma/client';
 import { SubscriptionService } from '../services/subscription.service';
 import { CreateSubscriptionOrderDto } from '../dto/create-subscription-order.dto';
+
+// --- CUSTOM VALIDATOR CLASS ---
+class SubscriptionFileValidator extends FileValidator<{}> {
+    private readonly logger = new Logger('FileValidator');
+
+    isValid(file?: Express.Multer.File): boolean {
+        if (!file) return false;
+
+        // Debugging log
+        this.logger.log(`Processing upload: ${file.originalname} | Mime: ${file.mimetype}`);
+
+        // Whitelist Mime Types
+        const allowedMimes = [
+            'image/jpeg',
+            'image/jpg',
+            'image/png',
+            'image/webp',
+            'application/pdf',
+            'application/octet-stream'
+        ];
+
+        // Validasi logic
+        const isValidMime = allowedMimes.includes(file.mimetype) || file.mimetype.startsWith('image/');
+
+        return isValidMime;
+    }
+
+    buildErrorMessage(file: any): string {
+        return `Format file tidak didukung (${file?.mimetype}). Harap upload Gambar (JPG/PNG) atau PDF.`;
+    }
+}
 
 @ApiTags('Subscription (User)')
 @Controller('subscription')
@@ -33,40 +66,24 @@ import { CreateSubscriptionOrderDto } from '../dto/create-subscription-order.dto
 export class SubscriptionController {
     constructor(private readonly subscriptionService: SubscriptionService) { }
 
-    /**
-     * Endpoint: GET /subscription/plans
-     * Mengambil daftar paket yang tersedia (Master Data)
-     */
     @Get('plans')
     @ApiOperation({ summary: 'Get available subscription plans' })
     async getPlans() {
         return this.subscriptionService.getPlans();
     }
 
-    /**
-     * Endpoint: GET /subscription/current
-     * Mengecek status subscription user yang sedang login
-     */
     @Get('current')
     @ApiOperation({ summary: 'Get current active subscription status' })
-    async getMySubscription(@GetUser() user: client.User) {
+    async getMySubscription(@GetUser() user: User) {
         return this.subscriptionService.getMySubscription(user.id);
     }
 
-    /**
-     * Endpoint: GET /subscription/orders
-     * Mengambil riwayat transaksi user
-     */
     @Get('orders')
     @ApiOperation({ summary: 'Get my subscription order history' })
-    async getMyOrders(@GetUser() user: client.User) {
+    async getMyOrders(@GetUser() user: User) {
         return this.subscriptionService.getMyOrders(user.id);
     }
 
-    /**
-     * Endpoint: POST /subscription/buy
-     * User membeli paket -> Upload Bukti -> Langsung Aktif (Optimistic)
-     */
     @Post('buy')
     @HttpCode(HttpStatus.CREATED)
     @ApiOperation({ summary: 'Purchase plan & Upload proof (Optimistic Activation)' })
@@ -91,19 +108,21 @@ export class SubscriptionController {
     })
     @UseInterceptors(FileInterceptor('proofFile'))
     async buySubscription(
-        @GetUser() user: client.User,
+        @GetUser() user: User,
         @Body() dto: CreateSubscriptionOrderDto,
         @UploadedFile(
             new ParseFilePipe({
                 validators: [
-                    new MaxFileSizeValidator({ maxSize: 2 * 1024 * 1024 }), // Max 2MB
-                    new FileTypeValidator({ fileType: /(jpg|jpeg|png|webp|pdf)$/ }), // Allow Images & PDF
+                    // 1. Validasi Ukuran (Max 2MB)
+                    new MaxFileSizeValidator({ maxSize: 2 * 1024 * 1024 }),
+
+                    // 2. Validasi Tipe (Custom Class Validator)
+                    new SubscriptionFileValidator({}),
                 ],
             }),
         )
         file: Express.Multer.File,
     ) {
-        // Logic: Panggil service untuk proses transaksi & aktivasi instan
         return this.subscriptionService.subscribe(user.id, dto, file);
     }
 }
