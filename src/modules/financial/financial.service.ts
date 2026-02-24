@@ -9,7 +9,10 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../prisma/prisma.service';
 import * as nodeCrypto from 'crypto';
-import { SchoolLevel, HealthStatus, User, Prisma } from '@prisma/client';
+import { SchoolLevel, HealthStatus, User, Prisma, NotificationType, NotificationCategory } from '@prisma/client';
+
+// [NEW] Import Notification Service
+import { NotificationService } from '../notification/notification.service';
 
 // DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -60,6 +63,7 @@ export class FinancialService {
     private readonly prisma: PrismaService,
     private readonly configService: ConfigService,
     private readonly pdfService: PdfGeneratorService,
+    private readonly notificationService: NotificationService, // [NEW] Injection
   ) {
     const secretEnv = this.configService.get<string>('RETENTION_SECRET');
 
@@ -81,6 +85,7 @@ export class FinancialService {
    * 1. Cek Subscription (PRO = Bypass).
    * 2. Cek Idempotency/Session (Revisi = Gratis).
    * 3. Cek Token (Free User = Bayar 1 Token).
+   * 4. [NEW] Kirim Notifikasi jika Token Menipis.
    */
   private async validateAndDeductQuota(userId: string, sessionId: string): Promise<boolean> {
     // 1. Cek Status PRO (Unlimited Pass)
@@ -110,7 +115,6 @@ export class FinancialService {
       let usage = await tx.userUsage.findUnique({
         where: { userId },
       });
-      
 
       // Handle jika user belum punya record usage (Edge Case)
       if (!usage) {
@@ -127,13 +131,29 @@ export class FinancialService {
       }
 
       // Potong 1 Token
-      await tx.userUsage.update({
+      const updatedUsage = await tx.userUsage.update({
         where: { userId },
         data: {
           simulationQuota: { decrement: 1 },
           totalUsed: { increment: 1 },
         },
       });
+
+      // [NEW] Trigger Notifikasi jika kuota menipis (Sisa 1)
+      if (updatedUsage.simulationQuota === 1) {
+        // Kita panggil di luar transaction block (fire-and-forget) via method terpisah
+        // atau setImmediate agar tidak memblokir TX.
+        // Di sini kita return dulu, panggil notif di controller/after-hook atau gunakan setImmediate
+        setImmediate(() => {
+          this.notificationService.createAndSend({
+            userId,
+            title: 'Kuota Hampir Habis ⚠️',
+            message: 'Perhatian! Kuota simulasi gratis Anda tinggal 1 token lagi. Segera upgrade ke PRO untuk layanan tanpa batas.',
+            type: NotificationType.WARNING,
+            category: NotificationCategory.QUOTA
+          }).catch(e => this.logger.error('Failed sending quota warning', e));
+        });
+      }
 
       return true; // Sukses potong kuota
     });

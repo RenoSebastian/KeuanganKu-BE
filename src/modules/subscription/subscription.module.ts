@@ -6,11 +6,13 @@ import { AdminSubscriptionService } from './services/admin-subscription.service'
 import { SubscriptionCronService } from './services/subscription-cron.service'; // [NEW IMPORT]
 import { SubscriptionController } from './controllers/subscription.controller';
 import { AdminSubscriptionController } from './controllers/admin-subscription.controller';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
     imports: [
         PrismaModule,
         MediaModule,
+        NotificationModule
     ],
     controllers: [
         SubscriptionController,

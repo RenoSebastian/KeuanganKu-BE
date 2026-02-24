@@ -28,6 +28,7 @@ import { RetentionModule } from './modules/retention/retention.module';
 import { EducationModule } from './modules/education/education.module';
 import { MediaModule } from './modules/media/media.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
+import { NotificationModule } from './modules/notification/notification.module';
 
 @Module({
   imports: [
@@ -71,7 +72,8 @@ import { SubscriptionModule } from './modules/subscription/subscription.module';
     RetentionModule,
     EducationModule,
     MediaModule,
-    SubscriptionModule
+    SubscriptionModule,
+    NotificationModule,
   ],
   controllers: [],
   providers: [

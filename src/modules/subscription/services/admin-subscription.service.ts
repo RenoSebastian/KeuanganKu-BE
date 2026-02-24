@@ -1,11 +1,24 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+    BadRequestException,
+    Injectable,
+    NotFoundException,
+} from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { VerifyOrderDto } from '../dto/verify-order.dto';
-import { SubscriptionStatus, VerificationStatus } from '@prisma/client';
+import {
+    SubscriptionStatus,
+    VerificationStatus,
+    NotificationType,
+    NotificationCategory,
+} from '@prisma/client';
+import { NotificationService } from '../../notification/notification.service';
 
 @Injectable()
 export class AdminSubscriptionService {
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly notificationService: NotificationService, // [NEW] Inject Notification Service
+    ) { }
 
     /**
      * Mengambil daftar order yang belum divalidasi
@@ -32,9 +45,9 @@ export class AdminSubscriptionService {
     }
 
     /**
-     * Core Logic: Admin Validator dengan Sinkronisasi Kuota
-     * Jika VALID -> Tetapkan limit PRO (9999).
-     * Jika INVALID -> Revoke akses & kembalikan limit ke FREE (3).
+     * Core Logic: Admin Validator dengan Sinkronisasi Kuota & Notifikasi
+     * Jika VALID -> Tetapkan limit PRO (9999) + Kirim Notif Sukses
+     * Jika INVALID -> Revoke akses & kembalikan limit ke FREE (3) + Kirim Notif Gagal
      */
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
         // 1. Ambil Order Target
@@ -51,8 +64,9 @@ export class AdminSubscriptionService {
             throw new BadRequestException('Order ini sudah diproses sebelumnya');
         }
 
-        return this.prisma.$transaction(async (tx) => {
-            // 2. Update Status Order
+        // 2. Proses Database (Atomic Transaction)
+        const result = await this.prisma.$transaction(async (tx) => {
+            // Update Status Order
             const updatedOrder = await tx.subscriptionOrder.update({
                 where: { id: dto.orderId },
                 data: {
@@ -62,7 +76,7 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // 3. Logic Branching berdasarkan keputusan Admin
+            // Logic Branching berdasarkan keputusan Admin
             if (dto.status === VerificationStatus.INVALID) {
                 const currentSub = await tx.userSubscription.findUnique({
                     where: { userId: order.userId },
@@ -78,15 +92,14 @@ export class AdminSubscriptionService {
                         },
                     });
 
-                    // [FIX] Kembalikan jatah ke standar FREE (3 Token)
+                    // Kembalikan jatah ke standar FREE (3 Token)
                     await tx.userUsage.update({
                         where: { userId: order.userId },
                         data: { simulationQuota: 3 },
                     });
                 }
             } else if (dto.status === VerificationStatus.VALID) {
-                // [FIX] Jika VALID, set kuota ke angka tinggi (9999)
-                // Meskipun User PRO di-bypass logic kuotanya, ini visual yang bagus di DB
+                // Jika VALID, set kuota ke angka tinggi (9999)
                 await tx.userUsage.upsert({
                     where: { userId: order.userId },
                     update: { simulationQuota: 9999 },
@@ -100,13 +113,43 @@ export class AdminSubscriptionService {
 
             return updatedOrder;
         });
+
+        // 3. Trigger Notifikasi (Fire-and-Forget)
+        // Dilakukan setelah transaksi sukses agar user mendapat update real-time
+        if (dto.status === VerificationStatus.VALID) {
+            await this.notificationService.createAndSend({
+                userId: order.userId,
+                title: 'Pembayaran Diterima 🎉',
+                message: `Selamat! Paket ${order.plan.name} Anda telah aktif. Nikmati akses simulasi tanpa batas.`,
+                type: NotificationType.SUCCESS,
+                category: NotificationCategory.SUBSCRIPTION,
+                metadata: { orderId: order.id },
+            });
+        } else if (dto.status === VerificationStatus.INVALID) {
+            await this.notificationService.createAndSend({
+                userId: order.userId,
+                title: 'Pembayaran Ditolak',
+                message: dto.adminNotes
+                    ? `Verifikasi gagal: ${dto.adminNotes}`
+                    : 'Bukti pembayaran tidak valid atau tidak terbaca. Silakan cek kembali dan upload ulang.',
+                type: NotificationType.ERROR,
+                category: NotificationCategory.PAYMENT,
+                metadata: { orderId: order.id },
+            });
+        }
+
+        return result;
     }
 
     /**
      * Manual Override (Super User Feature)
      * Admin memberikan paket PRO secara manual dan otomatis menaikkan limit.
      */
-    async manualOverride(userId: string, planId: string, durationMonths?: number) {
+    async manualOverride(
+        userId: string,
+        planId: string,
+        durationMonths?: number,
+    ) {
         const plan = await this.prisma.subscriptionPlan.findUnique({
             where: { id: planId },
         });
@@ -115,11 +158,13 @@ export class AdminSubscriptionService {
 
         const startDate = new Date();
         const endDate = new Date();
-        endDate.setMonth(endDate.getMonth() + (durationMonths || plan.durationMonths));
+        endDate.setMonth(
+            endDate.getMonth() + (durationMonths || plan.durationMonths),
+        );
 
-        return this.prisma.$transaction(async (tx) => {
+        const subscription = await this.prisma.$transaction(async (tx) => {
             // Upsert Status Berlangganan
-            const subscription = await tx.userSubscription.upsert({
+            const sub = await tx.userSubscription.upsert({
                 where: { userId },
                 update: {
                     status: SubscriptionStatus.ACTIVE,
@@ -133,11 +178,11 @@ export class AdminSubscriptionService {
                     planId: plan.id,
                     startDate,
                     endDate,
-                    lastOrderId: '', // Dummy/Empty untuk manual override
+                    lastOrderId: '', // Note: Pastikan field ini nullable di schema atau isi dengan Dummy Order ID
                 },
             });
 
-            // [FIX] Set jatah limit ke PRO (9999)
+            // Set jatah limit ke PRO (9999)
             await tx.userUsage.upsert({
                 where: { userId },
                 update: { simulationQuota: 9999 },
@@ -148,14 +193,25 @@ export class AdminSubscriptionService {
                 },
             });
 
-            return subscription;
+            return sub;
         });
+
+        // Trigger Notifikasi Manual Activation
+        await this.notificationService.createAndSend({
+            userId: userId,
+            title: 'Aktivasi Manual Berhasil',
+            message: `Admin telah mengaktifkan paket ${plan.name
+                } untuk akun Anda. Aktif hingga ${endDate.toLocaleDateString('id-ID')}.`,
+            type: NotificationType.INFO,
+            category: NotificationCategory.SYSTEM,
+        });
+
+        return subscription;
     }
 
     /**
-     * [NEW METHOD] Top Up Quota (Safety Net)
-     * Admin menambahkan token kuota untuk user (misal: penanganan komplain).
-     * Endpoint: PATCH /admin/subscription/topup-quota/:userId
+     * Top Up Quota (Safety Net)
+     * Admin menambahkan token kuota untuk user.
      */
     async topUpQuota(userId: string, amount: number) {
         const usage = await this.prisma.userUsage.findUnique({
@@ -163,10 +219,12 @@ export class AdminSubscriptionService {
         });
 
         if (!usage) {
-            throw new NotFoundException('Data penggunaan user (UserUsage) tidak ditemukan. User mungkin belum diinisialisasi.');
+            throw new NotFoundException(
+                'Data penggunaan user tidak ditemukan. User mungkin belum diinisialisasi.',
+            );
         }
 
-        return this.prisma.userUsage.update({
+        const updated = await this.prisma.userUsage.update({
             where: { userId },
             data: {
                 simulationQuota: {
@@ -174,5 +232,16 @@ export class AdminSubscriptionService {
                 },
             },
         });
+
+        // Trigger Notifikasi Quota Added
+        await this.notificationService.createAndSend({
+            userId: userId,
+            title: 'Bonus Kuota Simulasi',
+            message: `Admin menambahkan ${amount} token simulasi tambahan ke akun Anda. Sisa kuota saat ini: ${updated.simulationQuota}.`,
+            type: NotificationType.SUCCESS,
+            category: NotificationCategory.QUOTA,
+        });
+
+        return updated;
     }
 }

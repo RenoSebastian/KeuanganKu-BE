@@ -160,6 +160,7 @@ model User {
   // --- SUBSCRIPTION & QUOTA SYSTEM ---
   subscription       UserSubscription?   // Relasi One-to-One (Active Sub)
   subscriptionOrders SubscriptionOrder[] // Relasi One-to-Many (History)
+  notifications Notification[]
   
   // [PHASE 1] Relasi ke Usage Token
   usage              UserUsage?
@@ -667,4 +668,42 @@ model QuizOption {
 
   @@index([questionId])
   @@map("quiz_options")
+}
+
+// --- Enums Notification ---
+
+enum NotificationType {
+  INFO
+  WARNING
+  SUCCESS
+  ERROR
+}
+
+enum NotificationCategory {
+  SUBSCRIPTION
+  QUOTA
+  SYSTEM
+  PAYMENT
+}
+
+// =========================================================
+// NOTIFICATION SYSTEM
+// =========================================================
+
+model Notification {
+  id        String               @id @default(uuid())
+  userId    String               @map("user_id")
+  type      NotificationType     @default(INFO)
+  category  NotificationCategory @default(SYSTEM)
+  title     String
+  message   String               @db.Text
+  isRead    Boolean              @default(false) @map("is_read")
+  metadata  Json?                // Menyimpan ID transaksi, link redirect, dll
+  createdAt DateTime             @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
 }
