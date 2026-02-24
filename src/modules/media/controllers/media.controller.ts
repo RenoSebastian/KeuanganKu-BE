@@ -1,38 +1,43 @@
 import {
     Controller,
     Post,
+    Get,
     Delete,
     Body,
+    Param,
+    Res,
     UseGuards,
     UseInterceptors,
     UploadedFile,
-    ParseFilePipeBuilder,
     HttpStatus,
     HttpCode,
     BadRequestException,
     ParseFilePipe,
     MaxFileSizeValidator,
     FileTypeValidator,
+    StreamableFile,
+    NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags, ApiResponse } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags, ApiResponse, ApiParam } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
 import { Role } from '@prisma/client';
 import { MediaStorageService } from '../services/media-storage.service';
+import express from 'express';
+import { join } from 'path';
+import { createReadStream, existsSync } from 'fs';
 
 @ApiTags('Media Management')
 @Controller('media')
-@UseGuards(JwtAuthGuard, RolesGuard)
-@ApiBearerAuth()
 export class MediaController {
     constructor(private readonly mediaService: MediaStorageService) { }
 
-    // --- UPLOAD ENDPOINT ---
-
+    // --- 1. UPLOAD ENDPOINT ---
     @Post('upload')
-    @Roles(Role.ADMIN, Role.DIRECTOR)
+    @UseGuards(JwtAuthGuard) // Siapapun yang login boleh upload bukti bayar
+    @ApiBearerAuth()
     @HttpCode(HttpStatus.CREATED)
     @ApiOperation({ summary: 'Upload single image asset (Max 2MB, JPG/PNG/WEBP)' })
     @ApiConsumes('multipart/form-data')
@@ -61,8 +66,6 @@ export class MediaController {
                     }),
                     new FileTypeValidator({
                         fileType: /image\/(jpeg|jpg|png|webp)/,
-                        // TAMBAHKAN OPSI INI HANYA UNTUK DEBUGGING:
-                        skipMagicNumbersValidation: true 
                     }),
                 ],
                 errorHttpStatusCode: HttpStatus.BAD_REQUEST,
@@ -84,10 +87,43 @@ export class MediaController {
         };
     }
 
-    // --- DELETE ENDPOINT (Untuk Cleanup/Undo) ---
+    // --- 2. SERVE STATIC FILE (Private / Protected) ---
+    @Get(':filename')
+    @UseGuards(JwtAuthGuard) // Hanya user login yang bisa lihat
+    @ApiBearerAuth()
+    @ApiOperation({ summary: 'Get/Download file by filename' })
+    @ApiParam({ name: 'filename', type: 'string', description: 'Nama file yang tersimpan di server' })
+    async getFile(@Param('filename') filename: string, @Res({ passthrough: true }) res: express.Response): Promise<StreamableFile> {
 
+        // Sanitasi Path (Security)
+        if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
+            throw new BadRequestException('Filename tidak valid.');
+        }
+
+        // Lokasi file (sesuaikan dengan logic service Anda, misal di root/uploads/media)
+        const filePath = join(process.cwd(), 'uploads', 'media', filename);
+
+        if (!existsSync(filePath)) {
+            throw new NotFoundException('File tidak ditemukan.');
+        }
+
+        const fileStream = createReadStream(filePath);
+
+        // Set Header Content-Type otomatis berdasarkan ekstensi
+        // (NestJS StreamableFile handle basic, tapi express res lebih fleksibel)
+        res.set({
+            'Content-Type': 'image/jpeg', // Bisa dibuat dinamis pakai mime-types lib jika perlu
+            'Content-Disposition': `inline; filename="${filename}"`,
+        });
+
+        return new StreamableFile(fileStream);
+    }
+
+    // --- 3. DELETE ENDPOINT (Admin Only) ---
     @Delete()
+    @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN, Role.DIRECTOR)
+    @ApiBearerAuth()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({ summary: 'Delete media file by path (Garbage Collection)' })
     @ApiBody({
@@ -96,14 +132,12 @@ export class MediaController {
             properties: {
                 path: {
                     type: 'string',
-                    example: 'uploads/550e8400-e29b-41d4-a716-446655440000.jpg',
+                    example: 'media/550e8400-e29b-41d4-a716-446655440000.jpg',
                     description: 'Relative path file yang akan dihapus.'
                 }
             }
         }
     })
-    @ApiResponse({ status: 200, description: 'File berhasil dihapus.' })
-    @ApiResponse({ status: 400, description: 'Path tidak valid.' })
     async deleteFile(@Body('path') path: string) {
         if (!path) {
             throw new BadRequestException('Path file wajib diisi.');

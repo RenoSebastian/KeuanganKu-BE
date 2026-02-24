@@ -22,14 +22,13 @@ export class SubscriptionService {
     }
 
     /**
-     * [TAMBAHKAN METHOD INI]
-     * Mengambil riwayat seluruh order/transaksi milik user
+     * [NEW] Mengambil riwayat seluruh order/transaksi milik user
      */
     async getMyOrders(userId: string) {
         return this.prisma.subscriptionOrder.findMany({
             where: { userId },
             include: {
-                plan: true, // Sertakan info paket agar FE bisa menampilkan nama paket
+                plan: true, // Sertakan info paket
             },
             orderBy: {
                 createdAt: 'desc', // Urutkan dari yang terbaru
@@ -38,7 +37,7 @@ export class SubscriptionService {
     }
 
     /**
-     * Mengambil status subscription aktif milik user saat ini
+     * [NEW] Mengambil status subscription aktif milik user saat ini
      */
     async getMySubscription(userId: string) {
         const subscription = await this.prisma.userSubscription.findUnique({
@@ -49,7 +48,6 @@ export class SubscriptionService {
             },
         });
 
-        // Jika tidak ada data atau status expired, return null atau object kosong yang aman
         if (!subscription) {
             return null;
         }
@@ -59,7 +57,7 @@ export class SubscriptionService {
 
     /**
      * Core Logic: Optimistic Activation
-     * User upload bukti -> Order dibuat -> User langsung ACTIVE
+     * User upload bukti -> Order dibuat -> User langsung ACTIVE & Unlimited Quota
      */
     async subscribe(
         userId: string,
@@ -80,11 +78,10 @@ export class SubscriptionService {
             throw new NotFoundException('Paket langganan tidak ditemukan atau tidak aktif');
         }
 
-        // 3. Upload Bukti ke Storage (Menggunakan Service Existing)
-        // Asumsi return dari uploadFile adalah { url: string, ... }
+        // 3. Upload Bukti ke Storage
         const uploadResult = await this.mediaStorageService.uploadFile(
             file,
-            'subscription-proofs', // Folder di S3/Local
+            'subscription-proofs',
         );
         const proofImageUrl = uploadResult.url;
 
@@ -104,10 +101,15 @@ export class SubscriptionService {
             // B. Hitung Tanggal Berakhir (EndDate)
             const startDate = new Date();
             const endDate = new Date(startDate);
-            endDate.setMonth(endDate.getMonth() + plan.durationMonths);
+            // Asumsi durationMonths ada di schema, jika pakai durationDays ganti logicnya
+            if (plan.durationMonths) {
+                endDate.setMonth(endDate.getMonth() + plan.durationMonths);
+            } else {
+                // Fallback default 1 bulan jika data kosong
+                endDate.setMonth(endDate.getMonth() + 1);
+            }
 
             // C. UPSERT UserSubscription (Optimistic Activation)
-            // Jika user belum punya sub, create. Jika sudah punya (misal perpanjang/upgrade), update.
             const subscription = await tx.userSubscription.upsert({
                 where: { userId },
                 update: {
@@ -115,7 +117,7 @@ export class SubscriptionService {
                     planId: plan.id,
                     startDate: startDate,
                     endDate: endDate,
-                    lastOrderId: order.id, // Link ke bukti bayar terbaru
+                    lastOrderId: order.id,
                 },
                 create: {
                     userId,
@@ -128,6 +130,18 @@ export class SubscriptionService {
                 include: {
                     plan: true,
                 },
+            });
+
+            // D. [CRITICAL] Update Kuota User Menjadi UNLIMITED (9999)
+            // Ini bagian penting dari "Optimistic Update" agar user langsung bisa pakai fitur
+            await tx.userUsage.upsert({
+                where: { userId },
+                update: { simulationQuota: 9999 }, // Angka "magic" untuk unlimited
+                create: {
+                    userId,
+                    simulationQuota: 9999,
+                    totalUsed: 0
+                }
             });
 
             return {

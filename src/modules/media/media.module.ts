@@ -4,9 +4,9 @@ import { MediaStorageService } from './services/media-storage.service';
 import { ConfigModule } from '@nestjs/config';
 
 @Module({
-    imports: [ConfigModule], // Import ConfigModule jika nanti butuh ENV (misal limit size dinamis)
+    imports: [ConfigModule],
     controllers: [MediaController],
     providers: [MediaStorageService],
-    exports: [MediaStorageService], // Export service agar bisa dipanggil oleh EducationModule (untuk cleanup nanti)
+    exports: [MediaStorageService], // Export service agar bisa dipanggil oleh module lain
 })
 export class MediaModule { }

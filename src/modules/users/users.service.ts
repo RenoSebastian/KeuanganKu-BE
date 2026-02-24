@@ -144,17 +144,17 @@ export class UsersService {
         data,
         include: {
           usage: true, // Return usage agar FE bisa langsung update state
-        }
+        },
       });
 
       // Sync ke Meilisearch (Async agar tidak block response)
-      this.syncToSearch(newUser).catch(err =>
-        this.logger.error(`Failed to sync new user to search: ${err.message}`)
+      this.syncToSearch(newUser).catch((err) =>
+        this.logger.error(`Failed to sync new user to search: ${err.message}`),
       );
 
       const { passwordHash, ...result } = newUser;
       return result;
-    } catch (error) {
+    } catch (error: any) {
       if (error.code === 'P2003') {
         throw new BadRequestException('Unit Kerja ID tidak valid atau tidak ditemukan.');
       }
@@ -173,8 +173,8 @@ export class UsersService {
         subscription: {     // Admin perlu memantau status langganan
           include: {
             plan: true,
-            lastOrder: true
-          }
+            lastOrder: true,
+          },
         },
       },
     });
@@ -199,13 +199,16 @@ export class UsersService {
       const deleted = await this.prisma.user.delete({ where: { id } });
 
       // Hapus juga dari index pencarian
-      this.searchService.removeDocument('global_search', id)
-        .catch(e => this.logger.warn(`Search removal warning: ${e.message}`));
+      this.searchService
+        .removeDocument('global_search', id)
+        .catch((e) => this.logger.warn(`Search removal warning: ${e.message}`));
 
       return { message: 'User deleted successfully', id: deleted.id };
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Delete user failed: ${error.message}`);
-      throw new BadRequestException('Gagal menghapus user, mungkin masih memiliki relasi data penting.');
+      throw new BadRequestException(
+        'Gagal menghapus user, mungkin masih memiliki relasi data penting.',
+      );
     }
   }
 
@@ -248,20 +251,21 @@ export class UsersService {
         include: {
           usage: true,
           subscription: true,
-        }
+        },
       });
 
       // Update Search Index
-      this.syncToSearch(updatedUser).catch(e =>
-        this.logger.warn(`Search update warning: ${e.message}`)
+      this.syncToSearch(updatedUser).catch((e) =>
+        this.logger.warn(`Search update warning: ${e.message}`),
       );
 
       const { passwordHash, ...result } = updatedUser;
       return result;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Failed update user ${userId}: ${error.message}`);
       if (error.code === 'P2025') throw new NotFoundException('User not found');
-      if (error.code === 'P2003') throw new BadRequestException('Unit Kerja ID tidak valid');
+      if (error.code === 'P2003')
+        throw new BadRequestException('Unit Kerja ID tidak valid');
       throw error;
     }
   }
@@ -284,11 +288,11 @@ export class UsersService {
         companyName: user.companyName,
         goals: user.goals,
         // Optional: Tambahkan flag isPro untuk filtering di search
-        isPro: user.subscription?.status === 'ACTIVE'
+        isPro: user.subscription?.status === 'ACTIVE',
       };
 
       await this.searchService.addDocuments('global_search', [searchPayload]);
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error(`Sync search failed: ${error.message}`);
     }
   }
