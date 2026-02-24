@@ -130,16 +130,16 @@ model User {
   insurancePlans  InsurancePlan[]
   goalPlans       GoalPlan[]
 
-  // Relasi Modul Edukasi (Fase 1)
+  // Relasi Modul Edukasi 
   educationProgress UserEducationProgress[]
-
-  // Relasi Audit & Logs
   actionsPerformed AccessLog[]    @relation("ActorRelation")
   actionsTargeted  AccessLog[]    @relation("TargetRelation")
   RetentionLog     RetentionLog[]
-  // [NEW] Relasi ke Log Simulasi (Agent Tools)
-  // Menghubungkan Agen dengan history simulasi yang pernah mereka lakukan
   simulationLogs   SimulationLog[]
+
+  // --- RELASI BARU UNTUK SUBSCRIPTION ---
+  subscription          UserSubscription?       // Relasi One-to-One (Active Sub)
+  subscriptionOrders    SubscriptionOrder[]     // Relasi One-to-Many (History)
 
   // [OPTIMIZATION] Index FK untuk mempercepat JOIN Unit Kerja
   @@index([unitKerjaId])
@@ -671,4 +671,92 @@ model SimulationLog {
   @@index([agentId])
   @@index([createdAt])
   @@map("simulation_logs")
+}
+
+// --- NEW ENUMS & MODELS ---
+
+enum VerificationStatus {
+  PENDING   // Baru upload, user langsung aktif (Optimistic)
+  VALID     // Uang diterima Admin
+  INVALID   // Uang tidak masuk, trigger revocation
+}
+
+enum SubscriptionStatus {
+  ACTIVE    // User bisa akses fitur PRO
+  EXPIRED   // Masa waktu habis
+  REVOKED   // Admin membatalkan paksa (misal bukti palsu)
+}
+
+model SubscriptionPlan {
+  id              String   @id @default(uuid())
+  code            String   @unique // MONTHLY_1, MONTHLY_6, YEARLY_1
+  name            String   // "Paket 1 Bulan", "Paket Tahunan"
+  description     String?  @db.Text
+  durationMonths  Int      // 1, 6, 12
+  price           Decimal  @db.Decimal(15, 2)
+  isActive        Boolean  @default(true) @map("is_active")
+  
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  // Relasi
+  orders          SubscriptionOrder[]
+  subscriptions   UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model SubscriptionOrder {
+  id                 String             @id @default(uuid())
+  userId             String             @map("user_id")
+  planId             String             @map("plan_id")
+  proofImageUrl      String             @map("proof_image_url")
+  
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  adminNotes         String?            @map("admin_notes") @db.Text
+  
+  snapshotPrice      Decimal            @map("snapshot_price") @db.Decimal(15, 2)
+  
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  // Relasi
+  user               User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan               SubscriptionPlan   @relation(fields: [planId], references: [id])
+
+  // --- [FIX] TAMBAHKAN BARIS INI ---
+  // Relasi balik untuk 'lastOrder' di UserSubscription
+  // Kita gunakan Array [] karena secara teknis Prisma menganggap 1 Order bisa saja menjadi 'lastOrder' (meski logic kita 1-1)
+  activatedSubscription UserSubscription[] 
+
+  @@map("subscription_orders")
+  @@index([userId])
+  @@index([verificationStatus])
+}
+
+model UserSubscription {
+  id              String             @id @default(uuid())
+  userId          String             @unique @map("user_id") // 1 User hanya 1 Active Sub
+  planId          String             @map("plan_id")
+  
+  // Status Hak Akses
+  status          SubscriptionStatus @default(ACTIVE)
+  
+  startDate       DateTime           @default(now()) @map("start_date")
+  endDate         DateTime           @map("end_date") // Dihitung di Service: start + duration
+  
+  lastOrderId     String             @map("last_order_id") // Referensi ke order terakhir
+  
+  createdAt       DateTime           @default(now()) @map("created_at")
+  updatedAt       DateTime           @updatedAt @map("updated_at")
+
+  // Relasi
+  user            User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan            SubscriptionPlan   @relation(fields: [planId], references: [id])
+  lastOrder       SubscriptionOrder  @relation(fields: [lastOrderId], references: [id])
+
+  @@map("user_subscriptions")
+  @@index([userId])
+  @@index([status])
+  @@index([endDate]) 
 }

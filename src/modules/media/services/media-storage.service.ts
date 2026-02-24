@@ -29,7 +29,7 @@ export class MediaStorageService implements OnModuleInit {
      * Core Method: Upload File
      * Mengubah Binary Buffer dari Request menjadi File Fisik di Server.
      */
-    async uploadFile(file: Express.Multer.File): Promise<{ url: string; filename: string; mimeType: string; size: number }> {
+    async uploadFile(file: Express.Multer.File, p0: string): Promise<{ url: string; filename: string; mimeType: string; size: number }> {
         try {
             // 1. Validasi Keberadaan File (Defensive Programming)
             if (!file) {
