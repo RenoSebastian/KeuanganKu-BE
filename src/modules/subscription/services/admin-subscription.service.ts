@@ -95,7 +95,7 @@ export class AdminSubscriptionService {
                     // Kembalikan jatah ke standar FREE (3 Token)
                     await tx.userUsage.update({
                         where: { userId: order.userId },
-                        data: { simulationQuota: 3 },
+                        data: { simulationQuota: 10 },
                     });
                 }
             } else if (dto.status === VerificationStatus.VALID) {

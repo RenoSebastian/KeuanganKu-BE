@@ -120,7 +120,7 @@ export class FinancialService {
       if (!usage) {
         // USER LAMA DETECTED: Buatkan record secara otomatis (Welcome Bonus)
         usage = await tx.userUsage.create({
-          data: { userId, simulationQuota: 3, totalUsed: 0 }
+          data: { userId, simulationQuota: 10, totalUsed: 0 }
         });
       }
 

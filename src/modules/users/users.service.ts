@@ -133,7 +133,7 @@ export class UsersService {
       // Setiap user baru mendapat 3 Token Gratis (Configurable)
       usage: {
         create: {
-          simulationQuota: 3,
+          simulationQuota: 10,
           totalUsed: 0,
         },
       },

@@ -35,7 +35,7 @@ export class AuthService {
           // User baru otomatis mendapat 3 Token Gratis
           usage: {
             create: {
-              simulationQuota: 3,
+              simulationQuota: 10,
               totalUsed: 0,
             },
           },
