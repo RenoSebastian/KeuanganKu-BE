@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { CreateAuditLogDto } from './dto/create-audit-log.dto';
 
@@ -6,12 +7,11 @@ import { CreateAuditLogDto } from './dto/create-audit-log.dto';
 export class AuditService {
   private readonly logger = new Logger(AuditService.name);
 
-  constructor(private prisma: PrismaService) { }
+  constructor(private readonly prisma: PrismaService) { }
 
   /**
-   * [IMPLEMENTED] ADAPTER METHOD
-   * Dipanggil oleh FinancialController dan modul lain.
-   * Tugasnya: Memetakan parameter 'flat' menjadi struktur DTO/Database.
+   * [PUBLIC ADAPTER] GENERAL USER ACTIVITY
+   * Wrapper untuk memudahkan logging aktivitas user biasa.
    */
   async logActivity(data: {
     userId: string;
@@ -22,70 +22,118 @@ export class AuditService {
     ip?: string;
     userAgent?: string;
   }) {
-    // Mapping Logic:
-    // 1. userId -> actorId (Sesuai schema Prisma)
-    // 2. entity, entityId, details -> masuk ke kolom JSON 'metadata'
     const payload: CreateAuditLogDto = {
       actorId: data.userId,
       action: data.action,
-      // [FIX] Gunakan undefined, bukan null, agar sesuai dengan definisi DTO (string | undefined)
       targetUserId: undefined,
       metadata: {
+        context: 'USER_ACTIVITY',
         entity: data.entity,
         entityId: data.entityId,
         details: data.details,
         ip: data.ip,
         userAgent: data.userAgent,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
       },
     };
 
-    // Panggil Core Logic
     return this.logAccess(payload);
   }
 
   /**
-   * CORE: MENCATAT JEJAK DIGITAL (AUDIT TRAIL)
-   * Menyimpan data langsung ke tabel AccessLog di Database.
+   * [PUBLIC ADAPTER] ADMIN CORE ACTIONS
+   * Wrapper khusus untuk Admin SaaS (Approval, Banned, Inject Quota).
+   */
+  async logAdminAction(data: {
+    adminId: string;
+    action: string;
+    targetUserId: string;
+    details: Record<string, any>;
+    ip?: string;
+  }) {
+    const payload: CreateAuditLogDto = {
+      actorId: data.adminId,
+      action: data.action,
+      targetUserId: data.targetUserId,
+      metadata: {
+        context: 'ADMIN_ACTION',
+        ...data.details,
+        ip: data.ip,
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    return this.logAccess(payload);
+  }
+
+  /**
+   * [CORE LOGIC] DB WRITER
+   * NOTE: Method ini dibuat PUBLIC (bukan private) karena masih dipanggil langsung
+   * oleh 'AuditInterceptor' dan 'DirectorService'.
    */
   async logAccess(dto: CreateAuditLogDto): Promise<void> {
     try {
       await this.prisma.accessLog.create({
         data: {
           actorId: dto.actorId,
-          // Prisma biasanya butuh null untuk kolom optional di DB, jadi konversi di sini
           targetUserId: dto.targetUserId ?? null,
           action: dto.action,
-          // Cast ke any atau InputJsonValue agar Prisma tidak komplain soal tipe JSON
-          metadata: (dto.metadata as any) ?? {},
+          // Menggunakan tipe Prisma.InputJsonValue untuk keamanan tipe data JSON
+          metadata: (dto.metadata as Prisma.InputJsonValue) ?? {},
         },
       });
     } catch (error) {
-      // Fail-safe: Error logging JANGAN SAMPAI mematikan flow utama user
-      // User tetap harus bisa download PDF meski log gagal dicatat.
+      // Fail-safe: Error logging tidak boleh mematikan flow aplikasi utama
       this.logger.error(
         `[AUDIT FAILURE] Failed to log action '${dto.action}' by ${dto.actorId}`,
-        error instanceof Error ? error.stack : String(error)
+        error instanceof Error ? error.stack : String(error),
       );
     }
   }
 
   /**
-   * READ: HISTORY LOG
-   * Mengambil data log untuk ditampilkan di dashboard Admin/Direksi
+   * [READ] DASHBOARD ANALYTICS
    */
-  async getAllLogs() {
+  async getAllLogs(limit = 100) {
     return this.prisma.accessLog.findMany({
       include: {
         actor: {
-          select: { fullName: true, email: true, role: true },
+          select: {
+            fullName: true,
+            email: true,
+            role: true,
+          },
         },
         targetUser: {
-          select: { fullName: true, unitKerja: { select: { namaUnit: true } } },
+          select: {
+            fullName: true,
+            email: true,
+          },
         },
       },
+      orderBy: {
+        accessedAt: 'desc',
+      },
+      take: limit,
+    });
+  }
+
+  /**
+   * [READ] ADMIN SPECIFIC LOGS
+   */
+  async getAdminLogs(limit = 50) {
+    return this.prisma.accessLog.findMany({
+      where: {
+        actor: {
+          role: 'ADMIN',
+        },
+      },
+      include: {
+        actor: { select: { fullName: true, email: true } },
+        targetUser: { select: { fullName: true, email: true } },
+      },
       orderBy: { accessedAt: 'desc' },
-      take: 100,
+      take: limit,
     });
   }
 }

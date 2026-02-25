@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { forwardRef, Module } from '@nestjs/common';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { MediaModule } from '../media/media.module';
 import { SubscriptionService } from './services/subscription.service';
@@ -7,12 +7,16 @@ import { SubscriptionCronService } from './services/subscription-cron.service'; 
 import { SubscriptionController } from './controllers/subscription.controller';
 import { AdminSubscriptionController } from './controllers/admin-subscription.controller';
 import { NotificationModule } from '../notification/notification.module';
+import { UsersModule } from '../users/users.module'; // [REQUIRED]
+import { AuditModule } from '../audit/audit.module'; // [REQUIRED]
 
 @Module({
     imports: [
         PrismaModule,
         MediaModule,
-        NotificationModule
+        NotificationModule,
+        forwardRef(() => UsersModule), 
+    AuditModule,
     ],
     controllers: [
         SubscriptionController,

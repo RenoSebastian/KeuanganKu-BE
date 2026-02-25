@@ -6,7 +6,7 @@
 
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  previewFeatures = ["postgresqlExtensions", "interactiveTransactions"]
   binaryTargets   = ["native", "debian-openssl-3.0.x"]
 }
 
@@ -104,20 +104,31 @@ enum NotificationCategory {
   PAYMENT
 }
 
+// [NEW] Enum untuk tipe transaksi ledger kuota
+enum QuotaTransactionType {
+  SUBSCRIPTION_RENEWAL // Dapat dari paket langganan
+  ADMIN_BONUS          // Ditambah manual oleh admin
+  USAGE_SIMULATION     // Dipakai untuk generate PDF
+  COMPENSATION         // Ganti rugi error
+  CORRECTION           // Penyesuaian audit
+}
+
 // =========================================================
-// MASTER DATA
+// MASTER DATA (REFACTORED FOR SAAS)
 // =========================================================
 
-model UnitKerja {
+// [REFACTORED] Menggantikan 'UnitKerja' menjadi 'Agency' untuk konteks Asuransi
+model Agency {
   id        String   @id @default(uuid())
-  kodeUnit  String   @unique @map("kode_unit")
-  namaUnit  String   @map("nama_unit")
+  code      String   @unique @map("agency_code") // Ex: AG-001
+  name      String   @map("agency_name")         // Ex: "Agency Jakarta Selatan"
+  address   String?  @db.Text
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   users User[]
 
-  @@map("unit_kerja")
+  @@map("agencies")
 }
 
 // =========================================================
@@ -125,63 +136,91 @@ model UnitKerja {
 // =========================================================
 
 model User {
-  id             String    @id @default(uuid())
-  unitKerjaId    String?   @map("unit_kerja_id")
-  nip            String?   @unique
-  email          String    @unique
-  passwordHash   String    @map("password_hash")
-  fullName       String    @map("full_name")
+  id           String  @id @default(uuid())
+  agencyId     String? @map("agency_id")
+  nip          String? @unique // Bisa digunakan sebagai Agent ID
+  email        String  @unique
+  passwordHash String  @map("password_hash")
+  fullName     String  @map("full_name")
   
   gender         String?   @db.VarChar(50)
   address        String?   @db.Text
-  agencyName     String?   @map("agency_name")
-  agentLevel     String?   @map("agent_level")
+  // Field legacy 'agencyName' bisa dihapus jika sudah pindah ke relasi Agency
+  agentLevel     String?   @map("agent_level") // Junior, Senior, MDRT
   companyName    String?   @map("company_name")
   goals          String?   @db.Text
   avatar         String?   @db.Text
   dateOfBirth    DateTime? @map("date_of_birth")
   dependentCount Int       @default(0) @map("dependent_count")
-  role           Role      @default(USER)
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  
+  // Quota sekarang dikelola via UserQuotaLedger, tapi field ini tetap ada
+  // sebagai 'Current Balance' cache untuk performa read.
+  quota          Int       @default(0) 
 
-  unitKerja         UnitKerja?              @relation(fields: [unitKerjaId], references: [id])
+  role      Role     @default(USER)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  agency             Agency?             @relation(fields: [agencyId], references: [id])
   
-  budgetPlans       BudgetPlan[]
-  financialChecks   FinancialCheckup[]
-  eduPlans          EducationPlan[]
-  pensionPlans      PensionPlan[]
-  insurancePlans    InsurancePlan[]
-  goalPlans         GoalPlan[]
+  budgetPlans        BudgetPlan[]
+  financialChecks    FinancialCheckup[]
+  eduPlans           EducationPlan[]
+  pensionPlans       PensionPlan[]
+  insurancePlans     InsurancePlan[]
+  goalPlans          GoalPlan[]
   
-  educationProgress UserEducationProgress[]
-  actionsPerformed  AccessLog[]             @relation("ActorRelation")
-  actionsTargeted   AccessLog[]             @relation("TargetRelation")
-  RetentionLog      RetentionLog[]
-  simulationLogs    SimulationLog[]
+  educationProgress  UserEducationProgress[]
   
-  subscription      UserSubscription?
+  // Audit Relations
+  actionsPerformed   AccessLog[]         @relation("ActorRelation")
+  actionsTargeted    AccessLog[]         @relation("TargetRelation")
+  RetentionLog       RetentionLog[]
+  simulationLogs     SimulationLog[]
+  
+  // Subscription & Usage Relations
+  subscription       UserSubscription?
   subscriptionOrders SubscriptionOrder[]
-  notifications     Notification[]
-  usage             UserUsage?
+  notifications      Notification[]
+  usage              UserUsage?
+  quotaLedger        UserQuotaLedger[]
+  activeSessions     ActiveSession[]
 
-  @@index([unitKerjaId])
+  @@index([agencyId])
   @@map("users")
 }
 
 // =========================================================
-// USAGE & SUBSCRIPTION SYSTEM
+// USAGE & SUBSCRIPTION SYSTEM (ENHANCED)
 // =========================================================
 
 model UserUsage {
   userId          String   @id @map("user_id")
-  simulationQuota Int      @default(3) @map("simulation_quota")
+  simulationQuota Int      @default(3) @map("simulation_quota") // Legacy field support
   totalUsed       Int      @default(0) @map("total_used")
   updatedAt       DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_usages")
+}
+
+// [NEW] Ledger untuk mencatat riwayat keluar-masuk kuota (Double-Entry)
+model UserQuotaLedger {
+  id           String               @id @default(uuid())
+  userId       String               @map("user_id")
+  amount       Int                  // Positif (Debit) atau Negatif (Kredit)
+  type         QuotaTransactionType
+  referenceId  String?              @map("reference_id") // ID Order atau ID Simulasi
+  balanceAfter Int                  @map("balance_after") // Saldo setelah transaksi
+  description  String?              @db.Text
+  createdAt    DateTime             @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([type])
+  @@map("user_quota_ledgers")
 }
 
 model SubscriptionPlan {
@@ -191,6 +230,7 @@ model SubscriptionPlan {
   description    String?  @db.Text
   durationMonths Int
   price          Decimal  @db.Decimal(15, 2)
+  bonusQuota     Int      @default(0) @map("bonus_quota") // Kuota gratis saat beli paket
   isActive       Boolean  @default(true) @map("is_active")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
@@ -212,13 +252,30 @@ model SubscriptionOrder {
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
 
-  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan                  SubscriptionPlan   @relation(fields: [planId], references: [id])
+  user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                  SubscriptionPlan       @relation(fields: [planId], references: [id])
   activatedSubscription UserSubscription[]
+  paymentAudit          SubscriptionPaymentAudit?
 
   @@index([userId])
   @@index([verificationStatus])
   @@map("subscription_orders")
+}
+
+// [NEW] Audit khusus verifikasi pembayaran (untuk mencegah fraud internal)
+model SubscriptionPaymentAudit {
+  id               String   @id @default(uuid())
+  orderId          String   @unique @map("order_id")
+  adminId          String   @map("admin_id")
+  status           VerificationStatus
+  rejectionReason  String?  @map("rejection_reason") @db.Text
+  proofSnapshotUrl String?  @map("proof_snapshot_url") // Snapshot bukti bayar saat diverifikasi
+  verifiedAt       DateTime @default(now()) @map("verified_at")
+
+  order SubscriptionOrder @relation(fields: [orderId], references: [id])
+  // Relasi ke User (Admin) tidak dibuat strict relation agar tidak circular, cukup simpan ID
+  
+  @@map("subscription_payment_audits")
 }
 
 model UserSubscription {
@@ -265,27 +322,43 @@ model Notification {
 }
 
 // =========================================================
-// AGENT SIMULATION & LOGS
+// AGENT SIMULATION & MONITORING
 // =========================================================
 
+// [NEW] Untuk fitur Live Monitoring user yang sedang online
+model ActiveSession {
+  id             String   @id @default(uuid())
+  userId         String   @map("user_id")
+  socketId       String?  @map("socket_id")
+  deviceInfo     String?  @map("device_info") // User-Agent atau Device Name
+  ipAddress      String?  @map("ip_address")
+  lastActivityAt DateTime @default(now()) @map("last_activity_at")
+  loginAt        DateTime @default(now()) @map("login_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([lastActivityAt])
+  @@map("active_sessions")
+}
+
 model SimulationLog {
-  id              String        @id @default(uuid())
-  agentId         String        @map("agent_id")
-  clientName      String        @map("client_name")
-  clientAge       Int?          @map("client_age")
-  clientCity      String?       @map("client_city")
-  clientJob       String?       @map("client_job")
-  inputPayload    Json          @map("input_payload")
-  outputResult    Json?         @map("output_result")
-  sessionId       String        @map("session_id")
-  totalIncome     Decimal?      @map("total_income") @db.Decimal(15, 2)
-  calculatedSurplus Decimal?    @map("calculated_surplus") @db.Decimal(15, 2)
-  healthScore     Int?          @map("health_score")
-  status          HealthStatus? @default(BAHAYA)
-  financialRatios Json?         @map("financial_ratios")
-  moduleType      String        @default("BUDGETING") @map("module_type")
-  simulationDate  DateTime      @default(now()) @map("simulation_date")
-  createdAt       DateTime      @default(now()) @map("created_at")
+  id                String        @id @default(uuid())
+  agentId           String        @map("agent_id")
+  clientName        String        @map("client_name")
+  clientAge         Int?          @map("client_age")
+  clientCity        String?       @map("client_city")
+  clientJob         String?       @map("client_job")
+  inputPayload      Json          @map("input_payload")
+  outputResult      Json?         @map("output_result")
+  sessionId         String        @map("session_id")
+  totalIncome       Decimal?      @map("total_income") @db.Decimal(15, 2)
+  calculatedSurplus Decimal?      @map("calculated_surplus") @db.Decimal(15, 2)
+  healthScore       Int?          @map("health_score")
+  status            HealthStatus? @default(BAHAYA)
+  financialRatios   Json?         @map("financial_ratios")
+  moduleType        String        @default("BUDGETING") @map("module_type")
+  simulationDate    DateTime      @default(now()) @map("simulation_date")
+  createdAt         DateTime      @default(now()) @map("created_at")
 
   agent User @relation(fields: [agentId], references: [id])
 
@@ -299,8 +372,8 @@ model AccessLog {
   id           String   @id @default(uuid())
   actorId      String   @map("actor_id")
   targetUserId String?  @map("target_user_id")
-  action       String
-  metadata     Json?
+  action       String   // Ex: 'APPROVE_PAYMENT', 'INJECT_QUOTA'
+  metadata     Json?    // Stores snapshot data, reasons, etc.
   accessedAt   DateTime @default(now()) @map("accessed_at")
 
   actor      User  @relation("ActorRelation", fields: [actorId], references: [id])
@@ -544,7 +617,7 @@ model EducationModule {
   createdAt    DateTime              @default(now()) @map("created_at")
   updatedAt    DateTime              @updatedAt @map("updated_at")
 
-  category     EducationCategory       @relation(fields: [categoryId], references: [id])
+  category     EducationCategory     @relation(fields: [categoryId], references: [id])
   sections     ModuleSection[]
   userProgress UserEducationProgress[]
   quiz         Quiz?
@@ -584,23 +657,23 @@ model UserEducationProgress {
   updatedAt         DateTime                @updatedAt @map("updated_at")
   startedAt         DateTime?               @map("started_at")
 
-  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
-  lastReadSection ModuleSection? @relation(fields: [lastReadSectionId], references: [id])
+  lastReadSection ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
 
   @@id([userId, moduleId])
   @@map("user_education_progress")
 }
 
 model Quiz {
-  id           String         @id @default(uuid())
-  moduleId     String         @unique @map("module_id")
-  passingScore Int            @default(70) @map("passing_score")
-  timeLimit    Int            @default(0) @map("time_limit")
-  maxAttempts  Int            @default(3) @map("max_attempts")
-  description  String?        @db.Text
-  createdAt    DateTime       @default(now()) @map("created_at")
-  updatedAt    DateTime       @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  moduleId     String   @unique @map("module_id")
+  passingScore Int      @default(70) @map("passing_score")
+  timeLimit    Int      @default(0) @map("time_limit")
+  maxAttempts  Int      @default(3) @map("max_attempts")
+  description  String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
   module       EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   questions    QuizQuestion[]
 
