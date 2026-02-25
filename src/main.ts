@@ -27,15 +27,13 @@ async function bootstrap() {
   /**
    * 2. GLOBAL PREFIX
    * Semua endpoint akan diawali dengan /api (contoh: /api/auth/login).
-   * Ini memudahkan konfigurasi reverse proxy (Nginx) di production.
    */
   app.setGlobalPrefix('api');
 
   /**
    * 3. Infrastructure: Payload Limits
    * Konfigurasi ini KRUSIAL untuk fitur Upload File.
-   * Kita set 50mb (Safe Buffer) untuk menangani request multipart/form-data
-   * yang berisi gambar, meskipun validasi logika tetap di-limit 2MB di Controller.
+   * Kita set 50mb (Safe Buffer) untuk menangani request multipart/form-data.
    */
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -53,15 +51,12 @@ async function bootstrap() {
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
     allowedHeaders: 'Content-Type, Accept, Authorization',
-    // [FIX] Expose Headers agar Frontend bisa baca Token MGC dan Filename PDF
+    // Expose Headers agar Frontend bisa baca Token MGC dan Filename PDF
     exposedHeaders: ['X-MGC-Token', 'Content-Disposition'],
   });
 
   /**
    * 5. Global Pipes & Interceptors (Quality Assurance)
-   * - LoggingInterceptor: Mencatat setiap request masuk/keluar.
-   * - AllExceptionsFilter: Menstandarisasi format error response.
-   * - ValidationPipe: Memastikan data masuk sesuai DTO (Data Transfer Object).
    */
   app.useGlobalInterceptors(new LoggingInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
@@ -91,13 +86,17 @@ async function bootstrap() {
   /**
    * 7. Start Server
    * Note: Static Assets sekarang dilayani oleh ServeStaticModule di app.module.ts
-   * Folder: ./uploads -> URL: /uploads
+   * Folder: ./uploads -> URL: /api/uploads
    */
   const port = process.env.PORT || 4000;
-  await app.listen(port);
 
-  // Path folder uploads untuk keperluan logging debug
-  const uploadPath = join(__dirname, '..', 'uploads');
+  // [FIX] Bind ke 0.0.0.0 untuk kompatibilitas Docker/Network
+  // Agar bisa diakses dari luar container (misal oleh Frontend container)
+  await app.listen(port, '0.0.0.0');
+
+  // [FIX] Gunakan process.cwd() agar path akurat saat mode production/dist
+  // Ini memastikan log menunjuk ke folder uploads di root project, bukan di dalam dist
+  const uploadPath = join(process.cwd(), 'uploads');
 
   logger.log(`🚀 Backend Server running on internal port: ${port}`);
   logger.log(`📂 Static Assets Directory (Managed by Module): ${uploadPath}`);

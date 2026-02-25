@@ -51,7 +51,7 @@ import { NotificationModule } from './modules/notification/notification.module';
       rootPath: path.join(process.cwd(), 'uploads'),
 
       // URL Prefix untuk akses file
-      serveRoot: '/api/uploads',
+      serveRoot: 'uploads',
 
       // [FIX] HAPUS property 'exclude'. 
       // Karena serveRoot sudah spesifik '/api/uploads', ia tidak akan memakan route '/api/auth' dll.
