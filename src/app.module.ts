@@ -44,17 +44,15 @@ import { NotificationModule } from './modules/notification/notification.module';
     /**
      * 2. STATIC FILE SERVING [FIXED]
      * Mengizinkan akses publik ke folder uploads.
-     * URL: http://host:port/api/uploads/{filename}
+     * URL: http://host:port/uploads/{filename}
      */
     ServeStaticModule.forRoot({
-      // [FIX] Gunakan process.cwd() agar aman saat production/build (menunjuk ke root project)
+      // Gunakan process.cwd() agar aman saat production/build
       rootPath: path.join(process.cwd(), 'uploads'),
 
-      // URL Prefix untuk akses file
-      serveRoot: 'uploads',
-
-      // [FIX] HAPUS property 'exclude'. 
-      // Karena serveRoot sudah spesifik '/api/uploads', ia tidak akan memakan route '/api/auth' dll.
+      // [CRITICAL FIX] Tambahkan '/' di depan 'uploads'
+      // Agar route menjadi absolute: /uploads
+      serveRoot: '/uploads',
     }),
 
     // 3. Database
@@ -77,17 +75,14 @@ import { NotificationModule } from './modules/notification/notification.module';
   ],
   controllers: [],
   providers: [
-    // Global Error Handling
     {
       provide: APP_FILTER,
       useClass: HttpExceptionFilter,
     },
-    // Global Request Logging
     {
       provide: APP_INTERCEPTOR,
       useClass: LoggingInterceptor,
     },
-    // Global Audit Trail
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
