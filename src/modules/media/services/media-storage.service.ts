@@ -13,10 +13,9 @@ export class MediaStorageService implements OnModuleInit {
     // Default './uploads', tapi bisa di-override via ENV untuk production (misal: volume docker)
     private readonly UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
 
-    // URL Prefix yang akan disimpan di database.
-    // Frontend akan mengakses via: {BASE_URL}/media/{filename}
-    // Note: Prefix 'media' harus sesuai dengan controller route
-    private readonly URL_PREFIX = 'media';
+    // [FIXED] URL Prefix disesuaikan dengan ServeStaticModule di app.module.ts
+    // Sebelumnya 'media', sekarang 'api/uploads' agar routing static server dikenali.
+    private readonly URL_PREFIX = 'uploads';
 
     /**
      * Lifecycle Hook: Dijalankan otomatis saat modul diinisialisasi.
@@ -37,7 +36,7 @@ export class MediaStorageService implements OnModuleInit {
                 throw new InternalServerErrorException('File object is empty.');
             }
 
-            // 2. Siapkan Folder Tujuan (misal uploads/media)
+            // 2. Siapkan Folder Tujuan (misal uploads/subscription-proofs)
             const targetDir = path.join(this.getUploadPath(), subFolder);
             if (!fs.existsSync(targetDir)) {
                 fs.mkdirSync(targetDir, { recursive: true });
@@ -57,9 +56,12 @@ export class MediaStorageService implements OnModuleInit {
             this.logger.log(`File persisted successfully: ${filename} (${file.size} bytes)`);
 
             // 5. Return Metadata
-            // URL Publik: /media/{filename} -> Sesuai endpoint controller GET :filename
-            // Path Relatif: media/{filename} -> Untuk keperluan delete internal
-            const publicUrl = `/${this.URL_PREFIX}/${filename}`;
+            // [FIXED Logic]
+            // URL Publik: /api/uploads/{subFolder}/{filename}
+            // Contoh: /api/uploads/subscription-proofs/abc-123.jpg
+            const publicUrl = `/${this.URL_PREFIX}/${subFolder}/${filename}`;
+
+            // Path Relatif: subscription-proofs/abc-123.jpg (Untuk keperluan delete internal)
             const relativePath = `${subFolder}/${filename}`;
 
             return {
@@ -86,10 +88,6 @@ export class MediaStorageService implements OnModuleInit {
         try {
             // [SECURITY] Sanitasi input path untuk mencegah Path Traversal Attack
             // Kita ambil nama filenya saja, lalu gabung ulang dengan folder resmi.
-            // Ini mencegah input jahat seperti "../../etc/passwd"
-
-            // Catatan: Jika struktur folder lebih dalam (misal: uploads/2024/10/file.jpg),
-            // logika ini perlu disesuaikan. Untuk saat ini kita asumsikan flat structure atau 1 level subfolder.
 
             // Ambil path absolut
             const absolutePath = path.resolve(this.getUploadPath(), relativePath);
@@ -112,7 +110,6 @@ export class MediaStorageService implements OnModuleInit {
                 if (err.code === 'ENOENT') {
                     // [IDEMPOTENCY]
                     // Jika file tidak ditemukan, kita anggap "Sukses" (karena tujuan akhirnya file tidak ada).
-                    // Namun return false agar caller tahu tidak ada aksi penghapusan real yang terjadi (opsional).
                     this.logger.warn(`File not found during cleanup (skipped): ${relativePath}`);
                     return false;
                 }
@@ -121,8 +118,6 @@ export class MediaStorageService implements OnModuleInit {
 
         } catch (error: any) {
             this.logger.error(`Cleanup failed for ${relativePath}: ${error.message}`);
-            // Kita return false (gagal hapus) tapi TIDAK throw error, 
-            // agar proses batch delete pada array file lain tetap berjalan.
             return false;
         }
     }
@@ -130,9 +125,6 @@ export class MediaStorageService implements OnModuleInit {
     /**
      * [PHASE 1: DISCOVERY & INDEXING]
      * Mengembalikan Async Generator untuk iterasi file fisik secara efisien (Streaming).
-     * Pattern: Directory Iterator
-     * Mengapa? fs.readdir biasa memuat seluruh array nama file ke RAM. 
-     * fs.opendir membuka stream pointer ke direktori, sangat hemat memori untuk ribuan file.
      */
     async *getFileIterator(subFolder = 'media'): AsyncGenerator<string> {
         const dirPath = path.join(this.getUploadPath(), subFolder);
@@ -154,7 +146,6 @@ export class MediaStorageService implements OnModuleInit {
             }
         } catch (error: any) {
             this.logger.error(`Failed to open directory stream: ${error.message}`);
-            // Jika folder tidak ada, kita yield kosong (bukan throw error) agar proses cron tidak crash total
             return;
         }
     }
@@ -170,14 +161,12 @@ export class MediaStorageService implements OnModuleInit {
             // Double security check
             if (!absolutePath.startsWith(this.getUploadPath())) return null;
 
-            // fs.stat memberikan informasi size (bytes) dan mtime (modified time)
             const stats = await fsPromises.stat(absolutePath);
             return {
                 size: stats.size,
                 mtime: stats.mtime
             };
         } catch (error) {
-            // Jika file tidak ada atau error lain, return null
             return null;
         }
     }

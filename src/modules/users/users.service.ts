@@ -30,6 +30,7 @@ export class UsersService {
    * 1. Data Unit Kerja
    * 2. Status Subscription (Plan & Validity)
    * 3. Sisa Kuota Simulasi (UserUsage)
+   * 4. Total History Simulasi (Count) -> Untuk Dashboard "Total Report"
    */
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
@@ -42,6 +43,12 @@ export class UsersService {
         subscription: {
           include: {
             plan: true, // Sertakan detail nama paket (Monthly/Yearly)
+          },
+        },
+        // [NEW] Hitung total simulasi yang pernah dibuat user
+        _count: {
+          select: {
+            simulationLogs: true,
           },
         },
       },
@@ -130,7 +137,7 @@ export class UsersService {
       dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
 
       // [CRITICAL] Inisialisasi Token Bucket (Quota) untuk User Baru
-      // Setiap user baru mendapat 3 Token Gratis (Configurable)
+      // Setiap user baru mendapat 10 Token Gratis (Configurable)
       usage: {
         create: {
           simulationQuota: 10,
@@ -175,6 +182,10 @@ export class UsersService {
             plan: true,
             lastOrder: true,
           },
+        },
+        // [NEW] Admin juga bisa melihat total simulasi user
+        _count: {
+          select: { simulationLogs: true },
         },
       },
     });
