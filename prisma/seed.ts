@@ -8,6 +8,7 @@ import { seedInsurancePlans } from './seeds/06_insurance_plan';
 import { seedPensionPlans } from './seeds/07_pension_plan';
 import { seedGoalPlans } from './seeds/08_goal_plan';
 import { educationModulesSeed } from './seeds/09_education_modules';
+import { seedSubscriptionPlans } from './seeds/10_subscription_plans';
 
 const prisma = new PrismaClient();
 
@@ -20,6 +21,7 @@ async function main() {
     // --- LEVEL 1: FOUNDATION ---
     console.log('\n[1/4] 🌱 Seeding Foundation (Master Data & Users)...');
     await seedMasterData(prisma);
+    await seedSubscriptionPlans(prisma);
     await seedUsers(prisma);
 
     // --- LEVEL 2: CORE FINANCIAL ---

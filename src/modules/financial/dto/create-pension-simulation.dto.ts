@@ -6,7 +6,8 @@ import {
     Min,
     Max,
     IsOptional,
-    IsDateString
+    IsDateString,
+    IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -14,17 +15,28 @@ import { Type } from 'class-transformer';
  * DTO: CreatePensionSimulationDto
  * -------------------------------------------------------------------------
  * Data Transfer Object untuk menangani input simulasi Dana Pensiun (Stateless).
- * * Design Pattern:
+ * Design Pattern:
  * Menggunakan pendekatan Flat-DTO untuk kemudahan parsing dari Frontend,
  * namun secara logis data terbagi menjadi dua segmen:
  * 1. Identity Segment: Metadata untuk header laporan PDF.
  * 2. Financial Segment: Parameter inti untuk kalkulasi TVM (Time Value of Money).
- * * Validasi:
+ * Validasi:
  * - Menggunakan 'class-validator' untuk memastikan integritas tipe data.
  * - Validasi logika bisnis (seperti retirementAge > currentAge) akan
  * diesekusi di Service Layer untuk error handling yang lebih kontekstual.
  */
 export class CreatePensionSimulationDto {
+    // ===========================================================================
+    // SEGMENT 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
 
     // =======================================================================
     // SEGMENT 1: CLIENT IDENTITY (Metadata Laporan)

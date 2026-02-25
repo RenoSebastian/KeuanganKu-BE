@@ -9,7 +9,7 @@ import {
     Max,
     IsEnum,
     IsNotEmpty,
-    IsPhoneNumber
+    IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
@@ -128,6 +128,18 @@ export class EducationSimulationChildItem {
 // LEVEL 1: MAIN DTO (SIMULASI PENDIDIKAN AGEN)
 // ==============================================================================
 export class CreateEducationSimulationDto {
+    // ===========================================================================
+    // LEVEL 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
+
     // --- 1. IDENTITAS KLIEN ---
 
     @ApiProperty({ example: 'Bapak Budi', description: 'Nama Lengkap Klien' })

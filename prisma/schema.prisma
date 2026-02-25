@@ -1,4 +1,9 @@
-// --- KONFIGURASI ---
+// File: prisma/schema.prisma
+
+// =========================================================
+// KONFIGURASI DATABASE
+// =========================================================
+
 generator client {
   provider        = "prisma-client-js"
   previewFeatures = ["postgresqlExtensions"]
@@ -8,11 +13,11 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
-  extensions = [pg_trgm] // Definisikan extension pg_trgm untuk search
+  extensions = [pg_trgm] // Extension untuk pencarian teks cepat
 }
 
 // =========================================================
-// ENUMS (Standarisasi Data)
+// ENUMS
 // =========================================================
 
 enum Role {
@@ -28,8 +33,8 @@ enum HealthStatus {
 }
 
 enum EducationMethod {
-  ARITHMETIC // Konvensional
-  GEOMETRIC // Inflasi Progresif
+  ARITHMETIC
+  GEOMETRIC
 }
 
 enum SchoolLevel {
@@ -42,8 +47,8 @@ enum SchoolLevel {
 }
 
 enum CostType {
-  ENTRY // Uang Pangkal
-  ANNUAL // SPP Tahunan
+  ENTRY
+  ANNUAL
 }
 
 enum InsuranceType {
@@ -51,8 +56,6 @@ enum InsuranceType {
   HEALTH
   CRITICAL_ILLNESS
 }
-
-// --- Enums Modul Edukasi & Quiz ---
 
 enum EducationModuleStatus {
   DRAFT
@@ -65,11 +68,40 @@ enum EducationProgressStatus {
   COMPLETED
 }
 
-// [NEW] Enum Tipe Pertanyaan (Extensible untuk masa depan)
+enum EducationLevel {
+  BEGINNER
+  INTERMEDIATE
+  ADVANCED
+}
+
 enum QuizQuestionType {
   SINGLE_CHOICE
-  // MULTIPLE_CHOICE - (Future Dev)
-  // TRUE_FALSE - (Future Dev)
+}
+
+enum VerificationStatus {
+  PENDING
+  VALID
+  INVALID
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  EXPIRED
+  REVOKED
+}
+
+enum NotificationType {
+  INFO
+  WARNING
+  SUCCESS
+  ERROR
+}
+
+enum NotificationCategory {
+  SUBSCRIPTION
+  QUOTA
+  SYSTEM
+  PAYMENT
 }
 
 // =========================================================
@@ -78,201 +110,310 @@ enum QuizQuestionType {
 
 model UnitKerja {
   id        String   @id @default(uuid())
-  kodeUnit  String   @unique @map("kode_unit") // e.g. "IT-01"
-  namaUnit  String   @map("nama_unit") // e.g. "Divisi TI"
+  kodeUnit  String   @unique @map("kode_unit")
+  namaUnit  String   @map("nama_unit")
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  // Relasi
   users User[]
 
   @@map("unit_kerja")
 }
 
 // =========================================================
-// USER MANAGEMENT & SECURITY
+// USER MANAGEMENT
 // =========================================================
 
 model User {
-  id           String  @id @default(uuid())
-  unitKerjaId  String? @map("unit_kerja_id")
-  nip          String? @unique
-  email        String  @unique
-  passwordHash String  @map("password_hash")
-  fullName     String  @map("full_name")
-
-  // --- [NEW] FIELD TAMBAHAN PROFIL (Fase 1) ---
-  gender      String? @db.VarChar(50)   // "Laki-laki" | "Perempuan"
-  address     String? @db.Text    // Alamat Domisili (Text agar muat panjang)
-  agencyName  String? @map("agency_name") // Nama Perusahaan Agen (PT Asuransi X)
-  agentLevel  String? @map("agent_level") // Jabatan (Agent, Senior Agent, Manager)
-  companyName String? @map("company_name") // Nama Perusahaan (Parent Company)
-  goals       String? @db.Text             // Tujuan/Goals (Text Input)
-  // ---------------------------------------------
-
-  // Avatar Field
-  avatar String? @db.Text
-
-  dateOfBirth    DateTime? @map("date_of_birth") // Penting untuk pensiun
+  id             String    @id @default(uuid())
+  unitKerjaId    String?   @map("unit_kerja_id")
+  nip            String?   @unique
+  email          String    @unique
+  passwordHash   String    @map("password_hash")
+  fullName       String    @map("full_name")
+  
+  gender         String?   @db.VarChar(50)
+  address        String?   @db.Text
+  agencyName     String?   @map("agency_name")
+  agentLevel     String?   @map("agent_level")
+  companyName    String?   @map("company_name")
+  goals          String?   @db.Text
+  avatar         String?   @db.Text
+  dateOfBirth    DateTime? @map("date_of_birth")
   dependentCount Int       @default(0) @map("dependent_count")
   role           Role      @default(USER)
   createdAt      DateTime  @default(now()) @map("created_at")
   updatedAt      DateTime  @updatedAt @map("updated_at")
 
-  // Relasi Master Data
-  unitKerja UnitKerja? @relation(fields: [unitKerjaId], references: [id])
-
-  // Relasi Fitur Finansial
-  budgetPlans     BudgetPlan[]
-  financialChecks FinancialCheckup[]
-  eduPlans        EducationPlan[]
-  pensionPlans    PensionPlan[]
-  insurancePlans  InsurancePlan[]
-  goalPlans       GoalPlan[]
-
-  // Relasi Modul Edukasi (Fase 1)
+  unitKerja         UnitKerja?              @relation(fields: [unitKerjaId], references: [id])
+  
+  budgetPlans       BudgetPlan[]
+  financialChecks   FinancialCheckup[]
+  eduPlans          EducationPlan[]
+  pensionPlans      PensionPlan[]
+  insurancePlans    InsurancePlan[]
+  goalPlans         GoalPlan[]
+  
   educationProgress UserEducationProgress[]
+  actionsPerformed  AccessLog[]             @relation("ActorRelation")
+  actionsTargeted   AccessLog[]             @relation("TargetRelation")
+  RetentionLog      RetentionLog[]
+  simulationLogs    SimulationLog[]
+  
+  subscription      UserSubscription?
+  subscriptionOrders SubscriptionOrder[]
+  notifications     Notification[]
+  usage             UserUsage?
 
-  // Relasi Audit & Logs
-  actionsPerformed AccessLog[]    @relation("ActorRelation")
-  actionsTargeted  AccessLog[]    @relation("TargetRelation")
-  RetentionLog     RetentionLog[]
-  // [NEW] Relasi ke Log Simulasi (Agent Tools)
-  // Menghubungkan Agen dengan history simulasi yang pernah mereka lakukan
-  simulationLogs   SimulationLog[]
-
-  // [OPTIMIZATION] Index FK untuk mempercepat JOIN Unit Kerja
   @@index([unitKerjaId])
   @@map("users")
 }
 
 // =========================================================
-// AUDIT TRAIL (Dashboard Direksi)
+// USAGE & SUBSCRIPTION SYSTEM
 // =========================================================
+
+model UserUsage {
+  userId          String   @id @map("user_id")
+  simulationQuota Int      @default(3) @map("simulation_quota")
+  totalUsed       Int      @default(0) @map("total_used")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_usages")
+}
+
+model SubscriptionPlan {
+  id             String   @id @default(uuid())
+  code           String   @unique
+  name           String
+  description    String?  @db.Text
+  durationMonths Int
+  price          Decimal  @db.Decimal(15, 2)
+  isActive       Boolean  @default(true) @map("is_active")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  orders        SubscriptionOrder[]
+  subscriptions UserSubscription[]
+
+  @@map("subscription_plans")
+}
+
+model SubscriptionOrder {
+  id                 String             @id @default(uuid())
+  userId             String             @map("user_id")
+  planId             String             @map("plan_id")
+  proofImageUrl      String             @map("proof_image_url")
+  verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
+  adminNotes         String?            @map("admin_notes") @db.Text
+  snapshotPrice      Decimal            @map("snapshot_price") @db.Decimal(15, 2)
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan                  SubscriptionPlan   @relation(fields: [planId], references: [id])
+  activatedSubscription UserSubscription[]
+
+  @@index([userId])
+  @@index([verificationStatus])
+  @@map("subscription_orders")
+}
+
+model UserSubscription {
+  id          String             @id @default(uuid())
+  userId      String             @unique @map("user_id")
+  planId      String             @map("plan_id")
+  status      SubscriptionStatus @default(ACTIVE)
+  startDate   DateTime           @default(now()) @map("start_date")
+  endDate     DateTime           @map("end_date")
+  lastOrderId String             @map("last_order_id")
+  createdAt   DateTime           @default(now()) @map("created_at")
+  updatedAt   DateTime           @updatedAt @map("updated_at")
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan      SubscriptionPlan  @relation(fields: [planId], references: [id])
+  lastOrder SubscriptionOrder @relation(fields: [lastOrderId], references: [id])
+
+  @@index([userId])
+  @@index([status])
+  @@index([endDate])
+  @@map("user_subscriptions")
+}
+
+// =========================================================
+// NOTIFICATION SYSTEM
+// =========================================================
+
+model Notification {
+  id        String               @id @default(uuid())
+  userId    String               @map("user_id")
+  type      NotificationType     @default(INFO)
+  category  NotificationCategory @default(SYSTEM)
+  title     String
+  message   String               @db.Text
+  isRead    Boolean              @default(false) @map("is_read")
+  metadata  Json?
+  createdAt DateTime             @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([isRead])
+  @@map("notifications")
+}
+
+// =========================================================
+// AGENT SIMULATION & LOGS
+// =========================================================
+
+model SimulationLog {
+  id              String        @id @default(uuid())
+  agentId         String        @map("agent_id")
+  clientName      String        @map("client_name")
+  clientAge       Int?          @map("client_age")
+  clientCity      String?       @map("client_city")
+  clientJob       String?       @map("client_job")
+  inputPayload    Json          @map("input_payload")
+  outputResult    Json?         @map("output_result")
+  sessionId       String        @map("session_id")
+  totalIncome     Decimal?      @map("total_income") @db.Decimal(15, 2)
+  calculatedSurplus Decimal?    @map("calculated_surplus") @db.Decimal(15, 2)
+  healthScore     Int?          @map("health_score")
+  status          HealthStatus? @default(BAHAYA)
+  financialRatios Json?         @map("financial_ratios")
+  moduleType      String        @default("BUDGETING") @map("module_type")
+  simulationDate  DateTime      @default(now()) @map("simulation_date")
+  createdAt       DateTime      @default(now()) @map("created_at")
+
+  agent User @relation(fields: [agentId], references: [id])
+
+  @@index([agentId, sessionId])
+  @@index([clientCity, clientJob])
+  @@index([createdAt])
+  @@map("simulation_logs")
+}
 
 model AccessLog {
   id           String   @id @default(uuid())
-  actorId      String   @map("actor_id") // Siapa yang melihat? (Direksi)
-  targetUserId String?  @map("target_user_id") // Data siapa? (Karyawan)
-  action       String // VIEW_DETAIL, DOWNLOAD_PDF, UPDATE_PROFILE
-  metadata     Json? // Detail tambahan
+  actorId      String   @map("actor_id")
+  targetUserId String?  @map("target_user_id")
+  action       String
+  metadata     Json?
   accessedAt   DateTime @default(now()) @map("accessed_at")
 
-  // Relasi
   actor      User  @relation("ActorRelation", fields: [actorId], references: [id])
   targetUser User? @relation("TargetRelation", fields: [targetUserId], references: [id])
 
   @@map("access_logs")
 }
 
+model RetentionLog {
+  id             String    @id @default(uuid())
+  executorId     String    @map("executor_id")
+  entityType     String    @map("entity_type")
+  status         String    @default("STARTED")
+  recordsDeleted Int       @default(0) @map("records_deleted")
+  cutoffDate     DateTime  @map("cutoff_date")
+  startedAt      DateTime  @default(now()) @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  metadata       Json?
+  executor       User      @relation(fields: [executorId], references: [id])
+
+  @@index([startedAt])
+  @@map("retention_logs")
+}
+
 // =========================================================
-// FINANCIAL ENGINE MODELS
+// FINANCIAL MODELS (LEGACY)
 // =========================================================
 
 model BudgetPlan {
-  id     String @id @default(uuid())
-  userId String @map("user_id")
-  month  Int
-  year   Int
-
-  fixedIncome    Decimal @map("fixed_income") @db.Decimal(15, 2)
-  variableIncome Decimal @default(0) @map("variable_income") @db.Decimal(15, 2)
-
-  productiveDebt  Decimal @default(0) @map("productive_debt") @db.Decimal(15, 2)
-  consumptiveDebt Decimal @default(0) @map("consumptive_debt") @db.Decimal(15, 2)
-  insurance       Decimal @default(0) @map("insurance") @db.Decimal(15, 2)
-  saving          Decimal @default(0) @map("saving") @db.Decimal(15, 2)
-  livingCost      Decimal @default(0) @map("living_cost") @db.Decimal(15, 2)
-
-  totalIncome  Decimal @map("total_income") @db.Decimal(15, 2)
-  totalExpense Decimal @map("total_expense") @db.Decimal(15, 2)
-  balance      Decimal @map("balance") @db.Decimal(15, 2)
-  status       String
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user User @relation(fields: [userId], references: [id])
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  month           Int
+  year            Int
+  fixedIncome     Decimal  @map("fixed_income") @db.Decimal(15, 2)
+  variableIncome  Decimal  @default(0) @map("variable_income") @db.Decimal(15, 2)
+  productiveDebt  Decimal  @default(0) @map("productive_debt") @db.Decimal(15, 2)
+  consumptiveDebt Decimal  @default(0) @map("consumptive_debt") @db.Decimal(15, 2)
+  insurance       Decimal  @default(0) @map("insurance") @db.Decimal(15, 2)
+  saving          Decimal  @default(0) @map("saving") @db.Decimal(15, 2)
+  livingCost      Decimal  @default(0) @map("living_cost") @db.Decimal(15, 2)
+  totalIncome     Decimal  @map("total_income") @db.Decimal(15, 2)
+  totalExpense    Decimal  @map("total_expense") @db.Decimal(15, 2)
+  balance         Decimal  @map("balance") @db.Decimal(15, 2)
+  status          String
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  user            User     @relation(fields: [userId], references: [id])
 
   @@map("budget_plans")
 }
 
 model FinancialCheckup {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  checkDate DateTime @default(now()) @map("check_date")
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  userProfile   Json  @map("user_profile")
-  spouseProfile Json? @map("spouse_profile")
-
-  // Aset & Utang (Condensed for brevity, structure preserved)
-  assetCash          Decimal @default(0) @map("asset_cash") @db.Decimal(15, 2)
-  assetHome          Decimal @default(0) @map("asset_home") @db.Decimal(15, 2)
-  assetVehicle       Decimal @default(0) @map("asset_vehicle") @db.Decimal(15, 2)
-  assetJewelry       Decimal @default(0) @map("asset_jewelry") @db.Decimal(15, 2)
-  assetAntique       Decimal @default(0) @map("asset_antique") @db.Decimal(15, 2)
-  assetPersonalOther Decimal @default(0) @map("asset_personal_other") @db.Decimal(15, 2)
-
-  assetInvHome    Decimal @default(0) @map("asset_inv_home") @db.Decimal(15, 2)
-  assetInvVehicle Decimal @default(0) @map("asset_inv_vehicle") @db.Decimal(15, 2)
-  assetGold       Decimal @default(0) @map("asset_gold") @db.Decimal(15, 2)
-  assetInvAntique Decimal @default(0) @map("asset_inv_antique") @db.Decimal(15, 2)
-  assetStocks     Decimal @default(0) @map("asset_stocks") @db.Decimal(15, 2)
-  assetMutualFund Decimal @default(0) @map("asset_mutual_fund") @db.Decimal(15, 2)
-  assetBonds      Decimal @default(0) @map("asset_bonds") @db.Decimal(15, 2)
-  assetDeposit    Decimal @default(0) @map("asset_deposit") @db.Decimal(15, 2)
-  assetInvOther   Decimal @default(0) @map("asset_inv_other") @db.Decimal(15, 2)
-
-  debtKPR              Decimal @default(0) @map("debt_kpr") @db.Decimal(15, 2)
-  debtKPM              Decimal @default(0) @map("debt_kpm") @db.Decimal(15, 2)
-  debtCC               Decimal @default(0) @map("debt_cc") @db.Decimal(15, 2)
-  debtCoop             Decimal @default(0) @map("debt_coop") @db.Decimal(15, 2)
-  debtConsumptiveOther Decimal @default(0) @map("debt_consumptive_other") @db.Decimal(15, 2)
-  debtBusiness         Decimal @default(0) @map("debt_business") @db.Decimal(15, 2)
-
-  incomeFixed    Decimal @default(0) @map("income_fixed") @db.Decimal(15, 2)
-  incomeVariable Decimal @default(0) @map("income_variable") @db.Decimal(15, 2)
-
-  installmentKPR              Decimal @default(0) @map("installment_kpr") @db.Decimal(15, 2)
-  installmentKPM              Decimal @default(0) @map("installment_kpm") @db.Decimal(15, 2)
-  installmentCC               Decimal @default(0) @map("installment_cc") @db.Decimal(15, 2)
-  installmentCoop             Decimal @default(0) @map("installment_coop") @db.Decimal(15, 2)
-  installmentConsumptiveOther Decimal @default(0) @map("installment_consumptive_other") @db.Decimal(15, 2)
-  installmentBusiness         Decimal @default(0) @map("installment_business") @db.Decimal(15, 2)
-
-  insuranceLife    Decimal @default(0) @map("insurance_life") @db.Decimal(15, 2)
-  insuranceHealth  Decimal @default(0) @map("insurance_health") @db.Decimal(15, 2)
-  insuranceHome    Decimal @default(0) @map("insurance_home") @db.Decimal(15, 2)
-  insuranceVehicle Decimal @default(0) @map("insurance_vehicle") @db.Decimal(15, 2)
-  insuranceBPJS    Decimal @default(0) @map("insurance_bpjs") @db.Decimal(15, 2)
-  insuranceOther   Decimal @default(0) @map("insurance_other") @db.Decimal(15, 2)
-
-  savingEducation  Decimal @default(0) @map("saving_education") @db.Decimal(15, 2)
-  savingRetirement Decimal @default(0) @map("saving_retirement") @db.Decimal(15, 2)
-  savingPilgrimage Decimal @default(0) @map("saving_pilgrimage") @db.Decimal(15, 2)
-  savingHoliday    Decimal @default(0) @map("saving_holiday") @db.Decimal(15, 2)
-  savingEmergency  Decimal @default(0) @map("saving_emergency") @db.Decimal(15, 2)
-  savingOther      Decimal @default(0) @map("saving_other") @db.Decimal(15, 2)
-
-  expenseFood          Decimal @default(0) @map("expense_food") @db.Decimal(15, 2)
-  expenseSchool        Decimal @default(0) @map("expense_school") @db.Decimal(15, 2)
-  expenseTransport     Decimal @default(0) @map("expense_transport") @db.Decimal(15, 2)
-  expenseCommunication Decimal @default(0) @map("expense_communication") @db.Decimal(15, 2)
-  expenseHelpers       Decimal @default(0) @map("expense_helpers") @db.Decimal(15, 2)
-  expenseTax           Decimal @default(0) @map("expense_tax") @db.Decimal(15, 2)
-  expenseLifestyle     Decimal @default(0) @map("expense_lifestyle") @db.Decimal(15, 2)
-
-  expenseOther Decimal @default(0) @map("expense_other") @db.Decimal(15, 2)
-
-  totalNetWorth  Decimal      @default(0) @map("total_net_worth") @db.Decimal(15, 2)
-  surplusDeficit Decimal      @default(0) @map("surplus_deficit") @db.Decimal(15, 2)
-  healthScore    Int          @default(0) @map("health_score")
-  status         HealthStatus @default(BAHAYA)
-
-  ratiosDetails Json @map("ratios_details")
+  id                          String       @id @default(uuid())
+  userId                      String       @map("user_id")
+  checkDate                   DateTime     @default(now()) @map("check_date")
+  createdAt                   DateTime     @default(now()) @map("created_at")
+  updatedAt                   DateTime     @updatedAt @map("updated_at")
+  userProfile                 Json         @map("user_profile")
+  spouseProfile               Json?        @map("spouse_profile")
+  assetCash                   Decimal      @default(0) @map("asset_cash") @db.Decimal(15, 2)
+  assetHome                   Decimal      @default(0) @map("asset_home") @db.Decimal(15, 2)
+  assetVehicle                Decimal      @default(0) @map("asset_vehicle") @db.Decimal(15, 2)
+  assetJewelry                Decimal      @default(0) @map("asset_jewelry") @db.Decimal(15, 2)
+  assetAntique                Decimal      @default(0) @map("asset_antique") @db.Decimal(15, 2)
+  assetPersonalOther          Decimal      @default(0) @map("asset_personal_other") @db.Decimal(15, 2)
+  assetInvHome                Decimal      @default(0) @map("asset_inv_home") @db.Decimal(15, 2)
+  assetInvVehicle             Decimal      @default(0) @map("asset_inv_vehicle") @db.Decimal(15, 2)
+  assetGold                   Decimal      @default(0) @map("asset_gold") @db.Decimal(15, 2)
+  assetInvAntique             Decimal      @default(0) @map("asset_inv_antique") @db.Decimal(15, 2)
+  assetStocks                 Decimal      @default(0) @map("asset_stocks") @db.Decimal(15, 2)
+  assetMutualFund             Decimal      @default(0) @map("asset_mutual_fund") @db.Decimal(15, 2)
+  assetBonds                  Decimal      @default(0) @map("asset_bonds") @db.Decimal(15, 2)
+  assetDeposit                Decimal      @default(0) @map("asset_deposit") @db.Decimal(15, 2)
+  assetInvOther               Decimal      @default(0) @map("asset_inv_other") @db.Decimal(15, 2)
+  debtKPR                     Decimal      @default(0) @map("debt_kpr") @db.Decimal(15, 2)
+  debtKPM                     Decimal      @default(0) @map("debt_kpm") @db.Decimal(15, 2)
+  debtCC                      Decimal      @default(0) @map("debt_cc") @db.Decimal(15, 2)
+  debtCoop                    Decimal      @default(0) @map("debt_coop") @db.Decimal(15, 2)
+  debtConsumptiveOther        Decimal      @default(0) @map("debt_consumptive_other") @db.Decimal(15, 2)
+  debtBusiness                Decimal      @default(0) @map("debt_business") @db.Decimal(15, 2)
+  incomeFixed                 Decimal      @default(0) @map("income_fixed") @db.Decimal(15, 2)
+  incomeVariable              Decimal      @default(0) @map("income_variable") @db.Decimal(15, 2)
+  installmentKPR              Decimal      @default(0) @map("installment_kpr") @db.Decimal(15, 2)
+  installmentKPM              Decimal      @default(0) @map("installment_kpm") @db.Decimal(15, 2)
+  installmentCC               Decimal      @default(0) @map("installment_cc") @db.Decimal(15, 2)
+  installmentCoop             Decimal      @default(0) @map("installment_coop") @db.Decimal(15, 2)
+  installmentConsumptiveOther Decimal      @default(0) @map("installment_consumptive_other") @db.Decimal(15, 2)
+  installmentBusiness         Decimal      @default(0) @map("installment_business") @db.Decimal(15, 2)
+  insuranceLife               Decimal      @default(0) @map("insurance_life") @db.Decimal(15, 2)
+  insuranceHealth             Decimal      @default(0) @map("insurance_health") @db.Decimal(15, 2)
+  insuranceHome               Decimal      @default(0) @map("insurance_home") @db.Decimal(15, 2)
+  insuranceVehicle            Decimal      @default(0) @map("insurance_vehicle") @db.Decimal(15, 2)
+  insuranceBPJS               Decimal      @default(0) @map("insurance_bpjs") @db.Decimal(15, 2)
+  insuranceOther              Decimal      @default(0) @map("insurance_other") @db.Decimal(15, 2)
+  savingEducation             Decimal      @default(0) @map("saving_education") @db.Decimal(15, 2)
+  savingRetirement            Decimal      @default(0) @map("saving_retirement") @db.Decimal(15, 2)
+  savingPilgrimage            Decimal      @default(0) @map("saving_pilgrimage") @db.Decimal(15, 2)
+  savingHoliday               Decimal      @default(0) @map("saving_holiday") @db.Decimal(15, 2)
+  savingEmergency             Decimal      @default(0) @map("saving_emergency") @db.Decimal(15, 2)
+  savingOther                 Decimal      @default(0) @map("saving_other") @db.Decimal(15, 2)
+  expenseFood                 Decimal      @default(0) @map("expense_food") @db.Decimal(15, 2)
+  expenseSchool               Decimal      @default(0) @map("expense_school") @db.Decimal(15, 2)
+  expenseTransport            Decimal      @default(0) @map("expense_transport") @db.Decimal(15, 2)
+  expenseCommunication        Decimal      @default(0) @map("expense_communication") @db.Decimal(15, 2)
+  expenseHelpers              Decimal      @default(0) @map("expense_helpers") @db.Decimal(15, 2)
+  expenseTax                  Decimal      @default(0) @map("expense_tax") @db.Decimal(15, 2)
+  expenseLifestyle            Decimal      @default(0) @map("expense_lifestyle") @db.Decimal(15, 2)
+  expenseOther                Decimal      @default(0) @map("expense_other") @db.Decimal(15, 2)
+  totalNetWorth               Decimal      @default(0) @map("total_net_worth") @db.Decimal(15, 2)
+  surplusDeficit              Decimal      @default(0) @map("surplus_deficit") @db.Decimal(15, 2)
+  healthScore                 Int          @default(0) @map("health_score")
+  status                      HealthStatus @default(BAHAYA)
+  ratiosDetails               Json         @map("ratios_details")
 
   user User @relation(fields: [userId], references: [id])
 
@@ -282,393 +423,230 @@ model FinancialCheckup {
 }
 
 model EducationPlan {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  childName String   @map("child_name")
-  childDob  DateTime @map("child_dob")
-
+  id            String          @id @default(uuid())
+  userId        String          @map("user_id")
+  childName     String          @map("child_name")
+  childDob      DateTime        @map("child_dob")
   inflationRate Decimal         @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
   returnRate    Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
   method        EducationMethod @default(GEOMETRIC)
-
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  user   User             @relation(fields: [userId], references: [id])
-  stages EducationStage[]
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  user          User            @relation(fields: [userId], references: [id])
+  stages        EducationStage[]
 
   @@map("education_plans")
 }
 
 model EducationStage {
-  id       String      @id @default(uuid())
-  planId   String      @map("plan_id")
-  level    SchoolLevel
-  costType CostType    @map("cost_type")
-
-  currentCost Decimal @map("current_cost") @db.Decimal(15, 2)
-  futureCost  Decimal @map("future_cost") @db.Decimal(15, 2)
-
-  yearsToStart  Int     @map("years_to_start")
-  monthlySaving Decimal @map("monthly_saving") @db.Decimal(15, 2)
-
-  plan EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  id            String        @id @default(uuid())
+  planId        String        @map("plan_id")
+  level         SchoolLevel
+  costType      CostType      @map("cost_type")
+  currentCost   Decimal       @map("current_cost") @db.Decimal(15, 2)
+  futureCost    Decimal       @map("future_cost") @db.Decimal(15, 2)
+  yearsToStart  Int           @map("years_to_start")
+  monthlySaving Decimal       @map("monthly_saving") @db.Decimal(15, 2)
+  plan          EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@map("education_stages")
 }
 
 model PensionPlan {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  currentAge     Int @map("current_age")
-  retirementAge  Int @map("retirement_age")
-  lifeExpectancy Int @default(80) @map("life_expectancy")
-
-  currentExpense Decimal @map("current_expense") @db.Decimal(15, 2)
-  currentSaving  Decimal @default(0) @map("current_saving") @db.Decimal(15, 2)
-
-  inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal @default(8.0) @map("return_rate") @db.Decimal(5, 2)
-
-  totalFundNeeded Decimal @map("total_fund_needed") @db.Decimal(15, 2)
-  monthlySaving   Decimal @map("monthly_saving") @db.Decimal(15, 2)
-
-  user User @relation(fields: [userId], references: [id])
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  currentAge      Int      @map("current_age")
+  retirementAge   Int      @map("retirement_age")
+  lifeExpectancy  Int      @default(80) @map("life_expectancy")
+  currentExpense  Decimal  @map("current_expense") @db.Decimal(15, 2)
+  currentSaving   Decimal  @default(0) @map("current_saving") @db.Decimal(15, 2)
+  inflationRate   Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate      Decimal  @default(8.0) @map("return_rate") @db.Decimal(5, 2)
+  totalFundNeeded Decimal  @map("total_fund_needed") @db.Decimal(15, 2)
+  monthlySaving   Decimal  @map("monthly_saving") @db.Decimal(15, 2)
+  user            User     @relation(fields: [userId], references: [id])
 
   @@map("pension_plans")
 }
 
 model InsurancePlan {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  type InsuranceType @default(LIFE)
-
-  dependentCount     Int     @default(0) @map("dependent_count")
-  monthlyExpense     Decimal @map("monthly_expense") @db.Decimal(15, 2)
-  existingDebt       Decimal @default(0) @map("existing_debt") @db.Decimal(15, 2)
-  existingCoverage   Decimal @default(0) @map("existing_coverage") @db.Decimal(15, 2)
-  protectionDuration Int     @default(10) @map("protection_duration")
-  
-  inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal @default(7.0) @map("return_rate") @db.Decimal(5, 2)
-  finalExpense  Decimal @default(0) @db.Decimal(15, 2)
-
-  coverageNeeded Decimal @map("coverage_needed") @db.Decimal(15, 2)
-  recommendation String? @db.Text
-
-  user User @relation(fields: [userId], references: [id])
+  id                 String        @id @default(uuid())
+  userId             String        @map("user_id")
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+  type               InsuranceType @default(LIFE)
+  dependentCount     Int           @default(0) @map("dependent_count")
+  monthlyExpense     Decimal       @map("monthly_expense") @db.Decimal(15, 2)
+  existingDebt       Decimal       @default(0) @map("existing_debt") @db.Decimal(15, 2)
+  existingCoverage   Decimal       @default(0) @map("existing_coverage") @db.Decimal(15, 2)
+  protectionDuration Int           @default(10) @map("protection_duration")
+  inflationRate      Decimal       @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate         Decimal       @default(7.0) @map("return_rate") @db.Decimal(5, 2)
+  finalExpense       Decimal       @default(0) @db.Decimal(15, 2)
+  coverageNeeded     Decimal       @map("coverage_needed") @db.Decimal(15, 2)
+  recommendation     String?       @db.Text
+  user               User          @relation(fields: [userId], references: [id])
 
   @@map("insurance_plans")
 }
 
 model GoalPlan {
-  id        String   @id @default(uuid())
-  userId    String   @map("user_id")
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
-
-  goalName     String  @map("goal_name")
-  targetAmount Decimal @map("target_amount") @db.Decimal(15, 2)
-
-  targetDate DateTime @map("target_date")
-
-  inflationRate Decimal @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal @default(6.0) @map("return_rate") @db.Decimal(5, 2)
-
-  futureValue   Decimal @map("future_value") @db.Decimal(15, 2)
-  monthlySaving Decimal @map("monthly_saving") @db.Decimal(15, 2)
-
-  user User @relation(fields: [userId], references: [id])
+  id            String   @id @default(uuid())
+  userId        String   @map("user_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  goalName      String   @map("goal_name")
+  targetAmount  Decimal  @map("target_amount") @db.Decimal(15, 2)
+  targetDate    DateTime @map("target_date")
+  inflationRate Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate    Decimal  @default(6.0) @map("return_rate") @db.Decimal(5, 2)
+  futureValue   Decimal  @map("future_value") @db.Decimal(15, 2)
+  monthlySaving Decimal  @map("monthly_saving") @db.Decimal(15, 2)
+  user          User     @relation(fields: [userId], references: [id])
 
   @@map("goal_plans")
 }
 
 // =========================================================
-// EXTERNAL & SYSTEM DATA
-// =========================================================
-
-model GoldPriceHistory {
-  id String @id @default(uuid())
-
-  buyPrice  Decimal @map("buy_price") @db.Decimal(10, 2)
-  sellPrice Decimal @map("sell_price") @db.Decimal(10, 2)
-
-  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2)
-  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2)
-
-  currency String @default("IDR") @map("currency")
-  unit     String @default("GRAM") @map("unit")
-  source   String @map("source")
-
-  fetchedAt DateTime @default(now()) @map("fetched_at")
-
-  @@index([fetchedAt])
-  @@map("gold_price_histories")
-}
-
-// Update pada model RetentionLog
-model RetentionLog {
-  id            String   @id @default(uuid())
-  executorId    String   @map("executor_id")
-  entityType    String   @map("entity_type")
-  
-  // [NEW] Status Eksekusi untuk Idempotency & Crash Recovery
-  // Values: 'STARTED', 'DB_DELETED', 'COMPLETED', 'FAILED'
-  status        String   @default("STARTED") 
-  
-  recordsDeleted Int      @default(0) @map("records_deleted")
-  cutoffDate     DateTime @map("cutoff_date")
-  
-  startedAt    DateTime @default(now()) @map("started_at")
-  completedAt  DateTime? @map("completed_at")
-  
-  // Metadata menyimpan list file yang "akan" dihapus untuk recovery jika crash
-  metadata      Json?     
-
-  executor User @relation(fields: [executorId], references: [id])
-
-  @@index([startedAt])
-  @@map("retention_logs")
-}
-
-// =========================================================
-// MODULE: EDUCATION & LITERACY (Enhanced with Quiz)
+// EDUCATION MODULE & QUIZ
 // =========================================================
 
 model EducationCategory {
-  id            String   @id @default(uuid())
-  name          String
-  slug          String   @unique
-  
-  // [NEW] Menambahkan deskripsi agar sesuai dengan DTO & Service
-  description   String?  @db.VarChar(255) 
-  
-  iconUrl       String   @map("icon_url")
-  displayOrder  Int      @default(0) @map("display_order")
-  isActive      Boolean  @default(true) @map("is_active")
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  description  String?  @db.VarChar(255)
+  iconUrl      String   @map("icon_url")
+  displayOrder Int      @default(0) @map("display_order")
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
 
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  modules       EducationModule[]
+  modules EducationModule[]
 
   @@map("education_categories")
 }
 
-enum EducationLevel {
-  BEGINNER
-  INTERMEDIATE
-  ADVANCED
-}
-
 model EducationModule {
-  id                 String                @id @default(uuid())
-  categoryId         String                @map("category_id")
-  title              String
-  slug               String                @unique
-  
-  /// [STORAGE STRATEGY] 
-  /// Kolom ini menyimpan Relative Path ke Local Storage.
-  /// Format: "uploads/{uuid}.{ext}"
-  /// Frontend wajib menambahkan Base URL API sebelum menampilkannya.
+  id           String                @id @default(uuid())
+  categoryId   String                @map("category_id")
+  title        String
+  slug         String                @unique
   thumbnailUrl String                @map("thumbnail_url")
-  
-  excerpt       String                @db.Text
-  readingTime   Int                   @default(5) @map("reading_time")
+  excerpt      String                @db.Text
+  readingTime  Int                   @default(5) @map("reading_time")
+  level        EducationLevel        @default(BEGINNER)
+  points       Int                   @default(0)
+  status       EducationModuleStatus @default(DRAFT)
+  publishedAt  DateTime?             @map("published_at")
+  createdAt    DateTime              @default(now()) @map("created_at")
+  updatedAt    DateTime              @updatedAt @map("updated_at")
 
-  // [NEW] Tambahkan dua field ini:
-  level         EducationLevel        @default(BEGINNER)
-  points        Int                   @default(0)
-  
-  status        EducationModuleStatus @default(DRAFT)
-  publishedAt   DateTime?             @map("published_at")
-
-  createdAt     DateTime              @default(now()) @map("created_at")
-  updatedAt     DateTime              @updatedAt @map("updated_at")
-
-  // Relasi
-  category      EducationCategory     @relation(fields: [categoryId], references: [id])
-  sections      ModuleSection[]
-  userProgress  UserEducationProgress[]
-  
-  // [NEW] Relasi ke Quiz (1-to-0..1)
-  quiz          Quiz?
+  category     EducationCategory       @relation(fields: [categoryId], references: [id])
+  sections     ModuleSection[]
+  userProgress UserEducationProgress[]
+  quiz         Quiz?
 
   @@index([categoryId])
   @@index([status])
   @@index([slug])
-  
   @@map("education_modules")
 }
 
 model ModuleSection {
-  id               String   @id @default(uuid())
-  moduleId         String   @map("module_id")
-  
-  sectionOrder     Int      @map("section_order")
-  title            String?  
-  contentMarkdown  String   @map("content_markdown") @db.Text
-  
-  /// [STORAGE STRATEGY]
-  /// Kolom ini menyimpan Relative Path (Optional).
-  /// Format: "uploads/{uuid}.{ext}" atau null.
-  illustrationUrl  String?  @map("illustration_url")
-
-  createdAt        DateTime @default(now()) @map("created_at")
-  updatedAt        DateTime @updatedAt @map("updated_at")
-
-  module           EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  progressLogs     UserEducationProgress[]
+  id              String          @id @default(uuid())
+  moduleId        String          @map("module_id")
+  sectionOrder    Int             @map("section_order")
+  title           String?
+  contentMarkdown String          @map("content_markdown") @db.Text
+  illustrationUrl String?         @map("illustration_url")
+  createdAt       DateTime        @default(now()) @map("created_at")
+  updatedAt       DateTime        @updatedAt @map("updated_at")
+  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  progressLogs    UserEducationProgress[]
 
   @@index([moduleId])
   @@map("module_sections")
 }
 
 model UserEducationProgress {
-  userId             String                  @map("user_id")
-  moduleId           String                  @map("module_id")
-  
-  status             EducationProgressStatus @default(STARTED)
-  lastReadSectionId  String?                 @map("last_read_section_id")
-  
-  // [NEW] Fields untuk Quiz Tracking
-  quizScore          Int?                    @map("quiz_score") // Null jika belum pernah submit
-  quizAttempts       Int                     @default(0) @map("quiz_attempts")
-  isPassed           Boolean                 @default(false) @map("is_passed")
-  lastQuizDate       DateTime?               @map("last_quiz_date")
-  
-  completedAt        DateTime?               @map("completed_at")
-  updatedAt          DateTime                @updatedAt @map("updated_at")
-  startedAt          DateTime?               @map("started_at")
+  userId            String                  @map("user_id")
+  moduleId          String                  @map("module_id")
+  status            EducationProgressStatus @default(STARTED)
+  lastReadSectionId String?                 @map("last_read_section_id")
+  quizScore         Int?                    @map("quiz_score")
+  quizAttempts      Int                     @default(0) @map("quiz_attempts")
+  isPassed          Boolean                 @default(false) @map("is_passed")
+  lastQuizDate      DateTime?               @map("last_quiz_date")
+  completedAt       DateTime?               @map("completed_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+  startedAt         DateTime?               @map("started_at")
 
-  // Relasi
-  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  
-  // [CRITICAL UPDATE] Mengubah onDelete menjadi Restrict.
-  // Ini mencegah penghapusan Modul jika masih ada user yang memiliki progress/history belajar.
-  // Strategi Retention harus menangani ini secara eksplisit (seperti yang sudah kita refactor).
-  module           EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
-  
-  lastReadSection  ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  lastReadSection ModuleSection? @relation(fields: [lastReadSectionId], references: [id])
 
   @@id([userId, moduleId])
   @@map("user_education_progress")
 }
 
-// =========================================================
-// MODULE: QUIZ ENGINE (New in Phase 2 Integration)
-// =========================================================
-
 model Quiz {
-  id            String   @id @default(uuid())
-  moduleId      String   @unique @map("module_id") // Strict 1-to-1: Satu modul hanya boleh punya satu quiz aktif
-  
-  passingScore  Int      @default(70) @map("passing_score") // Persentase kelulusan (0-100)
-  timeLimit     Int      @default(0) @map("time_limit") // Dalam menit. 0 = Tidak ada batas waktu
-  maxAttempts   Int      @default(3) @map("max_attempts") // Kesempatan mengulang
-  description   String?  @db.Text // Instruksi sebelum mulai quiz
-
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
-
-  // Relasi
-  module        EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
-  questions     QuizQuestion[]
+  id           String         @id @default(uuid())
+  moduleId     String         @unique @map("module_id")
+  passingScore Int            @default(70) @map("passing_score")
+  timeLimit    Int            @default(0) @map("time_limit")
+  maxAttempts  Int            @default(3) @map("max_attempts")
+  description  String?        @db.Text
+  createdAt    DateTime       @default(now()) @map("created_at")
+  updatedAt    DateTime       @updatedAt @map("updated_at")
+  module       EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+  questions    QuizQuestion[]
 
   @@map("quizzes")
 }
 
 model QuizQuestion {
-  id             String           @id @default(uuid())
-  quizId         String           @map("quiz_id")
-  
-  questionText   String           @map("question_text") @db.Text
-  type           QuizQuestionType @default(SINGLE_CHOICE)
-  
-  // [NEW] Kolom Media & Poin
-  imageUrl       String?          @map("image_url") // Menyimpan path gambar soal
-  points         Int              @default(10)      // Bobot nilai per soal
-  
-  orderIndex     Int              @map("order_index") 
-  explanation    String?          @db.Text 
-
-  // Relasi
-  quiz           Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
-  options        QuizOption[]
+  id           String           @id @default(uuid())
+  quizId       String           @map("quiz_id")
+  questionText String           @map("question_text") @db.Text
+  type         QuizQuestionType @default(SINGLE_CHOICE)
+  imageUrl     String?          @map("image_url")
+  points       Int              @default(10)
+  orderIndex   Int              @map("order_index")
+  explanation  String?          @db.Text
+  quiz         Quiz             @relation(fields: [quizId], references: [id], onDelete: Cascade)
+  options      QuizOption[]
 
   @@index([quizId])
   @@map("quiz_questions")
 }
 
 model QuizOption {
-  id            String       @id @default(uuid())
-  questionId    String       @map("question_id")
-  
-  optionText    String       @map("option_text") @db.Text
-  isCorrect     Boolean      @default(false) @map("is_correct")
-  
-  // [NEW] Kolom Media & Urutan Opsi
-  imageUrl      String?      @map("image_url")    // Menyimpan path gambar pada pilihan jawaban
-  orderIndex    Int          @default(0) @map("order_index")
-
-  // Relasi
-  question      QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  id         String       @id @default(uuid())
+  questionId String       @map("question_id")
+  optionText String       @map("option_text") @db.Text
+  isCorrect  Boolean      @default(false) @map("is_correct")
+  imageUrl   String?      @map("image_url")
+  orderIndex Int          @default(0) @map("order_index")
+  question   QuizQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
 
   @@index([questionId])
   @@map("quiz_options")
 }
 
-// =========================================================
-// MODULE: AGENT SIMULATION & ANALYTICS (NEW PHASE)
-// =========================================================
+model GoldPriceHistory {
+  id           String   @id @default(uuid())
+  buyPrice     Decimal  @map("buy_price") @db.Decimal(10, 2)
+  sellPrice    Decimal  @map("sell_price") @db.Decimal(10, 2)
+  openPrice    Decimal? @map("open_price") @db.Decimal(10, 2)
+  changeAmount Decimal? @map("change_amount") @db.Decimal(10, 2)
+  currency     String   @default("IDR") @map("currency")
+  unit         String   @default("GRAM") @map("unit")
+  source       String   @map("source")
+  fetchedAt    DateTime @default(now()) @map("fetched_at")
 
-model SimulationLog {
-  id          String   @id @default(uuid())
-  agentId     String   @map("agent_id")
-
-  // --- [NEW] IDENTITAS KLIEN (Stateless/Non-Persisten) ---
-  clientName  String   @map("client_name")
-  
-  // Field Demografi dibuat OPTIONAL agar fleksibel untuk semua jenis modul simulasi
-  clientAge   Int?     @map("client_age")
-  clientCity  String?  @map("client_city") 
-  clientJob   String?  @map("client_job")  
-
-  // --- [NEW] INTI STATELESS ARCHITECTURE ---
-  // inputPayload: Menyimpan seluruh data mentah simulasi (misal: list anak, jenjang, biaya) dalam JSON.
-  // Ini memungkinkan "Replay" atau audit detail tanpa perlu struktur tabel relasional yang kaku.
-  inputPayload  Json   @map("input_payload") 
-  
-  // outputResult: Menyimpan hasil kalkulasi final (misal: Total Future Value, Monthly Investment)
-  outputResult  Json?  @map("output_result") 
-
-  // --- FIELD STATISTIK (OPTIONAL) ---
-  // Dibiarkan ada untuk backward compatibility modul Budgeting, 
-  // tapi dibuat optional agar modul Education tidak error saat insert.
-  totalIncome       Decimal?      @map("total_income") @db.Decimal(15, 2)
-  calculatedSurplus Decimal?      @map("calculated_surplus") @db.Decimal(15, 2)
-  healthScore       Int?          @map("health_score")
-  status            HealthStatus? @default(BAHAYA)
-  financialRatios   Json?         @map("financial_ratios")
-
-  // Metadata System
-  moduleType     String   @default("BUDGETING") @map("module_type") // Values: "BUDGETING", "EDUCATION", "PENSION"
-  simulationDate DateTime @default(now()) @map("simulation_date")
-  createdAt      DateTime @default(now()) @map("created_at")
-
-  // Relasi ke Agen (User)
-  agent          User     @relation(fields: [agentId], references: [id])
-
-  // --- INDEXING ---
-  // Index untuk performa query reporting/dashboard direksi
-  @@index([clientCity, clientJob])
-  @@index([agentId])
-  @@index([createdAt])
-  @@map("simulation_logs")
+  @@index([fetchedAt])
+  @@map("gold_price_histories")
 }
