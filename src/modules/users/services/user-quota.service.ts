@@ -3,18 +3,10 @@ import {
     Logger,
     BadRequestException,
     InternalServerErrorException,
+    NotFoundException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
-import { Prisma } from '@prisma/client';
-
-// Enum untuk menstandarisasi tipe transaksi kuota
-export enum QuotaTransactionType {
-    SUBSCRIPTION_RENEWAL = 'SUBSCRIPTION_RENEWAL', // Otomatis dari subscription
-    ADMIN_BONUS = 'ADMIN_BONUS',                   // Manual inject oleh Admin
-    USAGE_SIMULATION = 'USAGE_SIMULATION',         // Terpakai saat simulasi
-    COMPENSATION = 'COMPENSATION',                 // Ganti rugi error sistem
-    CORRECTION = 'CORRECTION',                     // Koreksi data audit
-}
+import { QuotaTransactionType } from '@prisma/client';
 
 @Injectable()
 export class UserQuotaService {
@@ -24,46 +16,46 @@ export class UserQuotaService {
 
     /**
      * [CORE] ADD QUOTA
-     * Menambah saldo kuota user.
-     * Digunakan oleh: Subscription Service, Admin Manual Inject.
+     * Menambah saldo kuota user (Debit).
+     * Digunakan oleh: Subscription Service (saat bayar), Admin Manual Inject.
      */
     async addQuota(
         userId: string,
         amount: number,
         type: QuotaTransactionType,
-        referenceId?: string, // Bisa berupa Order ID, atau Admin ID
-        reason?: string,
+        referenceId?: string,
+        description?: string,
     ) {
         if (amount <= 0) {
-            throw new BadRequestException('Amount must be positive for addition');
+            throw new BadRequestException('Jumlah penambahan kuota harus lebih dari 0');
         }
 
-        return this.processTransaction(userId, amount, type, referenceId, reason);
+        return this.processTransaction(userId, amount, type, referenceId, description);
     }
 
     /**
      * [CORE] DEDUCT QUOTA
-     * Mengurangi saldo kuota user.
-     * Digunakan oleh: Simulation Services (saat user klik "Generate PDF").
+     * Mengurangi saldo kuota user (Kredit).
+     * Digunakan oleh: Simulation Services (saat user generate report).
      */
     async deductQuota(
         userId: string,
         amount: number,
         type: QuotaTransactionType,
-        referenceId?: string, // Bisa berupa Simulation ID
+        referenceId?: string,
+        description?: string,
     ) {
         if (amount <= 0) {
-            throw new BadRequestException('Amount must be positive for deduction');
+            throw new BadRequestException('Jumlah pengurangan kuota harus lebih dari 0');
         }
 
-        // Kirim amount sebagai negatif ke prosesor
-        return this.processTransaction(userId, -amount, type, referenceId);
+        // Kirim amount sebagai negatif ke prosesor internal
+        return this.processTransaction(userId, -amount, type, referenceId, description);
     }
 
     /**
      * [INTERNAL] ATOMIC TRANSACTION PROCESSOR
-     * Menangani logika perubahan saldo agar sinkron antara tabel User dan Ledger.
-     * Menggunakan Prisma Interactive Transaction ($transaction).
+     * Menjamin sinkronisasi antara tabel User (Cache) dan UserQuotaLedger (Audit Trail).
      */
     private async processTransaction(
         userId: string,
@@ -74,127 +66,141 @@ export class UserQuotaService {
     ) {
         try {
             return await this.prisma.$transaction(async (tx) => {
-                // 1. Lock & Get User Data
-                // Mengambil data user terbaru untuk memastikan perhitungan saldo akurat
-                const user = await tx.user.findUniqueOrThrow({
+                // 1. Lock & Get User Data (Mencegah Race Condition)
+                const user = await tx.user.findUnique({
                     where: { id: userId },
                     select: { id: true, quota: true },
                 });
 
-                // 2. Calculate New Balance
+                if (!user) {
+                    throw new NotFoundException(`User dengan ID ${userId} tidak ditemukan`);
+                }
+
+                // 2. Hitung Saldo Baru
                 const currentBalance = user.quota ?? 0;
                 const newBalance = currentBalance + amountChange;
 
-                // 3. Validation: Prevent Negative Balance
+                // 3. Validasi: Saldo tidak boleh negatif
                 if (newBalance < 0) {
                     this.logger.warn(
-                        `User ${userId} attempted usage exceeding quota. Curr: ${currentBalance}, Req: ${Math.abs(amountChange)}`,
+                        `Insufficient Quota: User ${userId} attempted -${Math.abs(amountChange)} but only has ${currentBalance}`,
                     );
-                    throw new BadRequestException('Kuota simulasi tidak mencukupi.');
+                    throw new BadRequestException(
+                        'Kuota tidak mencukupi untuk melakukan aksi ini.',
+                    );
                 }
 
-                // 4. Update User Balance
+                // 4. Update User Cache Balance (Tabel users)
                 await tx.user.update({
                     where: { id: userId },
                     data: { quota: newBalance },
                 });
 
-                // 5. Insert Ledger Entry (Audit Trail)
-                // Mencatat detail transaksi agar bisa diaudit
-                const ledgerEntry = await tx.userQuotaLedger.create({
+                // 5. Create Ledger Entry (Tabel user_quota_ledgers)
+                const ledger = await tx.userQuotaLedger.create({
                     data: {
                         userId: userId,
                         amount: amountChange,
                         type: type,
                         referenceId: referenceId ?? null,
                         balanceAfter: newBalance,
-                        // Simpan metadata tambahan di kolom description atau metadata (jika schema mendukung JSON)
-                        description: description ?? null,
+                        description: description ?? this.getDefaultDescription(type, amountChange),
                     },
                 });
 
                 this.logger.log(
-                    `Quota Tx Success [${type}]: User ${userId} | ${amountChange > 0 ? '+' : ''}${amountChange} | Final: ${newBalance}`,
+                    `Quota Transaction Success [${type}]: User ${userId} | Change: ${amountChange} | Final: ${newBalance}`,
                 );
 
                 return {
-                    success: true,
+                    transactionId: ledger.id,
                     previousBalance: currentBalance,
-                    newBalance: newBalance,
-                    transactionId: ledgerEntry.id,
+                    currentBalance: newBalance,
                 };
             });
         } catch (error) {
-            // Re-throw BadRequestException agar sampai ke Controller dengan pesan yang benar
-            if (error instanceof BadRequestException) {
+            if (error instanceof BadRequestException || error instanceof NotFoundException) {
                 throw error;
             }
 
             this.logger.error(
-                `Failed to process quota transaction for user ${userId}`,
-                error instanceof Error ? error.stack : String(error),
+                `Failed to process quota transaction for user ${userId}: ${error.message}`,
+                error.stack,
             );
             throw new InternalServerErrorException(
-                'Gagal memproses transaksi kuota. Silakan coba lagi.',
+                'Terjadi kesalahan pada sistem manajemen kuota.',
             );
         }
     }
 
     /**
      * [READ] GET HISTORY
-     * Mengambil riwayat mutasi kuota untuk ditampilkan di halaman Profile/Subscription User.
+     * Mengambil riwayat mutasi kuota user untuk transparansi audit nasabah.
      */
-    async getQuotaHistory(userId: string, limit = 20, offset = 0) {
-        const history = await this.prisma.userQuotaLedger.findMany({
-            where: { userId },
-            orderBy: { createdAt: 'desc' },
-            take: limit,
-            skip: offset,
-            select: {
-                id: true,
-                amount: true,
-                type: true,
-                balanceAfter: true,
-                createdAt: true,
-                description: true,
-            },
-        });
+    async getQuotaHistory(userId: string, limit = 10, page = 1) {
+        const skip = (page - 1) * limit;
 
-        const total = await this.prisma.userQuotaLedger.count({
-            where: { userId },
-        });
+        const [data, total] = await Promise.all([
+            this.prisma.userQuotaLedger.findMany({
+                where: { userId },
+                orderBy: { createdAt: 'desc' },
+                take: limit,
+                skip: skip,
+            }),
+            this.prisma.userQuotaLedger.count({ where: { userId } }),
+        ]);
 
         return {
-            data: history,
+            data,
             meta: {
                 total,
-                limit,
-                offset,
+                page,
+                lastPage: Math.ceil(total / limit),
             },
         };
     }
 
     /**
-     * [ADMIN] SYNC BALANCE
-     * Fungsi darurat untuk menghitung ulang saldo user berdasarkan ledger
-     * jika dicurigai ada ketidakcocokan data (Data Integrity Check).
+     * [ADMIN] RECALIBRATE
+     * Menghitung ulang saldo user berdasarkan seluruh transaksi di Ledger.
+     * Digunakan jika ada kecurigaan integritas data kolom cache 'quota'.
      */
     async recalibrateBalance(userId: string) {
-        const aggregations = await this.prisma.userQuotaLedger.aggregate({
+        const aggregate = await this.prisma.userQuotaLedger.aggregate({
             where: { userId },
-            _sum: {
-                amount: true,
-            },
+            _sum: { amount: true },
         });
 
-        const calculatedBalance = aggregations._sum.amount ?? 0;
+        const realBalance = aggregate._sum.amount ?? 0;
 
-        // Update master user dengan nilai yang dihitung ulang
-        await this.prisma.user.update({
+        const updatedUser = await this.prisma.user.update({
             where: { id: userId },
-            data: { quota: calculatedBalance },
+            data: { quota: realBalance },
         });
 
-        return { calculatedBalance };
+        return {
+            userId: updatedUser.id,
+            recalibratedQuota: updatedUser.quota,
+        };
+    }
+
+    /**
+     * Helper: Generate deskripsi otomatis jika tidak disediakan.
+     */
+    private getDefaultDescription(type: QuotaTransactionType, change: number): string {
+        switch (type) {
+            case QuotaTransactionType.SUBSCRIPTION_RENEWAL:
+                return `Penambahan kuota dari aktivasi/perpanjangan paket langganan.`;
+            case QuotaTransactionType.USAGE_SIMULATION:
+                return `Penggunaan kuota untuk pembuatan laporan simulasi keuangan.`;
+            case QuotaTransactionType.ADMIN_BONUS:
+                return `Bonus kuota ditambahkan secara manual oleh administrator.`;
+            case QuotaTransactionType.COMPENSATION:
+                return `Kompensasi kuota atas kendala teknis sistem.`;
+            case QuotaTransactionType.CORRECTION:
+                return `Koreksi saldo kuota oleh tim audit.`;
+            default:
+                return `Transaksi kuota ${type}`;
+        }
     }
 }

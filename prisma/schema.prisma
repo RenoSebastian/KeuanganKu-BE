@@ -104,7 +104,7 @@ enum NotificationCategory {
   PAYMENT
 }
 
-// [NEW] Enum untuk tipe transaksi ledger kuota
+// Enum untuk tipe transaksi ledger kuota
 enum QuotaTransactionType {
   SUBSCRIPTION_RENEWAL // Dapat dari paket langganan
   ADMIN_BONUS          // Ditambah manual oleh admin
@@ -114,7 +114,7 @@ enum QuotaTransactionType {
 }
 
 // =========================================================
-// MASTER DATA (REFACTORED FOR SAAS)
+// MASTER DATA & CONFIGURATION (THE FOUNDATION)
 // =========================================================
 
 // [REFACTORED] Menggantikan 'UnitKerja' menjadi 'Agency' untuk konteks Asuransi
@@ -131,6 +131,21 @@ model Agency {
   @@map("agencies")
 }
 
+// [NEW] Central Bank Logic - Konfigurasi Global Ekonomi (Dinamis)
+// Tabel ini hanya akan memiliki 1 baris data (Singleton)
+model GlobalMarketSettings {
+  id             String   @id @default(uuid())
+  inflationRate  Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)   // Persentase (5.0 = 5%)
+  interestRate   Decimal  @default(4.5) @map("interest_rate") @db.Decimal(5, 2)    // Suku Bunga Acuan (BI Rate)
+  riskFreeRate   Decimal  @default(6.0) @map("risk_free_rate") @db.Decimal(5, 2)   // Return Obligasi Negara
+  goldPrice      Decimal  @default(1000000) @map("gold_price") @db.Decimal(15, 2)  // Harga Emas Acuan (Manual Override)
+  
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  updatedBy      String?  @map("updated_by") // Admin ID yang terakhir mengubah
+
+  @@map("global_market_settings")
+}
+
 // =========================================================
 // USER MANAGEMENT
 // =========================================================
@@ -145,16 +160,14 @@ model User {
   
   gender         String?   @db.VarChar(50)
   address        String?   @db.Text
-  // Field legacy 'agencyName' bisa dihapus jika sudah pindah ke relasi Agency
   agentLevel     String?   @map("agent_level") // Junior, Senior, MDRT
-  companyName    String?   @map("company_name")
+  companyName    String?   @map("company_name") // Untuk Agen Independen
   goals          String?   @db.Text
   avatar         String?   @db.Text
   dateOfBirth    DateTime? @map("date_of_birth")
   dependentCount Int       @default(0) @map("dependent_count")
   
-  // Quota sekarang dikelola via UserQuotaLedger, tapi field ini tetap ada
-  // sebagai 'Current Balance' cache untuk performa read.
+  // Quota dikelola via UserQuotaLedger, field ini sebagai Cache/Snapshot
   quota          Int       @default(0) 
 
   role      Role     @default(USER)
@@ -175,6 +188,7 @@ model User {
   // Audit Relations
   actionsPerformed   AccessLog[]         @relation("ActorRelation")
   actionsTargeted    AccessLog[]         @relation("TargetRelation")
+  adminActivities    AdminActivityLog[]  @relation("AdminActor")
   RetentionLog       RetentionLog[]
   simulationLogs     SimulationLog[]
   
@@ -191,7 +205,7 @@ model User {
 }
 
 // =========================================================
-// USAGE & SUBSCRIPTION SYSTEM (ENHANCED)
+// USAGE & SUBSCRIPTION SYSTEM (REVENUE ENGINE)
 // =========================================================
 
 model UserUsage {
@@ -205,7 +219,7 @@ model UserUsage {
   @@map("user_usages")
 }
 
-// [NEW] Ledger untuk mencatat riwayat keluar-masuk kuota (Double-Entry)
+// Ledger untuk mencatat riwayat keluar-masuk kuota (Double-Entry)
 model UserQuotaLedger {
   id           String               @id @default(uuid())
   userId       String               @map("user_id")
@@ -262,18 +276,17 @@ model SubscriptionOrder {
   @@map("subscription_orders")
 }
 
-// [NEW] Audit khusus verifikasi pembayaran (untuk mencegah fraud internal)
+// Audit khusus verifikasi pembayaran (Anti-Fraud Internal)
 model SubscriptionPaymentAudit {
   id               String   @id @default(uuid())
   orderId          String   @unique @map("order_id")
   adminId          String   @map("admin_id")
   status           VerificationStatus
   rejectionReason  String?  @map("rejection_reason") @db.Text
-  proofSnapshotUrl String?  @map("proof_snapshot_url") // Snapshot bukti bayar saat diverifikasi
+  proofSnapshotUrl String?  @map("proof_snapshot_url") // Snapshot bukti saat diverifikasi
   verifiedAt       DateTime @default(now()) @map("verified_at")
 
   order SubscriptionOrder @relation(fields: [orderId], references: [id])
-  // Relasi ke User (Admin) tidak dibuat strict relation agar tidak circular, cukup simpan ID
   
   @@map("subscription_payment_audits")
 }
@@ -300,7 +313,7 @@ model UserSubscription {
 }
 
 // =========================================================
-// NOTIFICATION SYSTEM
+// NOTIFICATION & MONITORING SYSTEM
 // =========================================================
 
 model Notification {
@@ -321,16 +334,12 @@ model Notification {
   @@map("notifications")
 }
 
-// =========================================================
-// AGENT SIMULATION & MONITORING
-// =========================================================
-
-// [NEW] Untuk fitur Live Monitoring user yang sedang online
+// Untuk fitur Live Monitoring user yang sedang online
 model ActiveSession {
   id             String   @id @default(uuid())
   userId         String   @map("user_id")
   socketId       String?  @map("socket_id")
-  deviceInfo     String?  @map("device_info") // User-Agent atau Device Name
+  deviceInfo     String?  @map("device_info") 
   ipAddress      String?  @map("ip_address")
   lastActivityAt DateTime @default(now()) @map("last_activity_at")
   loginAt        DateTime @default(now()) @map("login_at")
@@ -341,6 +350,7 @@ model ActiveSession {
   @@map("active_sessions")
 }
 
+// Log aktivitas simulasi user (History Penggunaan)
 model SimulationLog {
   id                String        @id @default(uuid())
   agentId           String        @map("agent_id")
@@ -368,18 +378,35 @@ model SimulationLog {
   @@map("simulation_logs")
 }
 
+// General Access Log (Untuk User Activity biasa)
 model AccessLog {
   id           String   @id @default(uuid())
   actorId      String   @map("actor_id")
   targetUserId String?  @map("target_user_id")
-  action       String   // Ex: 'APPROVE_PAYMENT', 'INJECT_QUOTA'
-  metadata     Json?    // Stores snapshot data, reasons, etc.
+  action       String   
+  metadata     Json?    
   accessedAt   DateTime @default(now()) @map("accessed_at")
 
   actor      User  @relation("ActorRelation", fields: [actorId], references: [id])
   targetUser User? @relation("TargetRelation", fields: [targetUserId], references: [id])
 
   @@map("access_logs")
+}
+
+// [NEW] Admin Activity Log (Untuk Audit Konfigurasi & Aksi Sensitif Admin)
+model AdminActivityLog {
+  id           String   @id @default(uuid())
+  adminId      String   @map("admin_id")
+  actionType   String   @map("action_type") // Ex: UPDATE_MARKET_SETTINGS, BAN_USER
+  entityName   String   @map("entity_name") // Ex: GlobalMarketSettings, User
+  entityId     String?  @map("entity_id")
+  changes      Json     @map("changes")     // { before: ..., after: ... }
+  ipAddress    String?  @map("ip_address")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  admin        User     @relation("AdminActor", fields: [adminId], references: [id])
+
+  @@map("admin_activity_logs")
 }
 
 model RetentionLog {
@@ -399,7 +426,7 @@ model RetentionLog {
 }
 
 // =========================================================
-// FINANCIAL MODELS (LEGACY)
+// FINANCIAL MODELS (LEGACY SUPPORTED)
 // =========================================================
 
 model BudgetPlan {

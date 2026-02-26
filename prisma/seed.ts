@@ -1,4 +1,6 @@
 import { PrismaClient, EducationModuleStatus, QuizQuestionType } from '@prisma/client';
+import { seedGlobalSettings } from './seeds/01_global_settings';
+import { seedUsers } from './seeds/02_users';
 // import { seedMasterData } from './seeds/01_master_data';
 // import { seedUsers } from './seeds/02_users';
 // import { seedFinancialCheckups } from './seeds/03_financial_checkup';
@@ -23,6 +25,8 @@ async function main() {
     // await seedMasterData(prisma);
     await seedSubscriptionPlans(prisma);
     // await seedUsers(prisma);
+    await seedGlobalSettings(prisma);
+    await seedUsers(prisma);
 
     // --- LEVEL 2: CORE FINANCIAL ---
     console.log('\n[2/4] 💸 Seeding Core Financials...');

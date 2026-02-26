@@ -11,12 +11,10 @@ import {
     VerificationStatus,
     NotificationType,
     NotificationCategory,
+    QuotaTransactionType,
 } from '@prisma/client';
 import { NotificationService } from '../../notification/notification.service';
-import {
-    UserQuotaService,
-    QuotaTransactionType,
-} from '../../users/services/user-quota.service';
+import { UserQuotaService } from '../../users/services/user-quota.service';
 import { AuditService } from '../../audit/audit.service';
 
 @Injectable()
@@ -26,8 +24,8 @@ export class AdminSubscriptionService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly notificationService: NotificationService,
-        private readonly userQuotaService: UserQuotaService, // [NEW] Ledger System
-        private readonly auditService: AuditService, // [NEW] Audit Trail
+        private readonly userQuotaService: UserQuotaService, // Ledger System
+        private readonly auditService: AuditService, // Audit Trail
     ) { }
 
     /**
@@ -56,7 +54,8 @@ export class AdminSubscriptionService {
     }
 
     /**
-     * [CORE] VALIDASI PEMBAYARAN
+     * [CORE] VALIDASI PEMBAYARAN (Enhanced)
+     * Menyimpan alasan reject ke tabel Audit & Update Kuota via Ledger
      */
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
         const order = await this.prisma.subscriptionOrder.findUnique({
@@ -72,8 +71,10 @@ export class AdminSubscriptionService {
             throw new BadRequestException('Order ini sudah diproses sebelumnya');
         }
 
+        // [ATOMIC TRANSACTION]
+        // Menjamin integritas data: Status, Audit, Subscription, dan Kuota
         const result = await this.prisma.$transaction(async (tx) => {
-            // A. Update Status Order
+            // 1. Update Status Order Utama
             const updatedOrder = await tx.subscriptionOrder.update({
                 where: { id: dto.orderId },
                 data: {
@@ -83,7 +84,8 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // B. Catat Audit Pembayaran
+            // 2. Simpan ke Audit Log Pembayaran (Anti-Fraud)
+            // Menyimpan alasan penolakan secara permanen di tabel terpisah
             await tx.subscriptionPaymentAudit.create({
                 data: {
                     orderId: dto.orderId,
@@ -95,13 +97,13 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // C. Logic Approval
+            // 3. Logic Approval: Aktifkan Paket & Tambah Kuota
             if (dto.status === VerificationStatus.VALID) {
                 const startDate = new Date();
                 const endDate = new Date();
                 endDate.setMonth(endDate.getMonth() + order.plan.durationMonths);
 
-                // Aktifkan Subscription
+                // a. Upsert User Subscription
                 await tx.userSubscription.upsert({
                     where: { userId: order.userId },
                     update: {
@@ -121,21 +123,27 @@ export class AdminSubscriptionService {
                     },
                 });
 
-                // Tambah Kuota via Transaction (Direct DB Update untuk atomicity)
-                const bonusQuota = order.plan.bonusQuota || 9999;
+                // b. Tambah Kuota (Direct DB Update dalam TX yang sama agar atomik)
+                const bonusQuota = order.plan.bonusQuota || 0;
+
+                // Ambil saldo terakhir untuk perhitungan ledger
+                const user = await tx.user.findUniqueOrThrow({ where: { id: order.userId } });
+                const newBalance = user.quota + bonusQuota;
+
+                // Update saldo di tabel User (Cache)
                 await tx.user.update({
                     where: { id: order.userId },
-                    data: { quota: { increment: bonusQuota } },
+                    data: { quota: newBalance },
                 });
 
-                // Catat di Ledger (Manual insert karena kita di dalam tx yang sama)
+                // Insert ke Ledger (Audit Trail Kuota)
                 await tx.userQuotaLedger.create({
                     data: {
                         userId: order.userId,
                         amount: bonusQuota,
                         type: QuotaTransactionType.SUBSCRIPTION_RENEWAL,
                         referenceId: order.id,
-                        balanceAfter: -1, // Placeholder
+                        balanceAfter: newBalance,
                         description: `Aktivasi Paket ${order.plan.name}`,
                     },
                 });
@@ -144,7 +152,8 @@ export class AdminSubscriptionService {
             return updatedOrder;
         });
 
-        // Post-Process (Audit & Notif)
+        // 4. Post-Process (Audit Umum & Notifikasi)
+        // Dilakukan di luar transaksi DB agar tidak memperlambat locking row
         await this.auditService.logAdminAction({
             adminId,
             action:
@@ -159,6 +168,7 @@ export class AdminSubscriptionService {
             },
         });
 
+        // Kirim Notifikasi ke User
         if (dto.status === VerificationStatus.VALID) {
             await this.notificationService.createAndSend({
                 userId: order.userId,
@@ -184,7 +194,7 @@ export class AdminSubscriptionService {
 
     /**
      * [ADMIN FEATURE] Manual Override / Grant Access
-     * Menerima 5 parameter sesuai Controller terbaru.
+     * Memberikan paket langganan secara manual (misal: hadiah/kompensasi)
      */
     async manualOverride(
         adminId: string,
@@ -207,12 +217,12 @@ export class AdminSubscriptionService {
 
         const bonusQuota = plan.bonusQuota || 50;
 
-        // 1. Tambah Quota (Ledger)
+        // 1. Tambah Quota (Panggil Service Ledger)
         await this.userQuotaService.addQuota(
             userId,
             bonusQuota,
             QuotaTransactionType.ADMIN_BONUS,
-            adminId,
+            adminId, // Reference ID bisa Admin ID
             `Manual Override: ${reason || 'Bonus Marketing'}`,
         );
 
@@ -247,7 +257,7 @@ export class AdminSubscriptionService {
         await this.notificationService.createAndSend({
             userId: userId,
             title: 'Aktivasi Paket Spesial',
-            message: `Admin telah mengaktifkan paket ${plan.name}.`,
+            message: `Admin telah mengaktifkan paket ${plan.name} secara manual.`,
             type: NotificationType.INFO,
             category: NotificationCategory.SYSTEM,
         });
@@ -257,7 +267,7 @@ export class AdminSubscriptionService {
 
     /**
      * [ADMIN FEATURE] Inject Quota Only
-     * Method ini sebelumnya hilang, sekarang ditambahkan kembali.
+     * Menambahkan token kuota tanpa mengubah status langganan.
      */
     async injectQuota(
         adminId: string,
@@ -279,14 +289,14 @@ export class AdminSubscriptionService {
             adminId,
             action: 'INJECT_QUOTA',
             targetUserId: userId,
-            details: { amount, reason, newBalance: result.newBalance },
+            details: { amount, reason, newBalance: result.currentBalance },
         });
 
         // 3. Notifikasi
         await this.notificationService.createAndSend({
             userId: userId,
             title: 'Bonus Token Simulasi',
-            message: `Admin menambahkan ${amount} token. Total kuota: ${result.newBalance}.`,
+            message: `Admin menambahkan ${amount} token. Total kuota: ${result.currentBalance}.`,
             type: NotificationType.SUCCESS,
             category: NotificationCategory.QUOTA,
         });

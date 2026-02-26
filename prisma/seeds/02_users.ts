@@ -1,79 +1,49 @@
-// import { PrismaClient, Role } from '@prisma/client';
-// import { DEFAULT_PASSWORD, hashPassword } from './helpers';
+import { PrismaClient, Role } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
 
-// export const seedUsers = async (prisma: PrismaClient) => {
-//     console.log('🌱 Seeding 02_users...');
+export async function seedUsers(prisma: PrismaClient) {
+    console.log('   👥 Seeding Initial Users...');
 
-//     // 1. Prepare Dependencies
-//     const passwordHash = await hashPassword(DEFAULT_PASSWORD);
+    const passwordHash = await bcrypt.hash('password123', 10);
 
-//     // Fetch Unit Kerja IDs (Required for Relation)
-//     const unitIT = await prisma.unitKerja.findUnique({ where: { kodeUnit: 'IT-01' } });
-//     const unitBOD = await prisma.unitKerja.findUnique({ where: { kodeUnit: 'BOD-01' } });
+    // 1. Super Admin
+    const adminEmail = 'admin@keuanganku.com';
+    await prisma.user.upsert({
+        where: { email: adminEmail },
+        update: {},
+        create: {
+            email: adminEmail,
+            fullName: 'Super Admin',
+            passwordHash,
+            role: Role.ADMIN,
+            quota: 9999, // Admin unlimited
+            // Tidak perlu agencyId
+        },
+    });
 
-//     if (!unitIT || !unitBOD) {
-//         throw new Error('❌ Critical Error: Unit Kerja not found. Run 01_master_data first.');
-//     }
+    // 2. Demo Agent
+    const agentEmail = 'agent@demo.com';
+    const agent = await prisma.user.upsert({
+        where: { email: agentEmail },
+        update: {},
+        create: {
+            email: agentEmail,
+            fullName: 'Budi Agent',
+            passwordHash,
+            role: Role.USER,
+            companyName: 'Prudential Life',
+            agentLevel: 'Senior',
+            quota: 0, // Nanti dapat dari seed subscription atau logic create user
+        },
+    });
 
-//     // 2. Create Director (Role: DIRECTOR)
-//     await prisma.user.upsert({
-//         where: { email: 'director@keuanganku.com' },
-//         update: {},
-//         create: {
-//             fullName: 'Bapak Direktur Utama',
-//             email: 'director@keuanganku.com',
-//             nip: 'DIR-001',
-//             passwordHash,
-//             role: Role.DIRECTOR,
-//             unitKerjaId: unitBOD.id,
-//             dateOfBirth: new Date('1975-05-20'),
-//             dependentCount: 2,
-//         },
-//     });
+    // Init Usage & Ledger untuk Demo Agent (Manual Init untuk Seed)
+    const usageCheck = await prisma.userUsage.findUnique({ where: { userId: agent.id } });
+    if (!usageCheck) {
+        await prisma.userUsage.create({
+            data: { userId: agent.id, simulationQuota: 3, totalUsed: 0 }
+        });
+    }
 
-//     // 3. [NEW] Create Admin (Role: ADMIN)
-//     // Admin ditempatkan di Unit IT sebagai System Administrator
-//     await prisma.user.upsert({
-//         where: { email: 'admin@keuanganku.com' },
-//         update: {},
-//         create: {
-//             fullName: 'System Administrator',
-//             email: 'admin@keuanganku.com',
-//             nip: 'ADM-001',
-//             passwordHash,
-//             role: Role.ADMIN,
-//             unitKerjaId: unitIT.id,
-//             dateOfBirth: new Date('1990-08-17'),
-//             dependentCount: 0,
-//         },
-//     });
-
-//     // 4. Create 10 Simulation Users (Batch Loop)
-//     // Logic: Loop efisien, upsert berdasarkan NIP untuk mencegah duplikasi
-//     const usersPayload = Array.from({ length: 10 }).map((_, index) => {
-//         const idNum = index + 1;
-//         return {
-//             fullName: `User Simulasi ${idNum}`,
-//             email: `user${idNum}@simulasi.com`,
-//             nip: `EMP-SIM-${idNum.toString().padStart(3, '0')}`,
-//             passwordHash,
-//             role: Role.USER,
-//             unitKerjaId: unitIT.id,
-//             dateOfBirth: new Date('1995-01-01'), // Generasi Milenial/Z
-//             dependentCount: idNum % 3, // Variasi tanggungan 0-2
-//         };
-//     });
-
-//     // Execute in Transaction
-//     await prisma.$transaction(
-//         usersPayload.map((user) =>
-//             prisma.user.upsert({
-//                 where: { nip: user.nip },
-//                 update: {},
-//                 create: user,
-//             })
-//         )
-//     );
-
-//     console.log(`✅ 1 Director, 1 Admin & ${usersPayload.length} Users Seeded.`);
-// };
+    console.log('      ✅ Admin & Demo Agent Created');
+}
