@@ -122,7 +122,7 @@ export class MediaController {
     // --- 3. DELETE ENDPOINT (Admin Only) ---
     @Delete()
     @UseGuards(JwtAuthGuard, RolesGuard)
-    @Roles(Role.ADMIN, Role.DIRECTOR)
+    @Roles(Role.ADMIN)
     @ApiBearerAuth()
     @HttpCode(HttpStatus.OK)
     @ApiOperation({ summary: 'Delete media file by path (Garbage Collection)' })

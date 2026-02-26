@@ -20,7 +20,7 @@ import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 @ApiTags('Director Dashboard') 
 @ApiBearerAuth()              
 @UseGuards(JwtAuthGuard, RolesGuard) // Guard: Cek Login & Role
-@Roles(client.Role.DIRECTOR)          // Security: Hanya Role DIRECTOR
+// @Roles(client.Role.DIRECTOR)          // Security: Hanya Role DIRECTOR
 @Controller('director')
 export class DirectorController {
   constructor(private readonly directorService: DirectorService) {}

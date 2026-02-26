@@ -40,7 +40,7 @@ export class EducationCategoryController {
     // --- CREATE ---
 
     @Post()
-    @Roles(Role.ADMIN, Role.DIRECTOR)
+    @Roles(Role.ADMIN)
     @ApiOperation({
         summary: 'Create New Education Category',
         description: 'Membuat kategori baru. Field iconUrl harus berupa path relative yang didapat dari endpoint Media Upload.'
@@ -55,7 +55,7 @@ export class EducationCategoryController {
     // --- READ (LIST) ---
 
     @Get()
-    @Roles(Role.ADMIN, Role.DIRECTOR)
+    @Roles(Role.ADMIN)
     @ApiOperation({
         summary: 'List All Categories',
         description: 'Mengambil daftar semua kategori beserta jumlah modul yang terasosiasi (_count relation).'
@@ -68,7 +68,7 @@ export class EducationCategoryController {
     // --- READ (DETAIL) ---
 
     @Get(':id')
-    @Roles(Role.ADMIN, Role.DIRECTOR)
+    @Roles(Role.ADMIN)
     @ApiOperation({
         summary: 'Get Category Details',
         description: 'Melihat detail kategori spesifik berdasarkan UUID.'
@@ -83,7 +83,7 @@ export class EducationCategoryController {
     // --- UPDATE ---
 
     @Patch(':id')
-    @Roles(Role.ADMIN, Role.DIRECTOR)
+    @Roles(Role.ADMIN)
     @ApiOperation({
         summary: 'Update Category',
         description: 'Memperbarui nama, deskripsi, atau icon kategori.'
