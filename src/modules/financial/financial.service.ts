@@ -138,11 +138,9 @@ export class FinancialService {
     return this.educationService.simulateAgentEducation(user, dto);
   }
 
-  // Delegasi khusus download PDF jika masih melalui facade
   async downloadEducationPdfById(simulationId: string, user: any) {
-    // Dipecah ke Education Service jika logicnya spesifik
-    return this.educationService.deleteEducationPlan(user.id, simulationId);
-    // Catatan: Pastikan method download juga dipindah ke Education Service
+    // PASTIKAN memanggil method download, BUKAN delete
+    return this.educationService.downloadEducationPdfById(simulationId, user);
   }
 
   // ===========================================================================

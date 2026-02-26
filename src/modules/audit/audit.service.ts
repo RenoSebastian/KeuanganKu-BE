@@ -11,7 +11,7 @@ export class AuditService {
 
   /**
    * [PUBLIC ADAPTER] GENERAL USER ACTIVITY
-   * Wrapper untuk memudahkan logging aktivitas user biasa.
+   * Mencatat aktivitas rutin user (Login, View, Simulasi) ke tabel AccessLog.
    */
   async logActivity(data: {
     userId: string;
@@ -42,34 +42,43 @@ export class AuditService {
 
   /**
    * [PUBLIC ADAPTER] ADMIN CORE ACTIONS
-   * Wrapper khusus untuk Admin SaaS (Approval, Banned, Inject Quota).
+   * Mencatat tindakan administratif sensitif ke tabel AdminActivityLog.
+   * Mendukung penyimpanan struktur 'changes' (Before vs After) untuk audit trail.
    */
   async logAdminAction(data: {
     adminId: string;
     action: string;
-    targetUserId: string;
+    targetUserId: string; // Bisa berupa User ID atau 'SYSTEM'
     details: Record<string, any>;
     ip?: string;
   }) {
-    const payload: CreateAuditLogDto = {
-      actorId: data.adminId,
-      action: data.action,
-      targetUserId: data.targetUserId,
-      metadata: {
-        context: 'ADMIN_ACTION',
-        ...data.details,
-        ip: data.ip,
-        timestamp: new Date().toISOString(),
-      },
-    };
+    try {
+      // Tentukan Entity Name berdasarkan target
+      let entityName = 'USER';
+      if (data.targetUserId === 'SYSTEM') entityName = 'SYSTEM';
+      if (data.details.entityName) entityName = data.details.entityName;
 
-    return this.logAccess(payload);
+      await this.prisma.adminActivityLog.create({
+        data: {
+          adminId: data.adminId,
+          actionType: data.action,
+          entityName: entityName,
+          entityId: data.targetUserId !== 'SYSTEM' ? data.targetUserId : null,
+          changes: data.details as Prisma.InputJsonValue,
+          ipAddress: data.ip,
+        },
+      });
+    } catch (error) {
+      this.logger.error(
+        `[AUDIT FAILURE] Failed to log Admin action '${data.action}' by ${data.adminId}`,
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 
   /**
-   * [CORE LOGIC] DB WRITER
-   * NOTE: Method ini dibuat PUBLIC (bukan private) karena masih dipanggil langsung
-   * oleh 'AuditInterceptor' dan 'DirectorService'.
+   * [CORE LOGIC] DB WRITER (Access Logs)
+   * Menyimpan log aktivitas umum.
    */
   async logAccess(dto: CreateAuditLogDto): Promise<void> {
     try {
@@ -92,7 +101,8 @@ export class AuditService {
   }
 
   /**
-   * [READ] DASHBOARD ANALYTICS
+   * [READ] DASHBOARD ANALYTICS (User Logs)
+   * Mengambil log aktivitas user biasa.
    */
   async getAllLogs(limit = 100) {
     return this.prisma.accessLog.findMany({
@@ -120,19 +130,19 @@ export class AuditService {
 
   /**
    * [READ] ADMIN SPECIFIC LOGS
+   * Mengambil log aktivitas khusus Admin dari tabel AdminActivityLog.
    */
   async getAdminLogs(limit = 50) {
-    return this.prisma.accessLog.findMany({
-      where: {
-        actor: {
-          role: 'ADMIN',
+    return this.prisma.adminActivityLog.findMany({
+      include: {
+        admin: {
+          select: {
+            fullName: true,
+            email: true,
+          },
         },
       },
-      include: {
-        actor: { select: { fullName: true, email: true } },
-        targetUser: { select: { fullName: true, email: true } },
-      },
-      orderBy: { accessedAt: 'desc' },
+      orderBy: { createdAt: 'desc' },
       take: limit,
     });
   }

@@ -23,7 +23,7 @@ datasource db {
 enum Role {
   USER
   ADMIN
-  DIRECTOR
+  // DIRECTOR [DELETED - LEGACY CLEANUP]
 }
 
 enum HealthStatus {
@@ -88,6 +88,7 @@ enum SubscriptionStatus {
   ACTIVE
   EXPIRED
   REVOKED
+  GRACE_PERIOD // [NEW] Status khusus masa tenggang
 }
 
 enum NotificationType {
@@ -111,6 +112,7 @@ enum QuotaTransactionType {
   USAGE_SIMULATION     // Dipakai untuk generate PDF
   COMPENSATION         // Ganti rugi error
   CORRECTION           // Penyesuaian audit
+  SYSTEM_DOWNGRADE     // [NEW] Reset kuota saat expired
 }
 
 // =========================================================
@@ -134,14 +136,14 @@ model Agency {
 // [NEW] Central Bank Logic - Konfigurasi Global Ekonomi (Dinamis)
 // Tabel ini hanya akan memiliki 1 baris data (Singleton)
 model GlobalMarketSettings {
-  id             String   @id @default(uuid())
-  inflationRate  Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)   // Persentase (5.0 = 5%)
-  interestRate   Decimal  @default(4.5) @map("interest_rate") @db.Decimal(5, 2)    // Suku Bunga Acuan (BI Rate)
-  riskFreeRate   Decimal  @default(6.0) @map("risk_free_rate") @db.Decimal(5, 2)   // Return Obligasi Negara
-  goldPrice      Decimal  @default(1000000) @map("gold_price") @db.Decimal(15, 2)  // Harga Emas Acuan (Manual Override)
+  id            String   @id @default(uuid())
+  inflationRate Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)   // Persentase (5.0 = 5%)
+  interestRate  Decimal  @default(4.5) @map("interest_rate") @db.Decimal(5, 2)    // Suku Bunga Acuan (BI Rate)
+  riskFreeRate  Decimal  @default(6.0) @map("risk_free_rate") @db.Decimal(5, 2)   // Return Obligasi Negara
+  goldPrice     Decimal  @default(1000000) @map("gold_price") @db.Decimal(15, 2)  // Harga Emas Acuan (Manual Override)
   
-  updatedAt      DateTime @updatedAt @map("updated_at")
-  updatedBy      String?  @map("updated_by") // Admin ID yang terakhir mengubah
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  updatedBy     String?  @map("updated_by") // Admin ID yang terakhir mengubah
 
   @@map("global_market_settings")
 }
@@ -151,12 +153,12 @@ model GlobalMarketSettings {
 // =========================================================
 
 model User {
-  id           String  @id @default(uuid())
-  agencyId     String? @map("agency_id")
-  nip          String? @unique // Bisa digunakan sebagai Agent ID
-  email        String  @unique
-  passwordHash String  @map("password_hash")
-  fullName     String  @map("full_name")
+  id             String  @id @default(uuid())
+  agencyId       String? @map("agency_id")
+  nip            String? @unique // Bisa digunakan sebagai Agent ID
+  email          String  @unique
+  passwordHash   String  @map("password_hash")
+  fullName       String  @map("full_name")
   
   gender         String?   @db.VarChar(50)
   address        String?   @db.Text
@@ -170,37 +172,40 @@ model User {
   // Quota dikelola via UserQuotaLedger, field ini sebagai Cache/Snapshot
   quota          Int       @default(0) 
 
-  role      Role     @default(USER)
-  createdAt DateTime @default(now()) @map("created_at")
-  updatedAt DateTime @updatedAt @map("updated_at")
+  role           Role      @default(USER)
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  deletedAt      DateTime? @map("deleted_at") // [NEW] Soft Delete
 
-  agency             Agency?             @relation(fields: [agencyId], references: [id])
+  agency              Agency?              @relation(fields: [agencyId], references: [id])
   
-  budgetPlans        BudgetPlan[]
-  financialChecks    FinancialCheckup[]
-  eduPlans           EducationPlan[]
-  pensionPlans       PensionPlan[]
-  insurancePlans     InsurancePlan[]
-  goalPlans          GoalPlan[]
+  budgetPlans         BudgetPlan[]
+  financialChecks     FinancialCheckup[]
+  eduPlans            EducationPlan[]
+  pensionPlans        PensionPlan[]
+  insurancePlans      InsurancePlan[]
+  goalPlans           GoalPlan[]
   
-  educationProgress  UserEducationProgress[]
+  educationProgress   UserEducationProgress[]
   
   // Audit Relations
-  actionsPerformed   AccessLog[]         @relation("ActorRelation")
-  actionsTargeted    AccessLog[]         @relation("TargetRelation")
-  adminActivities    AdminActivityLog[]  @relation("AdminActor")
-  RetentionLog       RetentionLog[]
-  simulationLogs     SimulationLog[]
+  actionsPerformed    AccessLog[]          @relation("ActorRelation")
+  actionsTargeted     AccessLog[]          @relation("TargetRelation")
+  adminActivities     AdminActivityLog[]   @relation("AdminActor")
+  RetentionLog        RetentionLog[]
+  simulationLogs      SimulationLog[]
   
   // Subscription & Usage Relations
-  subscription       UserSubscription?
-  subscriptionOrders SubscriptionOrder[]
-  notifications      Notification[]
-  usage              UserUsage?
-  quotaLedger        UserQuotaLedger[]
-  activeSessions     ActiveSession[]
+  subscription        UserSubscription?
+  subscriptionOrders  SubscriptionOrder[]
+  notifications       Notification[]
+  usage               UserUsage?
+  quotaLedger         UserQuotaLedger[]
+  activeSessions      ActiveSession[]
 
   @@index([agencyId])
+  @@index([email])
+  @@index([deletedAt]) // Index untuk optimasi filter soft delete
   @@map("users")
 }
 
@@ -229,11 +234,13 @@ model UserQuotaLedger {
   balanceAfter Int                  @map("balance_after") // Saldo setelah transaksi
   description  String?              @db.Text
   createdAt    DateTime             @default(now()) @map("created_at")
+  deletedAt    DateTime?            @map("deleted_at") // [NEW] Soft Delete (Rarely used but safe)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([type])
+  @@index([createdAt])
   @@map("user_quota_ledgers")
 }
 
@@ -265,6 +272,7 @@ model SubscriptionOrder {
   snapshotPrice      Decimal            @map("snapshot_price") @db.Decimal(15, 2)
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
+  deletedAt          DateTime?          @map("deleted_at") // [NEW] Soft Delete
 
   user                  User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan                  SubscriptionPlan       @relation(fields: [planId], references: [id])
@@ -278,13 +286,13 @@ model SubscriptionOrder {
 
 // Audit khusus verifikasi pembayaran (Anti-Fraud Internal)
 model SubscriptionPaymentAudit {
-  id               String   @id @default(uuid())
-  orderId          String   @unique @map("order_id")
-  adminId          String   @map("admin_id")
+  id               String             @id @default(uuid())
+  orderId          String             @unique @map("order_id")
+  adminId          String             @map("admin_id")
   status           VerificationStatus
-  rejectionReason  String?  @map("rejection_reason") @db.Text
-  proofSnapshotUrl String?  @map("proof_snapshot_url") // Snapshot bukti saat diverifikasi
-  verifiedAt       DateTime @default(now()) @map("verified_at")
+  rejectionReason  String?            @map("rejection_reason") @db.Text
+  proofSnapshotUrl String?            @map("proof_snapshot_url") // Snapshot bukti saat diverifikasi
+  verifiedAt       DateTime           @default(now()) @map("verified_at")
 
   order SubscriptionOrder @relation(fields: [orderId], references: [id])
   
@@ -292,15 +300,16 @@ model SubscriptionPaymentAudit {
 }
 
 model UserSubscription {
-  id          String             @id @default(uuid())
-  userId      String             @unique @map("user_id")
-  planId      String             @map("plan_id")
-  status      SubscriptionStatus @default(ACTIVE)
-  startDate   DateTime           @default(now()) @map("start_date")
-  endDate     DateTime           @map("end_date")
-  lastOrderId String             @map("last_order_id")
-  createdAt   DateTime           @default(now()) @map("created_at")
-  updatedAt   DateTime           @updatedAt @map("updated_at")
+  id                 String             @id @default(uuid())
+  userId             String             @unique @map("user_id")
+  planId             String             @map("plan_id")
+  status             SubscriptionStatus @default(ACTIVE)
+  startDate          DateTime           @default(now()) @map("start_date")
+  endDate            DateTime           @map("end_date")
+  gracePeriodEndDate DateTime?          @map("grace_period_end_date") // [NEW] Buffer Time (Netflix Style)
+  lastOrderId        String             @map("last_order_id")
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
 
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan      SubscriptionPlan  @relation(fields: [planId], references: [id])
@@ -352,23 +361,23 @@ model ActiveSession {
 
 // Log aktivitas simulasi user (History Penggunaan)
 model SimulationLog {
-  id                String        @id @default(uuid())
-  agentId           String        @map("agent_id")
-  clientName        String        @map("client_name")
-  clientAge         Int?          @map("client_age")
-  clientCity        String?       @map("client_city")
-  clientJob         String?       @map("client_job")
-  inputPayload      Json          @map("input_payload")
-  outputResult      Json?         @map("output_result")
-  sessionId         String        @map("session_id")
-  totalIncome       Decimal?      @map("total_income") @db.Decimal(15, 2)
-  calculatedSurplus Decimal?      @map("calculated_surplus") @db.Decimal(15, 2)
-  healthScore       Int?          @map("health_score")
-  status            HealthStatus? @default(BAHAYA)
-  financialRatios   Json?         @map("financial_ratios")
-  moduleType        String        @default("BUDGETING") @map("module_type")
-  simulationDate    DateTime      @default(now()) @map("simulation_date")
-  createdAt         DateTime      @default(now()) @map("created_at")
+  id                String          @id @default(uuid())
+  agentId           String          @map("agent_id")
+  clientName        String          @map("client_name")
+  clientAge         Int?            @map("client_age")
+  clientCity        String?         @map("client_city")
+  clientJob         String?         @map("client_job")
+  inputPayload      Json            @map("input_payload")
+  outputResult      Json?           @map("output_result")
+  sessionId         String          @map("session_id")
+  totalIncome       Decimal?        @map("total_income") @db.Decimal(15, 2)
+  calculatedSurplus Decimal?        @map("calculated_surplus") @db.Decimal(15, 2)
+  healthScore       Int?            @map("health_score")
+  status            HealthStatus?   @default(BAHAYA)
+  financialRatios   Json?           @map("financial_ratios")
+  moduleType        String          @default("BUDGETING") @map("module_type")
+  simulationDate    DateTime        @default(now()) @map("simulation_date")
+  createdAt         DateTime        @default(now()) @map("created_at")
 
   agent User @relation(fields: [agentId], references: [id])
 
@@ -395,16 +404,16 @@ model AccessLog {
 
 // [NEW] Admin Activity Log (Untuk Audit Konfigurasi & Aksi Sensitif Admin)
 model AdminActivityLog {
-  id           String   @id @default(uuid())
-  adminId      String   @map("admin_id")
-  actionType   String   @map("action_type") // Ex: UPDATE_MARKET_SETTINGS, BAN_USER
-  entityName   String   @map("entity_name") // Ex: GlobalMarketSettings, User
-  entityId     String?  @map("entity_id")
-  changes      Json     @map("changes")     // { before: ..., after: ... }
-  ipAddress    String?  @map("ip_address")
-  createdAt    DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid())
+  adminId    String   @map("admin_id")
+  actionType String   @map("action_type") // Ex: UPDATE_MARKET_SETTINGS, BAN_USER
+  entityName String   @map("entity_name") // Ex: GlobalMarketSettings, User
+  entityId   String?  @map("entity_id")
+  changes    Json     @map("changes")     // { before: ..., after: ... }
+  ipAddress  String?  @map("ip_address")
+  createdAt  DateTime @default(now()) @map("created_at")
 
-  admin        User     @relation("AdminActor", fields: [adminId], references: [id])
+  admin      User     @relation("AdminActor", fields: [adminId], references: [id])
 
   @@map("admin_activity_logs")
 }
@@ -614,15 +623,15 @@ model GoalPlan {
 // =========================================================
 
 model EducationCategory {
-  id           String   @id @default(uuid())
+  id           String            @id @default(uuid())
   name         String
-  slug         String   @unique
-  description  String?  @db.VarChar(255)
-  iconUrl      String   @map("icon_url")
-  displayOrder Int      @default(0) @map("display_order")
-  isActive     Boolean  @default(true) @map("is_active")
-  createdAt    DateTime @default(now()) @map("created_at")
-  updatedAt    DateTime @updatedAt @map("updated_at")
+  slug         String            @unique
+  description  String?           @db.VarChar(255)
+  iconUrl      String            @map("icon_url")
+  displayOrder Int               @default(0) @map("display_order")
+  isActive     Boolean           @default(true) @map("is_active")
+  createdAt    DateTime          @default(now()) @map("created_at")
+  updatedAt    DateTime          @updatedAt @map("updated_at")
 
   modules EducationModule[]
 
@@ -684,9 +693,9 @@ model UserEducationProgress {
   updatedAt         DateTime                @updatedAt @map("updated_at")
   startedAt         DateTime?               @map("started_at")
 
-  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
-  lastReadSection ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module            EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  lastReadSection   ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
 
   @@id([userId, moduleId])
   @@map("user_education_progress")

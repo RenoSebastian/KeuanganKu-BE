@@ -1,10 +1,11 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ConfigModule, ConfigService } from '@nestjs/config'; // [UPDATE] Import ConfigService
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core'; // [UPDATE] Import APP_GUARD
 import { WinstonModule } from 'nest-winston';
 import { ServeStaticModule } from '@nestjs/serve-static';
-import { JwtModule } from '@nestjs/jwt'; // [UPDATE] Import JwtModule
+import { JwtModule } from '@nestjs/jwt';
+import { ThrottlerModule } from '@nestjs/throttler'; // [NEW] Import Throttler
 import * as path from 'path';
 
 // --- Logging & Config ---
@@ -14,6 +15,9 @@ import { winstonConfig } from './common/configs/winston.config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+
+// --- Guards ---
+import { ThrottlerBehindProxyGuard } from './common/guards/throttler-behind-proxy.guard'; // [NEW] Custom Guard
 
 // --- Middlewares ---
 import { ActiveSessionMiddleware } from './common/middleware/active-session.middleware';
@@ -33,6 +37,7 @@ import { EducationModule } from './modules/education/education.module';
 import { MediaModule } from './modules/media/media.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { NotificationModule } from './modules/notification/notification.module';
+// import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomment jika AdminModule sudah dibuat di Fase 4
 
 @Module({
   imports: [
@@ -45,7 +50,16 @@ import { NotificationModule } from './modules/notification/notification.module';
     // Scheduler
     ScheduleModule.forRoot(),
 
-    // [FIX] Register JwtModule Global for Middleware
+    // [NEW] Security: Rate Limiting (Global Configuration)
+    // Limit: 100 request per 60 detik per IP
+    ThrottlerModule.forRoot([
+      {
+        ttl: 60000, // 60 detik (dalam milidetik)
+        limit: 100, // Maksimal 100 request
+      },
+    ]),
+
+    // Register JwtModule Global for Middleware
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
@@ -81,6 +95,7 @@ import { NotificationModule } from './modules/notification/notification.module';
     MediaModule,
     SubscriptionModule,
     NotificationModule,
+    // AdminModule, // Uncomment jika sudah ready
   ],
   controllers: [],
   providers: [
@@ -95,6 +110,12 @@ import { NotificationModule } from './modules/notification/notification.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
+    },
+    // [NEW] Global Rate Limiting Guard
+    // Mengaktifkan Throttler untuk seluruh endpoint secara default
+    {
+      provide: APP_GUARD,
+      useClass: ThrottlerBehindProxyGuard,
     },
   ],
 })

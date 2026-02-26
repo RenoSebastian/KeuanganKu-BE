@@ -239,4 +239,22 @@ export class EducationCalculatorService {
         const ageDt = new Date(diffMs);
         return Math.abs(ageDt.getUTCFullYear() - 1970);
     }
+
+    async downloadEducationPdfById(simulationId: string, user: User) {
+        const log = await this.prisma.simulationLog.findFirst({
+            where: {
+                id: simulationId,
+                agentId: user.id
+            }
+        });
+
+        if (!log) {
+            throw new NotFoundException('Data simulasi tidak ditemukan');
+        }
+
+        const originalInput = log.inputPayload as unknown as CreateEducationSimulationDto;
+
+        // Panggil pdfService untuk generate buffer
+        return this.pdfService.generateEducationSimulationPdf(originalInput, user);
+    }
 }

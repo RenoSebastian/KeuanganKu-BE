@@ -17,7 +17,7 @@ import { UpdateMarketSettingsDto } from '../../master-data/dto/update-market-set
 
 @Controller('admin/market-settings')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(client.Role.ADMIN, client.Role.DIRECTOR) // Hanya Admin & Direktur yang boleh akses
+@Roles(client.Role.ADMIN) // [FIX] Hapus Role.DIRECTOR karena sudah deprecated
 export class MarketSettingsController {
     constructor(private readonly marketSettingsService: MarketSettingsService) { }
 

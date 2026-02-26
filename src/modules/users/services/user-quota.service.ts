@@ -16,8 +16,8 @@ export class UserQuotaService {
 
     /**
      * [CORE] ADD QUOTA
-     * Menambah saldo kuota user (Debit).
-     * Digunakan oleh: Subscription Service (saat bayar), Admin Manual Inject.
+     * Adds user quota balance (Debit).
+     * Used by: Subscription Service (on payment), Admin Manual Inject.
      */
     async addQuota(
         userId: string,
@@ -35,8 +35,8 @@ export class UserQuotaService {
 
     /**
      * [CORE] DEDUCT QUOTA
-     * Mengurangi saldo kuota user (Kredit).
-     * Digunakan oleh: Simulation Services (saat user generate report).
+     * Reduces user quota balance (Credit).
+     * Used by: Simulation Services (when generating reports).
      */
     async deductQuota(
         userId: string,
@@ -49,13 +49,13 @@ export class UserQuotaService {
             throw new BadRequestException('Jumlah pengurangan kuota harus lebih dari 0');
         }
 
-        // Kirim amount sebagai negatif ke prosesor internal
+        // Send negative amount to internal processor
         return this.processTransaction(userId, -amount, type, referenceId, description);
     }
 
     /**
      * [INTERNAL] ATOMIC TRANSACTION PROCESSOR
-     * Menjamin sinkronisasi antara tabel User (Cache) dan UserQuotaLedger (Audit Trail).
+     * Ensures synchronization between User table (Cache) and UserQuotaLedger (Audit Trail).
      */
     private async processTransaction(
         userId: string,
@@ -66,7 +66,7 @@ export class UserQuotaService {
     ) {
         try {
             return await this.prisma.$transaction(async (tx) => {
-                // 1. Lock & Get User Data (Mencegah Race Condition)
+                // 1. Lock & Get User Data (Prevents Race Condition)
                 const user = await tx.user.findUnique({
                     where: { id: userId },
                     select: { id: true, quota: true },
@@ -76,27 +76,28 @@ export class UserQuotaService {
                     throw new NotFoundException(`User dengan ID ${userId} tidak ditemukan`);
                 }
 
-                // 2. Hitung Saldo Baru
+                // 2. Calculate New Balance
                 const currentBalance = user.quota ?? 0;
                 const newBalance = currentBalance + amountChange;
 
-                // 3. Validasi: Saldo tidak boleh negatif
+                // 3. Validation: Prevent Negative Balance
+                // (Unless explicitly allowed for certain transaction types, e.g., correction)
                 if (newBalance < 0) {
                     this.logger.warn(
-                        `Insufficient Quota: User ${userId} attempted -${Math.abs(amountChange)} but only has ${currentBalance}`,
+                        `Insufficient Quota: User ${userId} attempted ${amountChange} but only has ${currentBalance}`,
                     );
                     throw new BadRequestException(
                         'Kuota tidak mencukupi untuk melakukan aksi ini.',
                     );
                 }
 
-                // 4. Update User Cache Balance (Tabel users)
+                // 4. Update User Cache Balance (users table)
                 await tx.user.update({
                     where: { id: userId },
                     data: { quota: newBalance },
                 });
 
-                // 5. Create Ledger Entry (Tabel user_quota_ledgers)
+                // 5. Create Ledger Entry (user_quota_ledgers table)
                 const ledger = await tx.userQuotaLedger.create({
                     data: {
                         userId: userId,
@@ -124,8 +125,8 @@ export class UserQuotaService {
             }
 
             this.logger.error(
-                `Failed to process quota transaction for user ${userId}: ${error.message}`,
-                error.stack,
+                `Failed to process quota transaction for user ${userId}: ${error instanceof Error ? error.message : String(error)}`,
+                error instanceof Error ? error.stack : undefined,
             );
             throw new InternalServerErrorException(
                 'Terjadi kesalahan pada sistem manajemen kuota.',
@@ -135,7 +136,7 @@ export class UserQuotaService {
 
     /**
      * [READ] GET HISTORY
-     * Mengambil riwayat mutasi kuota user untuk transparansi audit nasabah.
+     * Retrieves user quota mutation history for audit transparency.
      */
     async getQuotaHistory(userId: string, limit = 10, page = 1) {
         const skip = (page - 1) * limit;
@@ -162,8 +163,8 @@ export class UserQuotaService {
 
     /**
      * [ADMIN] RECALIBRATE
-     * Menghitung ulang saldo user berdasarkan seluruh transaksi di Ledger.
-     * Digunakan jika ada kecurigaan integritas data kolom cache 'quota'.
+     * Recalculates user balance based on entire ledger history.
+     * Used if data integrity issues are suspected in the 'quota' cache column.
      */
     async recalibrateBalance(userId: string) {
         const aggregate = await this.prisma.userQuotaLedger.aggregate({
@@ -185,7 +186,7 @@ export class UserQuotaService {
     }
 
     /**
-     * Helper: Generate deskripsi otomatis jika tidak disediakan.
+     * Helper: Generate automatic description if not provided.
      */
     private getDefaultDescription(type: QuotaTransactionType, change: number): string {
         switch (type) {
@@ -199,6 +200,8 @@ export class UserQuotaService {
                 return `Kompensasi kuota atas kendala teknis sistem.`;
             case QuotaTransactionType.CORRECTION:
                 return `Koreksi saldo kuota oleh tim audit.`;
+            case QuotaTransactionType.SYSTEM_DOWNGRADE:
+                return `Reset kuota otomatis karena masa aktif langganan habis.`;
             default:
                 return `Transaksi kuota ${type}`;
         }
