@@ -4,12 +4,11 @@ import { AuditService } from '../audit/audit.service';
 import { FinancialService } from '../financial/financial.service';
 import { HealthStatus } from '@prisma/client';
 
-// Utility Import (Step 1 Integration)
+// Utility Import
 import { calculateFinancialHealth } from '../financial/utils/financial-math.util';
 import { CreateFinancialRecordDto } from '../financial/dto/create-financial-record.dto';
 import { SearchService } from '../search/search.service';
 
-// 1. Import DTO Dashboard & Summary
 import {
   DashboardStatsDto,
   RiskyEmployeeDto,
@@ -17,7 +16,6 @@ import {
   DashboardSummaryDto
 } from './dto/director-dashboard.dto';
 
-// 2. Import DTO Detail Employee
 import { EmployeeAuditDetailDto } from './dto/employee-detail-response.dto';
 
 @Injectable()
@@ -29,9 +27,6 @@ export class DirectorService {
     private searchService: SearchService,
   ) { }
 
-  // ===========================================================================
-  // PHASE 5: ORCHESTRATOR (PARALLEL EXECUTION)
-  // ===========================================================================
   async getDashboardSummary(): Promise<DashboardSummaryDto> {
     const [stats, riskyAll, rankingsAll] = await Promise.all([
       this.getDashboardStats(),
@@ -41,17 +36,14 @@ export class DirectorService {
 
     return {
       stats,
-      topRiskyEmployees: riskyAll.slice(0, 5), // Preview Top 5
-      unitRankings: rankingsAll.slice(0, 5),   // Preview Top 5
+      topRiskyEmployees: riskyAll.slice(0, 5),
+      unitRankings: rankingsAll.slice(0, 5),
       meta: {
         generatedAt: new Date(),
       },
     };
   }
 
-  // ===========================================================================
-  // 1. DASHBOARD STATS (OPTIMIZED)
-  // ===========================================================================
   async getDashboardStats(): Promise<DashboardStatsDto> {
     const totalEmployees = await this.prisma.user.count({
       where: { role: 'USER' },
@@ -88,9 +80,6 @@ export class DirectorService {
     };
   }
 
-  // ===========================================================================
-  // 2. RISK MONITOR (DATABASE FILTERING)
-  // ===========================================================================
   async getRiskMonitor(): Promise<RiskyEmployeeDto[]> {
     const users = await this.prisma.user.findMany({
       where: {
@@ -104,7 +93,8 @@ export class DirectorService {
       select: {
         id: true,
         fullName: true,
-        unitKerja: { select: { namaUnit: true } },
+        // [FIX] unitKerja -> agency, namaUnit -> name
+        agency: { select: { name: true } },
         financialChecks: {
           orderBy: { checkDate: 'desc' },
           take: 1,
@@ -130,7 +120,8 @@ export class DirectorService {
         return {
           id: u.id,
           fullName: u.fullName,
-          unitName: u.unitKerja?.namaUnit || 'Tidak Ada Unit',
+          // [FIX] Mapping result agency name
+          unitName: u.agency?.name || 'Tidak Ada Agency',
           status: lastCheck.status,
           healthScore: lastCheck.healthScore,
           debtToIncomeRatio: debtRatio,
@@ -142,24 +133,22 @@ export class DirectorService {
     return riskyList.sort((a, b) => a.healthScore - b.healthScore);
   }
 
-  // ===========================================================================
-  // 3. UNIT RANKING (OPTIMIZED)
-  // ===========================================================================
   async getUnitRankings(): Promise<UnitRankingDto[]> {
+    // [FIX] Update Raw Query: unit_kerja -> agencies, nama_unit -> agency_name, u.unit_kerja_id -> u.agency_id
     const rawRankings: any[] = await this.prisma.$queryRaw`
       SELECT
-        uk.id,
-        uk.nama_unit as "unitName",
+        ag.id,
+        ag.agency_name as "unitName",
         COUNT(u.id)::int as "employeeCount",
         COALESCE(AVG(fc.health_score), 0)::float as "avgScore"
-      FROM unit_kerja uk
-      LEFT JOIN users u ON u.unit_kerja_id = uk.id AND u.role = 'USER'
+      FROM agencies ag
+      LEFT JOIN users u ON u.agency_id = ag.id AND u.role = 'USER'
       LEFT JOIN (
         SELECT DISTINCT ON (user_id) user_id, health_score
         FROM financial_checkups
         ORDER BY user_id, check_date DESC
       ) fc ON fc.user_id = u.id
-      GROUP BY uk.id, uk.nama_unit
+      GROUP BY ag.id, ag.agency_name
       ORDER BY "avgScore" DESC;
     `;
 
@@ -180,24 +169,22 @@ export class DirectorService {
     });
   }
 
-  // ===========================================================================
-  // 4. SEARCH EMPLOYEES (FUZZY SEARCH)
-  // ===========================================================================
   async searchEmployees(keyword: string) {
     if (!keyword) return [];
 
     const safeKeyword = keyword.trim();
 
+    // [FIX] Update Raw Query Fuzzy Search: unit_kerja -> agencies, dst
     const results: any[] = await this.prisma.$queryRaw`
       SELECT
         u.id,
         u.full_name as "fullName",
         u.email,
-        uk.nama_unit as "unitName",
+        ag.agency_name as "unitName",
         fc.status,
         fc.health_score as "healthScore"
       FROM users u
-      LEFT JOIN unit_kerja uk ON u.unit_kerja_id = uk.id
+      LEFT JOIN agencies ag ON u.agency_id = ag.id
       LEFT JOIN (
         SELECT DISTINCT ON (user_id) user_id, status, health_score
         FROM financial_checkups
@@ -208,7 +195,7 @@ export class DirectorService {
         (
           u.full_name ILIKE ${'%' + safeKeyword + '%'}
           OR 
-          uk.nama_unit ILIKE ${'%' + safeKeyword + '%'}
+          ag.agency_name ILIKE ${'%' + safeKeyword + '%'}
         )
       LIMIT 20;
     `;
@@ -218,7 +205,7 @@ export class DirectorService {
       fullName: row.fullName,
       email: row.email,
       unitKerja: {
-        name: row.unitName || 'Tidak Ada Unit'
+        name: row.unitName || 'Tidak Ada Agency'
       },
       financialChecks: row.status ? [{
         status: row.status as HealthStatus,
@@ -227,13 +214,11 @@ export class DirectorService {
     }));
   }
 
-  // ===========================================================================
-  // 5. EMPLOYEE DETAIL (DEEP DIVE + AUDIT)
-  // ===========================================================================
   async getEmployeeAuditDetail(actorId: string, targetUserId: string): Promise<EmployeeAuditDetailDto | null> {
     const user = await this.prisma.user.findUnique({
       where: { id: targetUserId },
-      include: { unitKerja: true }
+      // [FIX] unitKerja -> agency
+      include: { agency: true }
     });
 
     if (!user) throw new NotFoundException('Karyawan tidak ditemukan');
@@ -244,7 +229,6 @@ export class DirectorService {
       return null;
     }
 
-    // [FIX 1] Pass object, bukan multiple arguments
     await this.auditService.logAccess({
       actorId: actorId,
       targetUserId: targetUserId,
@@ -255,14 +239,18 @@ export class DirectorService {
       }
     });
 
-    // [FIX 2] Type Casting untuk menghindari error Prisma JsonValue vs RatioDetail[]
     let analysisRatios: any = c.ratiosDetails;
 
-    // On-the-fly Calculation jika data belum matang
     if (!analysisRatios) {
+      // ... (Logic kalkulasi tetap sama, disembunyikan untuk ringkas)
+      // Pastikan logic mapping di bawah ini aman
+      // ...
       const rawDataForCalc: CreateFinancialRecordDto = {
+        // ... populate data from 'c'
         assetCash: Number(c.assetCash),
         assetHome: Number(c.assetHome),
+        // ... lanjutkan sisa mapping properti
+        // (copy paste bagian mapping dari kode lama Anda di sini)
         assetVehicle: Number(c.assetVehicle),
         assetJewelry: Number(c.assetJewelry),
         assetAntique: Number(c.assetAntique),
@@ -320,7 +308,8 @@ export class DirectorService {
       profile: {
         id: user.id,
         fullName: user.fullName,
-        unitName: user.unitKerja?.namaUnit || '-',
+        // [FIX] unitKerja -> agency
+        unitName: user.agency?.name || '-',
         email: user.email,
         status: c.status,
         healthScore: c.healthScore,
@@ -333,7 +322,7 @@ export class DirectorService {
         netWorth: Number(c.totalNetWorth),
         surplusDeficit: Number(c.surplusDeficit),
         generatedAt: c.checkDate,
-        ratios: analysisRatios as any // Explicit casting
+        ratios: analysisRatios as any
       },
 
       record: {
@@ -342,7 +331,9 @@ export class DirectorService {
           dob: user.dateOfBirth ? user.dateOfBirth.toISOString() : undefined,
           ...c.userProfile as any
         },
+        // ... (sisanya sama dengan file asli)
         assetCash: Number(c.assetCash),
+        // ... dst
         assetHome: Number(c.assetHome),
         assetVehicle: Number(c.assetVehicle),
         assetJewelry: Number(c.assetJewelry),
@@ -406,13 +397,12 @@ export class DirectorService {
     });
 
     if (employee) {
-      // Indexing untuk kebutuhan Direktur (Omni Search)
       await this.searchService.addDocuments('director_employees', [
         {
           id: employee.id,
           name: employee.fullName,
-          unitKerja: employee.unitKerjaId,
-          // Menambahkan konteks finansial terakhir agar bisa di-search berdasarkan kondisi
+          // [FIX] unitKerjaId -> agencyId
+          unitKerja: employee.agencyId,
           lastHealthScore: employee.financialChecks[0]?.healthScore || 0,
         },
       ]);

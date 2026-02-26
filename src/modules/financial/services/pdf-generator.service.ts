@@ -8,7 +8,7 @@ import * as path from 'path';
 import { checkupReportTemplate } from '../templates/checkup-report.template';
 import { budgetReportTemplate } from '../templates/budget-report.template';
 import { pensionReportTemplate } from '../templates/pension-report.template';
-import { insuranceReportTemplate } from '../templates/insurance-report.template';
+import { generateInsuranceReportHtml } from '../templates/insurance-report.template';
 import { goalReportTemplate } from '../templates/goals-report.template';
 import { educationReportTemplate } from '../templates/education-report.template';
 import { historyCheckupReportTemplate } from '../templates/history-checkup-report.template';
@@ -129,7 +129,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
     // --- CORE GENERATOR DENGAN AUTO-RETRY ---
 
-    private async generatePdfCore(templateHtml: string, data: any, attempt = 1): Promise<Buffer> {
+    // --- CORE GENERATOR DENGAN AUTO-RETRY ---
+
+    // [FIX] data dibuat optional (data?: any)
+    private async generatePdfCore(templateHtml: string, data?: any, attempt = 1): Promise<Buffer> {
         const MAX_RETRIES = 2; // Coba maksimal 2 kali jika crash
         let page: puppeteer.Page | null = null;
 
@@ -179,7 +182,8 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             if (isCrash && attempt <= MAX_RETRIES) {
                 this.logger.warn(`Browser crashed. Resetting and retrying... (Attempt ${attempt}/${MAX_RETRIES})`);
                 await this.closeBrowser(); // Matikan browser rusak
-                return this.generatePdfCore(templateHtml, data, attempt + 1); // Rekursif call
+                // [FIX] Pass data (bisa undefined) ke recursive call
+                return this.generatePdfCore(templateHtml, data, attempt + 1);
             }
 
             throw error; // Lempar error jika bukan crash atau sudah habis retry
@@ -219,7 +223,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     }
 
     async generateInsurancePdf(data: any): Promise<Buffer> {
-        const template = handlebars.compile(insuranceReportTemplate);
+        const template = handlebars.compile(generateInsuranceReportHtml);
         const context = this.mapInsuranceData(data);
         const html = template(context);
         return this.generatePdfCore(html, context);
@@ -793,7 +797,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
-                groupAgency: agent.agencyName || 'MaxiPro Group',
+                groupAgency: agent.companyName || 'MaxiPro Group',
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
@@ -864,7 +868,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
      */
     async generateInsurancePdfBuffer(
         clientData: CreateInsuranceSimulationDto,
-        calculationResult: any, // Menggunakan hasil return dari calculateInsurancePlan
+        calculationResult: any,
         agent: User,
     ): Promise<Buffer> {
         const fmt = (n: number) =>
@@ -875,79 +879,67 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             }).format(n);
 
         // Hitung total dana untuk membersihkan hutang + biaya akhir (Debt Clearance)
-        // Logic: Hutang Sisa + Biaya Pemakaman
         const debtClearanceTotal = Number(clientData.existingDebt) + Number(clientData.finalExpense || 0);
 
-        // Mapping Data Context untuk Handlebars
+        // Mapping Data Context
         const context = {
-            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
-            documentId: `INS-${Math.random().toString(36).substring(7).toUpperCase()}`,
+            meta: { // [FIXED] Sesuai struktur di template: data.meta.documentId
+                generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+                documentId: `INS-${Math.random().toString(36).substring(7).toUpperCase()}`,
+            },
 
-            // 1. Profil Agen (Professional Header)
             agent: {
                 name: agent.fullName,
-                parentCompany: agent.companyName || 'KeuanganKu Pratama',
-                groupAgency: agent.agencyName || 'MaxiPro Group',
+                companyName: agent.companyName || 'KeuanganKu Pratama', // [FIXED] template pakai 'companyName'
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
-            // 2. Profil Klien
             client: {
                 name: clientData.clientName,
                 city: clientData.clientCity,
                 job: clientData.clientJob,
-                // Format tanggal lahir agar enak dibaca
                 dob: clientData.clientDob ? new Date(clientData.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
+                maritalStatus: 'MARRIED' // Optional jika ada di input
             },
 
-            // 3. Snapshot Input (Parameter yang digunakan)
             input: {
                 typeLabel: clientData.type === 'LIFE' ? 'Jiwa (Life)' : clientData.type === 'HEALTH' ? 'Kesehatan' : 'Sakit Kritis',
-                dependentCount: clientData.dependentCount,
+                dependents: clientData.dependents || 0, // [FIXED] Mapping dependents
                 monthlyExpense: fmt(clientData.monthlyExpense),
                 existingDebt: fmt(clientData.existingDebt),
                 existingCoverage: fmt(clientData.existingCoverage),
+                // Raw value needed for chart calculation in template
+                existingCoverageRaw: clientData.existingCoverage,
                 finalExpense: fmt(clientData.finalExpense || 0),
                 protectionDuration: clientData.protectionDuration,
-                inflationRate: clientData.inflationRate || 5, // Default display
-                returnRate: clientData.returnRate || 6       // Default display
+                inflationRate: clientData.inflationRate || 5,
+                returnRate: clientData.returnRate || 6
             },
 
-            // 4. Hasil Analisa (Calculation Result)
             result: {
-                // Pilar A: Income Replacement (Biaya Hidup Keluarga)
+                // Raw values needed for chart calculation in template
+                totalNeededRaw: calculationResult.totalNeeded,
+
                 incomeReplacement: fmt(calculationResult.incomeReplacementValue),
                 annualExpense: fmt(clientData.monthlyExpense * 12),
-
-                // Pilar B: Debt & Final Expense (Dana Bersih-bersih)
                 debtClearance: fmt(debtClearanceTotal),
-
-                // Summary
-                totalNeeded: fmt(calculationResult.totalNeeded), // A + B
+                totalNeeded: fmt(calculationResult.totalNeeded),
                 existing: fmt(clientData.existingCoverage),
                 gap: fmt(calculationResult.coverageGap),
-
-                // Logic Visual (Apakah Surplus atau Defisit?)
-                isGapPositive: calculationResult.coverageGap > 0,
-
-                // Rekomendasi Dinamis
-                recommendation: calculationResult.coverageGap > 0
-                    ? `Klien membutuhkan TAMBAHAN Uang Pertanggungan sebesar ${fmt(calculationResult.coverageGap)} agar keluarga aman 100%.`
-                    : `Selamat! Proteksi klien saat ini sudah mencukupi kebutuhan masa depan.`
+                recommendation: calculationResult.recommendation // Asumsi service sudah men-generate teks rekomendasi
             }
         };
 
         try {
-            // Compile Template (Pastikan insurance-report.template.ts sudah direvisi layoutnya)
-            const template = handlebars.compile(insuranceReportTemplate);
-            const html = template(context);
+            // [FIXED] Panggil function template langsung (ES6 Template Literal)
+            // Tidak perlu Handlebars compile karena kita pakai native JS function
+            const htmlContent = generateInsuranceReportHtml(context);
 
-            // Render ke Buffer via Puppeteer
-            const pdfBuffer = await this.generatePdfCore(html, context);
+            // Render ke Buffer via Puppeteer (Core Logic)
+            // Pastikan generatePdfCore sudah diadaptasi untuk menerima string HTML langsung
+            const pdfBuffer = await this.generatePdfCore(htmlContent);
 
             this.logger.log(`Stateless Insurance PDF generated for: ${clientData.clientName}`);
-
-            // Return Buffer langsung (Zero Disk I/O)
             return pdfBuffer;
 
         } catch (error: any) {
@@ -997,7 +989,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
-                groupAgency: agent.agencyName || 'MaxiPro Group',
+                groupAgency: agent.companyName || 'MaxiPro Group',
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
@@ -1103,7 +1095,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
-                groupAgency: agent.agencyName || 'MaxiPro Group',
+                groupAgency: agent.companyName || 'MaxiPro Group',
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
@@ -1254,7 +1246,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 name: agent.fullName,
                 level: agent.agentLevel || 'Financial Advisor',
                 company: agent.companyName || 'KeuanganKu Pratama',
-                agency: agent.agencyName || 'MaxiPro Group',
+                agency: agent.companyName || 'MaxiPro Group',
             },
 
             // PROFIL KLIEN
@@ -1374,7 +1366,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 name: agent.fullName,
                 level: agent.agentLevel || 'Financial Advisor',
                 company: agent.companyName || 'KeuanganKu Pratama',
-                agency: agent.agencyName || 'MaxiPro Group',
+                agency: agent.companyName || 'MaxiPro Group',
             },
 
             // Profil Klien
@@ -1511,7 +1503,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             // Header Info
             agent: {
                 name: agent.fullName,
-                agency: agent.agencyName || 'MaxiPro Agency',
+                agency: agent.companyName || 'MaxiPro Agency',
                 level: agent.agentLevel || 'Financial Consultant'
             },
             client: {

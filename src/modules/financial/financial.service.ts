@@ -706,7 +706,7 @@ export class FinancialService {
     try {
       const calculationResult = calculateInsurancePlan({
         type: dto.type,
-        dependentCount: dto.dependentCount,
+        dependentCount: dto.dependents,
         monthlyExpense: dto.monthlyExpense,
         existingDebt: dto.existingDebt,
         existingCoverage: dto.existingCoverage,

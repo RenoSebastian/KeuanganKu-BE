@@ -11,4 +11,5 @@ export class CreateUnitDto {
     @IsString()
     @IsNotEmpty()
     namaUnit: string;
+    alamat: null;
 }

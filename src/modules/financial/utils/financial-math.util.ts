@@ -523,16 +523,17 @@ export function calculatePensionPlan(data: {
     totalFundNeeded = futureAnnualExpense * factor * (1 + nettRate);
   }
 
-  // 5. Future Value Existing Fund (Aset Lama)
-  // PENTING: Menggunakan Investment Rate (invRate), BUKAN Nett Rate
-  // Rumus: PV * (1 + i)^n1
-  const fvExistingFund = data.currentSaving * Math.pow(1 + invRate, yearsToRetire);
+  // 5. [UPDATED] Future Value Existing Fund (Aset Lama)
+  // Menggunakan Rate Konstan 5.5% (0.055) untuk aset yang sudah ada
+  const FIXED_EXISTING_RATE = 0.055;
+  const fvExistingFund = data.currentSaving * Math.pow(1 + FIXED_EXISTING_RATE, yearsToRetire);
 
   // 6. Shortfall (Gap)
+  // Menghitung selisih antara Kebutuhan vs Aset Lama yang sudah tumbuh
   const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
 
   // 7. Monthly Saving (PMT)
-  // Menghitung cicilan untuk mencapai Shortfall
+  // Menghitung cicilan untuk mencapai Shortfall (menggunakan return rate input user)
   let monthlySaving = 0;
   if (shortfall > 0) {
     const monthlyRate = invRate / 12;
@@ -551,7 +552,7 @@ export function calculatePensionPlan(data: {
     retirementDuration,
     futureMonthlyExpense, // Untuk Shock Therapy UI
     totalFundNeeded,      // Target Dana
-    fvExistingFund,       // Aset Lama
+    fvExistingFund,       // Aset Lama (Tumbuh 5.5%)
     shortfall,            // Kekurangan
     monthlySaving         // Solusi
   };
