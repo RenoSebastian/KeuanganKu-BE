@@ -3,87 +3,166 @@ import {
     WebSocketServer,
     OnGatewayConnection,
     OnGatewayDisconnect,
+    ConnectedSocket,
 } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
-import { Logger, UseGuards } from '@nestjs/common';
+import { Logger, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 
+// Constants untuk nama Room agar konsisten
+const ROOMS = {
+    ADMIN_DASHBOARD: 'admin-dashboard',
+    DIRECTOR_DASHBOARD: 'director-dashboard',
+    USER_PREFIX: 'user:',
+};
+
 @WebSocketGateway({
     cors: {
-        origin: '*', // Di produksi, ganti dengan URL Frontend spesifik
+        origin: '*', // [PRODUCTION] Ganti dengan URL Frontend spesifik saat deploy
+        methods: ['GET', 'POST'],
+        credentials: true,
     },
-    // Kita hapus namespace 'admin' agar bisa dipakai global (User & Admin)
+    pingTimeout: 60000, // Menjaga koneksi tetap hidup
 })
-export class NotificationGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class NotificationGateway
+    implements OnGatewayConnection, OnGatewayDisconnect {
     @WebSocketServer()
     server: Server;
 
     private readonly logger = new Logger(NotificationGateway.name);
+
+    // Menyimpan mapping userId -> socketId (Opsional, untuk tracking manual in-memory)
+    private activeUsers: Map<string, string> = new Map();
 
     constructor(
         private readonly jwtService: JwtService,
         private readonly configService: ConfigService,
     ) { }
 
-    // --- 1. SECURITY & ROOM SETUP ---
-    async handleConnection(client: Socket) {
+    // =================================================================
+    // 1. CONNECTION HANDLER (Security & Room Assignment)
+    // =================================================================
+
+    async handleConnection(@ConnectedSocket() client: Socket) {
         try {
-            // Ambil token dari handshake auth atau headers
-            const token =
-                client.handshake.auth?.token ||
-                client.handshake.headers?.authorization?.split(' ')[1];
+            const token = this.extractToken(client);
 
             if (!token) {
-                this.logger.warn(`Client ${client.id} mencoba connect tanpa token.`);
-                client.disconnect();
-                return;
+                throw new UnauthorizedException('Token not found');
             }
 
             // Verifikasi Token
             const secret = this.configService.get<string>('JWT_SECRET');
             const payload = await this.jwtService.verifyAsync(token, { secret });
 
-            // Jika valid, masukan user ke "Room Pribadi"
-            const userId = payload.sub; // 'sub' biasanya berisi userId
-            const roomName = `user_${userId}`;
+            const userId = payload.sub;
+            const role = payload.role;
 
-            await client.join(roomName);
+            // 1. Join Personal Room (untuk notifikasi spesifik user)
+            const userRoom = `${ROOMS.USER_PREFIX}${userId}`;
+            await client.join(userRoom);
 
-            this.logger.log(`Client ${client.id} (User: ${userId}) joined room: ${roomName}`);
+            // 2. Join Role-Based Rooms (untuk fitur Live Monitoring & Feed)
+            if (role === 'ADMIN') {
+                await client.join(ROOMS.ADMIN_DASHBOARD);
+                this.logger.log(`Admin ${userId} joined dashboard room.`);
+            } else if (role === 'DIRECTOR') {
+                await client.join(ROOMS.DIRECTOR_DASHBOARD);
+            }
 
-            // Simpan userId di socket instance untuk referensi saat disconnect
+            // 3. Update State Local (Bisa di-extend ke Redis untuk scale-out)
             client.data.userId = userId;
+            client.data.role = role;
+            this.activeUsers.set(userId, client.id);
+
+            this.logger.log(
+                `Client connected: ${client.id} | User: ${userId} | Role: ${role}`,
+            );
+
+            // [OPTIONAL] Emit event 'user_online' ke Admin Dashboard
+            this.broadcastToAdmins('user_status', { userId, status: 'ONLINE' });
 
         } catch (error) {
-            this.logger.error(`Connection rejected for client ${client.id}: ${error.message}`);
+            this.logger.warn(
+                `Connection rejected for client ${client.id}: ${error.message}`,
+            );
             client.disconnect();
         }
     }
 
     handleDisconnect(client: Socket) {
-        this.logger.log(`Client ${client.id} disconnected.`);
+        const userId = client.data.userId;
+        if (userId) {
+            this.activeUsers.delete(userId);
+            this.logger.log(`Client disconnected: ${client.id} | User: ${userId}`);
+
+            // [OPTIONAL] Emit event 'user_offline' ke Admin Dashboard
+            this.broadcastToAdmins('user_status', { userId, status: 'OFFLINE' });
+        }
     }
 
-    // --- 2. PUBLIC METHODS (Dipanggil oleh Service) ---
+    // =================================================================
+    // 2. PUBLIC METHODS (Dipanggil oleh Services lain)
+    // =================================================================
 
     /**
-     * Kirim notifikasi real-time ke user spesifik
+     * Kirim notifikasi real-time ke user spesifik (Personal Notification)
+     * Contoh: "Pembayaran Anda Diterima"
      */
     sendToUser(userId: string, event: string, data: any) {
-        const roomName = `user_${userId}`;
+        const roomName = `${ROOMS.USER_PREFIX}${userId}`;
         this.server.to(roomName).emit(event, data);
-        this.logger.debug(`Event '${event}' sent to ${roomName}`);
+        this.logger.debug(`[Direct] Event '${event}' sent to ${userId}`);
     }
 
     /**
-     * Kirim notifikasi ke semua Admin (misal: ada pembayaran baru)
-     * Note: Asumsi Admin punya room khusus atau kita loop user admin
-     * Untuk simplifikasi, kita bisa buat room 'admin_channel'
+     * Kirim notifikasi ke semua Admin yang sedang online (Live Feed)
+     * Contoh: "User A baru saja mengupload bukti bayar"
      */
-    sendToAdmins(event: string, data: any) {
-        // Logic join admin ke room 'admin_channel' harus ada di handleConnection
-        // jika role === 'ADMIN'
-        this.server.to('admin_channel').emit(event, data);
+    broadcastToAdmins(event: string, data: any) {
+        this.server.to(ROOMS.ADMIN_DASHBOARD).emit(event, data);
+        this.logger.debug(`[Broadcast Admin] Event '${event}' sent.`);
+    }
+
+    /**
+     * Kirim notifikasi ke semua Director (Executive Dashboard)
+     * Contoh: "Omset harian mencapai target"
+     */
+    broadcastToDirectors(event: string, data: any) {
+        this.server.to(ROOMS.DIRECTOR_DASHBOARD).emit(event, data);
+    }
+
+    /**
+     * Kirim notifikasi ke seluruh user yang terkoneksi (System Announcement)
+     * Contoh: "Maintenance Server dalam 10 menit"
+     */
+    broadcastGlobal(event: string, data: any) {
+        this.server.emit(event, data);
+        this.logger.warn(`[Broadcast Global] Event '${event}' sent.`);
+    }
+
+    // =================================================================
+    // 3. HELPER METHODS
+    // =================================================================
+
+    private extractToken(client: Socket): string | null {
+        // 1. Cek Handshake Auth (Standard Socket.io v4)
+        if (client.handshake.auth?.token) {
+            return client.handshake.auth.token;
+        }
+
+        // 2. Cek Authorization Header (Fallback)
+        const authHeader = client.handshake.headers?.authorization;
+        if (authHeader && authHeader.split(' ')[0] === 'Bearer') {
+            return authHeader.split(' ')[1];
+        }
+
+        // 3. Cek Query Param (Fallback terakhir untuk klien legacy)
+        if (client.handshake.query?.token) {
+            return client.handshake.query.token as string;
+        }
+
+        return null;
     }
 }

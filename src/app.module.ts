@@ -1,9 +1,10 @@
-import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config'; // [UPDATE] Import ConfigService
 import { ScheduleModule } from '@nestjs/schedule';
 import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { WinstonModule } from 'nest-winston';
 import { ServeStaticModule } from '@nestjs/serve-static';
+import { JwtModule } from '@nestjs/jwt'; // [UPDATE] Import JwtModule
 import * as path from 'path';
 
 // --- Logging & Config ---
@@ -13,6 +14,9 @@ import { winstonConfig } from './common/configs/winston.config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+
+// --- Middlewares ---
+import { ActiveSessionMiddleware } from './common/middleware/active-session.middleware';
 
 // --- Feature Modules ---
 import { PrismaModule } from '../prisma/prisma.module';
@@ -38,24 +42,29 @@ import { NotificationModule } from './modules/notification/notification.module';
     }),
     WinstonModule.forRoot(winstonConfig),
 
-    // [PHASE 4] Scheduler untuk Retention Cron Job
+    // Scheduler
     ScheduleModule.forRoot(),
 
+    // [FIX] Register JwtModule Global for Middleware
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: async (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: { expiresIn: '1d' },
+      }),
+      inject: [ConfigService],
+      global: true, // Make it available everywhere including middleware
+    }),
+
     /**
-     * 2. STATIC FILE SERVING [FIXED]
-     * Mengizinkan akses publik ke folder uploads.
-     * URL: http://host:port/uploads/{filename}
+     * 2. STATIC FILE SERVING
      */
     ServeStaticModule.forRoot({
-      // Gunakan process.cwd() agar aman saat production/build
       rootPath: path.join(process.cwd(), 'uploads'),
-
-      // [CRITICAL FIX] Tambahkan '/' di depan 'uploads'
-      // Agar route menjadi absolute: /uploads
       serveRoot: '/uploads',
     }),
 
-    // 3. Database
+    // 3. Database Layer
     PrismaModule,
 
     // 4. Application Features
@@ -89,4 +98,8 @@ import { NotificationModule } from './modules/notification/notification.module';
     },
   ],
 })
-export class AppModule { }
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(ActiveSessionMiddleware).forRoutes('*');
+  }
+}
