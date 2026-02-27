@@ -50,7 +50,7 @@ async function bootstrap() {
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
     credentials: true,
-    allowedHeaders: 'Content-Type, Accept, Authorization',
+    allowedHeaders: 'Content-Type, Accept, Authorization, x-device-id',
     // Expose Headers agar Frontend bisa baca Token MGC dan Filename PDF
     exposedHeaders: ['X-MGC-Token', 'Content-Disposition'],
   });

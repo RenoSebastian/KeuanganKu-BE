@@ -1,6 +1,6 @@
 import { Global, Module } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import Redis from 'ioredis';
+import Redis, { RedisOptions } from 'ioredis';
 import { RedisService } from './redis.service';
 
 @Global()
@@ -13,28 +13,33 @@ import { RedisService } from './redis.service';
                 const port = configService.get<number>('redis.port');
                 const password = configService.get<string>('redis.password');
                 const db = configService.get<number>('redis.db');
+                const isTls = configService.get<boolean>('redis.tls'); // Ambil flag TLS
 
-                // Instansiasi koneksi ke Redis
-                const client = new Redis({
+                // [FIX] Siapkan objek opsi dasar
+                const redisOptions: RedisOptions = {
                     host,
                     port,
                     password,
                     db,
                     retryStrategy(times) {
-                        // Logika deterministik: Jika redis mati, coba reconnect setiap (times * 50) ms.
-                        // Maksimum delay adalah 2 detik untuk menghindari overload memori.
-                        const delay = Math.min(times * 50, 2000);
-                        return delay;
+                        return Math.min(times * 50, 2000);
                     },
-                });
+                };
 
-                // Event listener pasif untuk memudahkan debugging di console backend
+                // [FIX] Injeksi parameter TLS kosong jika diaktifkan (syarat mutlak untuk Upstash)
+                if (isTls) {
+                    redisOptions.tls = {};
+                }
+
+                // Instansiasi koneksi ke Redis dengan opsi yang sudah disesuaikan
+                const client = new Redis(redisOptions);
+
                 client.on('error', (err) => {
                     console.error('[Redis Error] Gagal terhubung ke Redis:', err.message);
                 });
 
                 client.on('connect', () => {
-                    console.log('[Redis] Berhasil terhubung ke In-Memory Storage');
+                    console.log(`[Redis] Berhasil terhubung ke In-Memory Storage (${isTls ? 'TLS/Secure' : 'Plaintext'})`);
                 });
 
                 return client;
