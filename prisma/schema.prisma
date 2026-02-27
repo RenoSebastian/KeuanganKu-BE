@@ -153,55 +153,55 @@ model GlobalMarketSettings {
 // =========================================================
 
 model User {
-  id             String  @id @default(uuid())
-  agencyId       String? @map("agency_id")
-  nip            String? @unique // Bisa digunakan sebagai Agent ID
-  email          String  @unique
-  passwordHash   String  @map("password_hash")
-  fullName       String  @map("full_name")
+  id               String  @id @default(uuid())
+  agencyId         String? @map("agency_id")
+  nip              String? @unique // Bisa digunakan sebagai Agent ID
+  email            String  @unique
+  passwordHash     String  @map("password_hash")
+  fullName         String  @map("full_name")
   
-  gender         String?   @db.VarChar(50)
-  address        String?   @db.Text
-  agentLevel     String?   @map("agent_level") // Junior, Senior, MDRT
-  companyName    String?   @map("company_name") // Untuk Agen Independen
-  goals          String?   @db.Text
-  avatar         String?   @db.Text
-  dateOfBirth    DateTime? @map("date_of_birth")
-  dependentCount Int       @default(0) @map("dependent_count")
+  gender           String?   @db.VarChar(50)
+  address          String?   @db.Text
+  agentLevel       String?   @map("agent_level") // Junior, Senior, MDRT
+  companyName      String?   @map("company_name") // Untuk Agen Independen
+  goals            String?   @db.Text
+  avatar           String?   @db.Text
+  dateOfBirth      DateTime? @map("date_of_birth")
+  dependentCount   Int       @default(0) @map("dependent_count")
   
   // Quota dikelola via UserQuotaLedger, field ini sebagai Cache/Snapshot
-  quota          Int       @default(0) 
+  quota            Int       @default(0) 
 
-  role           Role      @default(USER)
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
-  deletedAt      DateTime? @map("deleted_at") // [NEW] Soft Delete
+  role             Role      @default(USER)
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deletedAt        DateTime? @map("deleted_at") // [NEW] Soft Delete
 
-  agency              Agency?              @relation(fields: [agencyId], references: [id])
+  agency               Agency?              @relation(fields: [agencyId], references: [id])
   
-  budgetPlans         BudgetPlan[]
-  financialChecks     FinancialCheckup[]
-  eduPlans            EducationPlan[]
-  pensionPlans        PensionPlan[]
-  insurancePlans      InsurancePlan[]
-  goalPlans           GoalPlan[]
+  budgetPlans          BudgetPlan[]
+  financialChecks      FinancialCheckup[]
+  eduPlans             EducationPlan[]
+  pensionPlans         PensionPlan[]
+  insurancePlans       InsurancePlan[]
+  goalPlans            GoalPlan[]
   
-  educationProgress   UserEducationProgress[]
+  educationProgress    UserEducationProgress[]
   
   // Audit Relations
-  actionsPerformed    AccessLog[]          @relation("ActorRelation")
-  actionsTargeted     AccessLog[]          @relation("TargetRelation")
-  adminActivities     AdminActivityLog[]   @relation("AdminActor")
-  RetentionLog        RetentionLog[]
-  simulationLogs      SimulationLog[]
+  actionsPerformed     AccessLog[]          @relation("ActorRelation")
+  actionsTargeted      AccessLog[]          @relation("TargetRelation")
+  adminActivities      AdminActivityLog[]   @relation("AdminActor")
+  RetentionLog         RetentionLog[]
+  simulationLogs       SimulationLog[]
   
   // Subscription & Usage Relations
-  subscription        UserSubscription?
-  subscriptionOrders  SubscriptionOrder[]
-  notifications       Notification[]
-  usage               UserUsage?
-  quotaLedger         UserQuotaLedger[]
-  activeSessions      ActiveSession[]
+  subscription         UserSubscription?
+  subscriptionOrders   SubscriptionOrder[]
+  notifications        Notification[]
+  usage                UserUsage?
+  quotaLedger          UserQuotaLedger[]
+  activeSessions       ActiveSession[]
 
   @@index([agencyId])
   @@index([email])
@@ -256,8 +256,8 @@ model SubscriptionPlan {
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
 
-  orders        SubscriptionOrder[]
-  subscriptions UserSubscription[]
+  orders         SubscriptionOrder[]
+  subscriptions  UserSubscription[]
 
   @@map("subscription_plans")
 }
@@ -343,41 +343,45 @@ model Notification {
   @@map("notifications")
 }
 
-// Untuk fitur Live Monitoring user yang sedang online
+// Untuk fitur Live Monitoring user yang sedang online (SINGLE CONCURRENT SESSION)
 model ActiveSession {
-  id             String   @id @default(uuid())
-  userId         String   @map("user_id")
-  socketId       String?  @map("socket_id")
-  deviceInfo     String?  @map("device_info") 
-  ipAddress      String?  @map("ip_address")
-  lastActivityAt DateTime @default(now()) @map("last_activity_at")
-  loginAt        DateTime @default(now()) @map("login_at")
+  id               String   @id @default(uuid())
+  sessionId        String   @unique @map("session_id") // ID JWT hybrid
+  deviceId         String   @map("device_id")          // AppMySite/Browser Fingerprint (X-Device-ID)
+  userId           String   @map("user_id")
+  socketId         String?  @map("socket_id")          // Websocket koneksi aktif
+  deviceInfo       String?  @map("device_info")        // User-Agent (Opsional untuk log)
+  ipAddress        String?  @map("ip_address")
+  refreshTokenHash String?  @map("refresh_token_hash") // Fallback rekonsiliasi Redis downtime
+  lastActivityAt   DateTime @default(now()) @map("last_activity_at")
+  loginAt          DateTime @default(now()) @map("login_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([deviceId])
   @@index([lastActivityAt])
   @@map("active_sessions")
 }
 
 // Log aktivitas simulasi user (History Penggunaan)
 model SimulationLog {
-  id                String          @id @default(uuid())
-  agentId           String          @map("agent_id")
-  clientName        String          @map("client_name")
-  clientAge         Int?            @map("client_age")
-  clientCity        String?         @map("client_city")
-  clientJob         String?         @map("client_job")
-  inputPayload      Json            @map("input_payload")
-  outputResult      Json?           @map("output_result")
-  sessionId         String          @map("session_id")
-  totalIncome       Decimal?        @map("total_income") @db.Decimal(15, 2)
-  calculatedSurplus Decimal?        @map("calculated_surplus") @db.Decimal(15, 2)
-  healthScore       Int?            @map("health_score")
-  status            HealthStatus?   @default(BAHAYA)
-  financialRatios   Json?           @map("financial_ratios")
-  moduleType        String          @default("BUDGETING") @map("module_type")
-  simulationDate    DateTime        @default(now()) @map("simulation_date")
-  createdAt         DateTime        @default(now()) @map("created_at")
+  id               String          @id @default(uuid())
+  agentId          String          @map("agent_id")
+  clientName       String          @map("client_name")
+  clientAge        Int?            @map("client_age")
+  clientCity       String?         @map("client_city")
+  clientJob        String?         @map("client_job")
+  inputPayload     Json            @map("input_payload")
+  outputResult     Json?           @map("output_result")
+  sessionId        String          @map("session_id")
+  totalIncome      Decimal?        @map("total_income") @db.Decimal(15, 2)
+  calculatedSurplus Decimal?       @map("calculated_surplus") @db.Decimal(15, 2)
+  healthScore      Int?            @map("health_score")
+  status           HealthStatus?   @default(BAHAYA)
+  financialRatios  Json?           @map("financial_ratios")
+  moduleType       String          @default("BUDGETING") @map("module_type")
+  simulationDate   DateTime        @default(now()) @map("simulation_date")
+  createdAt        DateTime        @default(now()) @map("created_at")
 
   agent User @relation(fields: [agentId], references: [id])
 
@@ -532,31 +536,31 @@ model FinancialCheckup {
 }
 
 model EducationPlan {
-  id            String          @id @default(uuid())
-  userId        String          @map("user_id")
-  childName     String          @map("child_name")
-  childDob      DateTime        @map("child_dob")
+  id           String          @id @default(uuid())
+  userId       String          @map("user_id")
+  childName    String          @map("child_name")
+  childDob     DateTime        @map("child_dob")
   inflationRate Decimal         @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
-  method        EducationMethod @default(GEOMETRIC)
-  createdAt     DateTime        @default(now()) @map("created_at")
-  updatedAt     DateTime        @updatedAt @map("updated_at")
-  user          User            @relation(fields: [userId], references: [id])
-  stages        EducationStage[]
+  returnRate   Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
+  method       EducationMethod @default(GEOMETRIC)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  user         User            @relation(fields: [userId], references: [id])
+  stages       EducationStage[]
 
   @@map("education_plans")
 }
 
 model EducationStage {
-  id            String        @id @default(uuid())
-  planId        String        @map("plan_id")
-  level         SchoolLevel
-  costType      CostType      @map("cost_type")
-  currentCost   Decimal       @map("current_cost") @db.Decimal(15, 2)
-  futureCost    Decimal       @map("future_cost") @db.Decimal(15, 2)
-  yearsToStart  Int           @map("years_to_start")
+  id           String        @id @default(uuid())
+  planId       String        @map("plan_id")
+  level        SchoolLevel
+  costType     CostType      @map("cost_type")
+  currentCost  Decimal       @map("current_cost") @db.Decimal(15, 2)
+  futureCost   Decimal       @map("future_cost") @db.Decimal(15, 2)
+  yearsToStart Int           @map("years_to_start")
   monthlySaving Decimal       @map("monthly_saving") @db.Decimal(15, 2)
-  plan          EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+  plan         EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@map("education_stages")
 }
@@ -693,9 +697,9 @@ model UserEducationProgress {
   updatedAt         DateTime                @updatedAt @map("updated_at")
   startedAt         DateTime?               @map("started_at")
 
-  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  module            EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
-  lastReadSection   ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
+  user            User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Restrict)
+  lastReadSection ModuleSection?  @relation(fields: [lastReadSectionId], references: [id])
 
   @@id([userId, moduleId])
   @@map("user_education_progress")

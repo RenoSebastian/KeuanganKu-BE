@@ -10,7 +10,6 @@ import { Request, Response } from 'express';
 
 @Catch()
 export class HttpExceptionFilter implements ExceptionFilter {
-  // Logger khusus untuk Filter, agar mudah dicari di log file dengan keyword [GlobalFilter]
   private readonly logger = new Logger('GlobalFilter');
 
   catch(exception: unknown, host: ArgumentsHost) {
@@ -19,42 +18,63 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<Request>();
 
     // 1. Tentukan Status Code
-    // Jika error dari Nest (misal 404/400), pakai statusnya.
-    // Jika error code crash (misal TypeError), default ke 500.
     const status =
       exception instanceof HttpException
         ? exception.getStatus()
         : HttpStatus.INTERNAL_SERVER_ERROR;
 
-    // 2. Tentukan Pesan Error
-    const res: any =
+    // 2. Ekstraksi Response Asli dari NestJS
+    const exceptionRes: any =
       exception instanceof HttpException
         ? exception.getResponse()
         : { message: 'Internal Server Error' };
 
-    // Normalisasi pesan error (bisa berupa string atau object)
-    const errorMessage = typeof res === 'string' ? res : res.message || res;
+    // 3. Logika Pembakuan Kode Operasional (SaaS Resilience)
+    // Kita memetakan pesan error spesifik ke kode yang dipahami Frontend Interceptor.
+    let errorCode = 'ERR_INTERNAL_SERVER';
+    const message = typeof exceptionRes === 'string' ? exceptionRes : exceptionRes.message || exceptionRes;
 
-    // 3. Ambil Stack Trace (Jejak Error di kodingan)
-    // Jika production, mungkin kita tidak ingin log stack trace terlalu detail, 
-    // tapi untuk file log internal, ini WAJIB ada.
+    if (status === HttpStatus.UNAUTHORIZED) {
+      errorCode = 'ERR_UNAUTHORIZED';
+
+      // Deteksi Skenario Sesi Digantikan (Last-In Wins impact)
+      if (message.includes('Concurrent Login') || message.includes('perangkat lain')) {
+        errorCode = 'ERR_SESSION_SUPERSEDED';
+      }
+      // Deteksi Skenario Sesi expired di Redis
+      else if (message.includes('Sesi aktif tidak ditemukan') || message.includes('Sesi telah berakhir')) {
+        errorCode = 'ERR_SESSION_EXPIRED';
+      }
+      // Deteksi Mismatch Device ID (Zero Trust Guard)
+      else if (message.includes('Device Mismatch')) {
+        errorCode = 'ERR_DEVICE_MISMATCH';
+      }
+    }
+    else if (status === HttpStatus.FORBIDDEN) {
+      errorCode = 'ERR_FORBIDDEN';
+    }
+    else if (status === HttpStatus.TOO_MANY_REQUESTS) {
+      errorCode = 'ERR_RATE_LIMIT_EXCEEDED';
+    }
+    else if (status === HttpStatus.BAD_REQUEST) {
+      errorCode = 'ERR_BAD_REQUEST';
+    }
+
+    // 4. LOGGING (Winston Integration)
     const stackTrace = exception instanceof Error ? exception.stack : '';
-
-    // 4. LOGGING KE FILE (Winston)
-    // Format: [METHOD] URL - Status - Error Message
-    // Parameter ke-2 (stackTrace) akan otomatis disimpan Winston sebagai meta data
     this.logger.error(
-      `${request.method} ${request.url} - Status: ${status} - Error: ${JSON.stringify(errorMessage)}`,
+      `${request.method} ${request.url} - Status: ${status} - Code: ${errorCode} - Msg: ${JSON.stringify(message)}`,
       stackTrace,
     );
 
-    // 5. Response ke User (Sanitized)
-    // Jangan pernah kirim stack trace ke user (security risk).
+    // 5. Response Sanitized (Contract for AppMySite / Frontend)
     response.status(status).json({
+      success: false,
       statusCode: status,
+      errorCode: errorCode, // Field utama untuk interceptor Frontend
       timestamp: new Date().toISOString(),
       path: request.url,
-      message: errorMessage,
+      message: message,
     });
   }
 }

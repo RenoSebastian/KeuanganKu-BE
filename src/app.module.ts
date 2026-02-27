@@ -10,6 +10,7 @@ import * as path from 'path';
 
 // --- Logging & Config ---
 import { winstonConfig } from './common/configs/winston.config';
+import redisConfig from './common/configs/redis.config'; // [NEW] Import Redis Configuration Namespace
 
 // --- Global Filters & Interceptors ---
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -24,6 +25,7 @@ import { ActiveSessionMiddleware } from './common/middleware/active-session.midd
 
 // --- Feature Modules ---
 import { PrismaModule } from '../prisma/prisma.module';
+import { RedisModule } from './modules/redis/redis.module'; // [NEW] Import In-Memory Session Layer
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { FinancialModule } from './modules/financial/financial.module';
@@ -44,6 +46,7 @@ import { NotificationModule } from './modules/notification/notification.module';
     // 1. Global Configurations
     ConfigModule.forRoot({
       isGlobal: true,
+      load: [redisConfig], // [NEW] Load registrasi konfigurasi namespace 'redis'
     }),
     WinstonModule.forRoot(winstonConfig),
 
@@ -64,6 +67,8 @@ import { NotificationModule } from './modules/notification/notification.module';
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
+        // Perhatian: Ini akan direfaktor di Fase 4 (Auth Service Refactoring) 
+        // saat kita memecah masa berlaku antara Access Token dan Refresh Token
         signOptions: { expiresIn: '1d' },
       }),
       inject: [ConfigService],
@@ -78,8 +83,9 @@ import { NotificationModule } from './modules/notification/notification.module';
       serveRoot: '/uploads',
     }),
 
-    // 3. Database Layer
+    // 3. Database Layer (PostgreSQL & Redis)
     PrismaModule,
+    RedisModule, // [NEW] Integrasi Redis sebagai state-manager sesi utama
 
     // 4. Application Features
     AuthModule,

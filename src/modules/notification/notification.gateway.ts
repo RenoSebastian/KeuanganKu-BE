@@ -71,7 +71,7 @@ export class NotificationGateway
                 await client.join(ROOMS.DIRECTOR_DASHBOARD);
             }
 
-            // 3. Update State Local (Bisa di-extend ke Redis untuk scale-out)
+            // 3. Update State Local
             client.data.userId = userId;
             client.data.role = role;
             this.activeUsers.set(userId, client.id);
@@ -108,7 +108,6 @@ export class NotificationGateway
 
     /**
      * Kirim notifikasi real-time ke user spesifik (Personal Notification)
-     * Contoh: "Pembayaran Anda Diterima"
      */
     sendToUser(userId: string, event: string, data: any) {
         const roomName = `${ROOMS.USER_PREFIX}${userId}`;
@@ -118,7 +117,6 @@ export class NotificationGateway
 
     /**
      * Kirim notifikasi ke semua Admin yang sedang online (Live Feed)
-     * Contoh: "User A baru saja mengupload bukti bayar"
      */
     broadcastToAdmins(event: string, data: any) {
         this.server.to(ROOMS.ADMIN_DASHBOARD).emit(event, data);
@@ -127,7 +125,6 @@ export class NotificationGateway
 
     /**
      * Kirim notifikasi ke semua Director (Executive Dashboard)
-     * Contoh: "Omset harian mencapai target"
      */
     broadcastToDirectors(event: string, data: any) {
         this.server.to(ROOMS.DIRECTOR_DASHBOARD).emit(event, data);
@@ -135,7 +132,6 @@ export class NotificationGateway
 
     /**
      * Kirim notifikasi ke seluruh user yang terkoneksi (System Announcement)
-     * Contoh: "Maintenance Server dalam 10 menit"
      */
     broadcastGlobal(event: string, data: any) {
         this.server.emit(event, data);
@@ -143,22 +139,46 @@ export class NotificationGateway
     }
 
     // =================================================================
-    // 3. HELPER METHODS
+    // [NEW] 3. SECURITY ORCHESTRATION (Single Concurrent Session)
+    // =================================================================
+
+    /**
+     * Menendang (kick-out) socket spesifik secara paksa.
+     * Dipanggil oleh Auth Service ketika mendeteksi login baru di lokasi lain.
+     */
+    forceDisconnectClient(targetSocketId: string, reason: string = 'concurrent_login') {
+        // Mencari referensi instance soket aktif di memori Server berdasarkan socketId
+        const targetSocket = this.server.sockets.sockets.get(targetSocketId);
+
+        if (targetSocket) {
+            // 1. Pancarkan event agar Frontend bisa menghapus token dan merender modal notifikasi
+            targetSocket.emit('force_logout', { reason });
+
+            // 2. Putus tautan dari sisi server secara eksplisit. 
+            // true = memutus koneksi di level transport (underlying TCP connection).
+            targetSocket.disconnect(true);
+
+            this.logger.warn(`[Security] Socket ${targetSocketId} diputus paksa. Reason: ${reason}`);
+        } else {
+            // Skema aman: Sesi lama diganti saat user sedang tutup browser / background (tidak terhubung WSS)
+            this.logger.debug(`[Security] Target socket ${targetSocketId} tidak ditemukan. (Mungkin sudah offline).`);
+        }
+    }
+
+    // =================================================================
+    // 4. HELPER METHODS
     // =================================================================
 
     private extractToken(client: Socket): string | null {
-        // 1. Cek Handshake Auth (Standard Socket.io v4)
         if (client.handshake.auth?.token) {
             return client.handshake.auth.token;
         }
 
-        // 2. Cek Authorization Header (Fallback)
         const authHeader = client.handshake.headers?.authorization;
         if (authHeader && authHeader.split(' ')[0] === 'Bearer') {
             return authHeader.split(' ')[1];
         }
 
-        // 3. Cek Query Param (Fallback terakhir untuk klien legacy)
         if (client.handshake.query?.token) {
             return client.handshake.query.token as string;
         }
