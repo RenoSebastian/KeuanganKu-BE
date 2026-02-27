@@ -1,51 +1,184 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../../../prisma/prisma.service';
-import { SubscriptionStatus } from '@prisma/client';
+import { NotificationService } from '../../notification/notification.service';
+import {
+    SubscriptionStatus,
+    NotificationType,
+    NotificationCategory,
+    QuotaTransactionType
+} from '@prisma/client';
+
+const FREE_TIER_QUOTA_RESET = 3; // Jatah default user gratis
+const GRACE_PERIOD_DAYS = 2; // Tenggang waktu 2 hari
 
 @Injectable()
 export class SubscriptionCronService {
     private readonly logger = new Logger(SubscriptionCronService.name);
 
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly notificationService: NotificationService,
+    ) { }
 
     /**
-     * Cron Job: Berjalan setiap hari pada tengah malam (00:00).
-     * Tugas: Mencari subscription yang ACTIVE tapi endDate-nya sudah lewat, lalu set ke EXPIRED.
+     * Main Cron Job: Berjalan setiap hari jam 00:00
+     * Mengorkestrasikan siklus hidup langganan.
      */
     @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-    async handleExpiration() {
-        this.logger.log('Running Subscription Expiration Check...');
-
-        const now = new Date();
+    async handleDailyLifecycle() {
+        this.logger.log('🔄 Running Daily Subscription Lifecycle Check...');
 
         try {
-            // Update Massal (Bulk Update) untuk efisiensi performa
-            const result = await this.prisma.userSubscription.updateMany({
-                where: {
-                    status: SubscriptionStatus.ACTIVE,
-                    endDate: {
-                        lt: now, // lt = less than (kurang dari waktu sekarang)
-                    },
+            await this.handleUpcomingExpirations(); // 1. Reminder H-3
+            await this.handleGracePeriodEntry();    // 2. Masuk Masa Tenggang
+            await this.handleFinalExpiration();     // 3. Expired & Downgrade
+        } catch (error) {
+            this.logger.error('❌ Critical Error in Subscription Cron', error);
+        }
+    }
+
+    /**
+     * TASK 1: Kirim Pengingat H-3 Sebelum Expired
+     */
+    private async handleUpcomingExpirations() {
+        const threeDaysFromNow = new Date();
+        threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
+
+        // Cari rentang waktu besoknya agar presisi harian
+        const startOfDay = new Date(threeDaysFromNow.setHours(0, 0, 0, 0));
+        const endOfDay = new Date(threeDaysFromNow.setHours(23, 59, 59, 999));
+
+        const expiringSoon = await this.prisma.userSubscription.findMany({
+            where: {
+                status: SubscriptionStatus.ACTIVE,
+                endDate: {
+                    gte: startOfDay,
+                    lte: endOfDay,
                 },
+            },
+            include: { plan: true },
+        });
+
+        this.logger.log(`📢 Found ${expiringSoon.length} users for H-3 Reminder.`);
+
+        for (const sub of expiringSoon) {
+            await this.notificationService.createAndSend({
+                userId: sub.userId,
+                title: 'Tagihan Segera Jatuh Tempo ⏳',
+                message: `Paket ${sub.plan.name} Anda akan berakhir dalam 3 hari. Perpanjang sekarang agar akses simulasi tidak terputus.`,
+                type: NotificationType.WARNING,
+                category: NotificationCategory.SUBSCRIPTION,
+            });
+        }
+    }
+
+    /**
+     * TASK 2: Handle Grace Period (Masa Tenggang)
+     * Jika endDate lewat tapi belum Expired/Grace Period, beri waktu tambahan.
+     */
+    private async handleGracePeriodEntry() {
+        const now = new Date();
+
+        // Cari user yang sudah lewat tanggal tapi status masih ACTIVE
+        // dan belum punya gracePeriodEndDate
+        const graceCandidates = await this.prisma.userSubscription.findMany({
+            where: {
+                status: SubscriptionStatus.ACTIVE,
+                endDate: { lt: now },
+                gracePeriodEndDate: null,
+            },
+            include: { plan: true },
+        });
+
+        this.logger.log(`⚠️ Entering Grace Period: ${graceCandidates.length} users.`);
+
+        for (const sub of graceCandidates) {
+            const graceEnd = new Date();
+            graceEnd.setDate(graceEnd.getDate() + GRACE_PERIOD_DAYS);
+
+            await this.prisma.userSubscription.update({
+                where: { id: sub.id },
                 data: {
-                    status: SubscriptionStatus.EXPIRED,
-                    updatedAt: now,
+                    status: SubscriptionStatus.GRACE_PERIOD, // Pastikan Enum ini ada di schema
+                    gracePeriodEndDate: graceEnd,
                 },
             });
 
-            if (result.count > 0) {
-                this.logger.log(
-                    `✅ Successfully expired ${result.count} subscriptions.`,
-                );
-            } else {
-                this.logger.log('ℹ️ No expired subscriptions found today.');
-            }
-        } catch (error) {
-            this.logger.error(
-                '❌ Failed to execute subscription expiration cron job',
-                error.stack,
-            );
+            await this.notificationService.createAndSend({
+                userId: sub.userId,
+                title: 'Masa Tenggang Dimulai ⚠️',
+                message: `Langganan Anda telah berakhir. Kami memberikan waktu tambahan 48 jam sebelum akses dikunci. Segera lakukan pembayaran.`,
+                type: NotificationType.ERROR, // Merah agar urgency tinggi
+                category: NotificationCategory.PAYMENT,
+            });
+        }
+    }
+
+    /**
+     * TASK 3: Final Expiration & Downgrade Strategy
+     * Jika Grace Period lewat, matikan status dan reset kuota ke Free Tier.
+     */
+    private async handleFinalExpiration() {
+        const now = new Date();
+
+        // Cari user yang Grace Period-nya sudah lewat
+        const toExpire = await this.prisma.userSubscription.findMany({
+            where: {
+                OR: [
+                    { status: SubscriptionStatus.GRACE_PERIOD },
+                    { status: SubscriptionStatus.ACTIVE } // Jaga-jaga yg lolos grace period
+                ],
+                gracePeriodEndDate: { lt: now }, // Buffer time over
+            },
+            include: { user: true, plan: true },
+        });
+
+        this.logger.log(`🛑 Final Expiration (Downgrade): ${toExpire.length} users.`);
+
+        for (const sub of toExpire) {
+            await this.prisma.$transaction(async (tx) => {
+                // 1. Update Status ke EXPIRED
+                await tx.userSubscription.update({
+                    where: { id: sub.id },
+                    data: {
+                        status: SubscriptionStatus.EXPIRED,
+                        updatedAt: new Date(),
+                    },
+                });
+
+                // 2. [CORE LOGIC] Downgrade Strategy: Reset Quota
+                // Kita tidak mau user punya 0 kuota selamanya. Kita reset ke 3 (Free Tier).
+                const currentQuota = sub.user.quota;
+                const resetAmount = FREE_TIER_QUOTA_RESET - currentQuota;
+
+                // Hanya catat di ledger jika ada perubahan nilai
+                if (resetAmount !== 0) {
+                    await tx.user.update({
+                        where: { id: sub.userId },
+                        data: { quota: FREE_TIER_QUOTA_RESET },
+                    });
+
+                    await tx.userQuotaLedger.create({
+                        data: {
+                            userId: sub.userId,
+                            amount: resetAmount, // Bisa minus (jika sisa banyak), bisa plus (jika 0)
+                            type: QuotaTransactionType.SYSTEM_DOWNGRADE,
+                            balanceAfter: FREE_TIER_QUOTA_RESET,
+                            description: `Masa aktif habis. Kuota di-reset ke paket Free (${FREE_TIER_QUOTA_RESET}).`,
+                        },
+                    });
+                }
+            });
+
+            // 3. Notifikasi
+            await this.notificationService.createAndSend({
+                userId: sub.userId,
+                title: 'Paket Berakhir 🔒',
+                message: `Masa aktif paket ${sub.plan.name} telah habis. Akun Anda kembali ke status Free User.`,
+                type: NotificationType.INFO,
+                category: NotificationCategory.SUBSCRIPTION,
+            });
         }
     }
 }

@@ -1,15 +1,50 @@
 import { Module } from '@nestjs/common';
 import { FinancialController } from './financial.controller';
 import { FinancialService } from './financial.service';
-import { PrismaModule } from '../../../prisma/prisma.module'; // Pastikan import Prisma jika Service butuh
 import { PdfGeneratorService } from './services/pdf-generator.service';
-import { NotificationModule } from '../notification/notification.module'; // [NEW] Import ini
-import { ConfigModule } from '@nestjs/config';
+
+// Core Services
+import { FinancialQuotaService } from './services/core/financial-quota.service';
+import { SimulationTokenService } from './services/core/simulation-token.service';
+
+// Calculator Services
+import { PensionCalculatorService } from './services/calculators/pension-calculator.service';
+import { InsuranceCalculatorService } from './services/calculators/insurance-calculator.service';
+import { EducationCalculatorService } from './services/calculators/education-calculator.service';
+import { GoalCalculatorService } from './services/calculators/goal-calculator.service';
+import { CheckupCalculatorService } from './services/calculators/checkup-calculator.service';
+import { RiskProfileCalculatorService } from './services/calculators/risk-profile-calculator.service';
+
+// External Modules
+import { MasterDataModule } from '../master-data/master-data.module';
+import { NotificationModule } from '../notification/notification.module';
 
 @Module({
-  imports: [PrismaModule, ConfigModule, NotificationModule], // Tambahkan jika FinancialService menggunakan Prisma
+  imports: [
+    MasterDataModule, // Menyediakan MarketSettingsService
+    NotificationModule, // Menyediakan NotificationService
+  ],
   controllers: [FinancialController],
-  providers: [FinancialService, PdfGeneratorService],
-  exports: [FinancialService] // <--- WAJIB DITAMBAHKAN
+  providers: [
+    FinancialService, // Facade
+    PdfGeneratorService,
+
+    // Core Infrastructure
+    FinancialQuotaService,
+    SimulationTokenService,
+
+    // Domain Calculators
+    PensionCalculatorService,
+    InsuranceCalculatorService,
+    EducationCalculatorService,
+    GoalCalculatorService,
+    CheckupCalculatorService,
+    RiskProfileCalculatorService,
+  ],
+  exports: [
+    FinancialService,
+    FinancialQuotaService,
+    SimulationTokenService,
+  ],
 })
 export class FinancialModule { }

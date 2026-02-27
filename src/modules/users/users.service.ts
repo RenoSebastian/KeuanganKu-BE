@@ -26,26 +26,27 @@ export class UsersService {
   // =================================================================
 
   /**
-   * Mengambil profil user yang sedang login beserta:
-   * 1. Data Unit Kerja
-   * 2. Status Subscription (Plan & Validity)
-   * 3. Sisa Kuota Simulasi (UserUsage)
-   * 4. Total History Simulasi (Count) -> Untuk Dashboard "Total Report"
+   * Mengambil profil user yang sedang login beserta context SaaS:
+   * 1. Data Agency (dahulu Unit Kerja)
+   * 2. Status Subscription (Active Plan)
+   * 3. Sisa Kuota (UserUsage)
+   * 4. Statistik Simulasi
    */
   async getMe(userId: string) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       include: {
-        unitKerja: true,
+        // [REFACTOR] Menggunakan relasi Agency (SaaS Model)
+        agency: true,
         // [INTEGRATION] Load Quota Data untuk Logic Blocking di FE
         usage: true,
-        // [INTEGRATION] Load Status Langganan untuk Fitur PRO
+        // [INTEGRATION] Load Data Langganan (1-to-1)
         subscription: {
           include: {
-            plan: true, // Sertakan detail nama paket (Monthly/Yearly)
+            plan: true,
           },
         },
-        // [NEW] Hitung total simulasi yang pernah dibuat user
+        // [ANALYTICS] Hitung total report yang pernah dibuat
         _count: {
           select: {
             simulationLogs: true,
@@ -56,7 +57,7 @@ export class UsersService {
 
     if (!user) throw new NotFoundException(`User profile not found`);
 
-    // Sanitize: Hapus password hash sebelum dikirim ke client
+    // Sanitize: Hapus password hash
     const { passwordHash, ...result } = user;
     return result;
   }
@@ -69,12 +70,19 @@ export class UsersService {
   }
 
   // =================================================================
-  // ADMIN FEATURES (Manajemen Pegawai & Monitoring)
+  // ADMIN FEATURES (Manajemen Agen & Monitoring)
   // =================================================================
 
   // 1. List Users (Search & Filter)
-  async findAll(params: { search?: string; role?: Role }) {
-    const { search, role } = params;
+  async findAll(params: {
+    search?: string;
+    role?: Role;
+    page?: number;
+    limit?: number;
+  }) {
+    const { search, role, page = 1, limit = 10 } = params;
+    const skip = (page - 1) * limit;
+
     const where: any = {};
 
     if (role) {
@@ -86,29 +94,47 @@ export class UsersService {
         { fullName: { contains: search, mode: 'insensitive' } },
         { email: { contains: search, mode: 'insensitive' } },
         { nip: { contains: search, mode: 'insensitive' } },
+        // Support pencarian berdasarkan nama agency
+        { agency: { name: { contains: search, mode: 'insensitive' } } },
       ];
     }
 
-    // Mengambil list user dengan data ringkas untuk tabel Admin
-    const users = await this.prisma.user.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        unitKerja: {
-          select: { namaUnit: true, kodeUnit: true },
+    const [users, total] = await Promise.all([
+      this.prisma.user.findMany({
+        where,
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          agency: {
+            select: { name: true, code: true },
+          },
+          usage: true, // Admin perlu lihat sisa kuota user
+          subscription: {
+            // [FIX] Hapus 'orderBy' dan 'take' karena relasi One-to-One
+            select: {
+              status: true,
+              endDate: true,
+              plan: { select: { name: true } },
+            },
+          },
         },
-        usage: true, // Admin perlu lihat siapa yang kuotanya habis
-        subscription: {
-          select: { status: true, plan: { select: { name: true } } },
-        },
-      },
-    });
+      }),
+      this.prisma.user.count({ where }),
+    ]);
 
-    // Mapping result agar lebih rapi (optional, tergantung kebutuhan UI table)
-    return users.map((u) => {
-      const { passwordHash, ...rest } = u;
-      return rest;
-    });
+    return {
+      data: users.map((u) => {
+        const { passwordHash, ...rest } = u;
+        return rest;
+      }),
+      meta: {
+        total,
+        page,
+        limit,
+        lastPage: Math.ceil(total / limit),
+      },
+    };
   }
 
   // 2. Create User (Admin / Registration Handler)
@@ -121,37 +147,50 @@ export class UsersService {
     });
 
     if (existing) {
-      throw new BadRequestException('Email atau NIP sudah terdaftar dalam sistem.');
+      throw new BadRequestException(
+        'Email atau NIP sudah terdaftar dalam sistem.',
+      );
     }
 
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    // Pisahkan field khusus yang butuh processing manual
-    const { password, dateOfBirth, ...rest } = dto;
-
-    // Persiapkan Payload Database
-    const data: any = {
-      ...rest,
-      passwordHash: hashedPassword,
-      dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
-
-      // [CRITICAL] Inisialisasi Token Bucket (Quota) untuk User Baru
-      // Setiap user baru mendapat 10 Token Gratis (Configurable)
-      usage: {
-        create: {
-          simulationQuota: 10,
-          totalUsed: 0,
-        },
-      },
-    };
+    // Destructure field DTO
+    const { password, dateOfBirth, agencyId, ...rest } = dto;
 
     try {
-      const newUser = await this.prisma.user.create({
-        data,
-        include: {
-          usage: true, // Return usage agar FE bisa langsung update state
-        },
+      // Menggunakan Transaction untuk Data Consistency
+      const newUser = await this.prisma.$transaction(async (tx) => {
+        return tx.user.create({
+          data: {
+            ...rest,
+            passwordHash: hashedPassword,
+            dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
+            agencyId: agencyId || null,
+
+            // [CRITICAL] Inisialisasi Token Bucket (Quota) untuk User Baru
+            // Default: 3 Token Gratis (Configurable)
+            usage: {
+              create: {
+                simulationQuota: 3,
+                totalUsed: 0,
+              },
+            },
+            // [NEW] Inisialisasi Ledger Awal (Bonus Welcome)
+            quotaLedger: {
+              create: {
+                amount: 3,
+                type: 'ADMIN_BONUS',
+                balanceAfter: 3,
+                description: 'Welcome Bonus',
+              },
+            },
+          },
+          include: {
+            usage: true,
+            agency: true,
+          },
+        });
       });
 
       // Sync ke Meilisearch (Async agar tidak block response)
@@ -163,7 +202,9 @@ export class UsersService {
       return result;
     } catch (error: any) {
       if (error.code === 'P2003') {
-        throw new BadRequestException('Unit Kerja ID tidak valid atau tidak ditemukan.');
+        throw new BadRequestException(
+          'Agency ID tidak valid atau tidak ditemukan.',
+        );
       }
       this.logger.error(`Create user failed: ${error.message}`);
       throw error;
@@ -175,15 +216,14 @@ export class UsersService {
     const user = await this.prisma.user.findUnique({
       where: { id },
       include: {
-        unitKerja: true,
-        usage: true,        // Admin perlu memantau pemakaian user
-        subscription: {     // Admin perlu memantau status langganan
+        agency: true,
+        usage: true,
+        subscription: {
           include: {
             plan: true,
             lastOrder: true,
           },
         },
-        // [NEW] Admin juga bisa melihat total simulasi user
         _count: {
           select: { simulationLogs: true },
         },
@@ -203,13 +243,12 @@ export class UsersService {
 
   // 5. Delete User (Admin)
   async deleteUser(id: string) {
-    // Pastikan user ada sebelum delete
-    await this.findOne(id);
+    await this.findOne(id); // Ensure exists
 
     try {
       const deleted = await this.prisma.user.delete({ where: { id } });
 
-      // Hapus juga dari index pencarian
+      // Hapus document dari Search Engine
       this.searchService
         .removeDocument('global_search', id)
         .catch((e) => this.logger.warn(`Search removal warning: ${e.message}`));
@@ -218,49 +257,45 @@ export class UsersService {
     } catch (error: any) {
       this.logger.error(`Delete user failed: ${error.message}`);
       throw new BadRequestException(
-        'Gagal menghapus user, mungkin masih memiliki relasi data penting.',
+        'Gagal menghapus user. Pastikan user tidak memiliki data tagihan aktif.',
       );
     }
   }
 
   // =================================================================
-  // HELPERS (Shared Logic)
+  // HELPER METHODS
   // =================================================================
 
   private async processUpdate(userId: string, dto: any) {
     try {
-      const { password, dateOfBirth, dependentCount, ...restData } = dto;
+      const { password, dateOfBirth, dependentCount, agencyId, ...restData } =
+        dto;
 
-      const updatePayload: any = {};
+      const updatePayload: any = { ...restData };
 
-      // Dynamic field mapping
-      Object.keys(restData).forEach((key) => {
-        if (restData[key] !== undefined && restData[key] !== '') {
-          updatePayload[key] = restData[key];
-        }
-      });
-
-      // Handle Numeric Fields
       if (dependentCount !== undefined) {
         updatePayload.dependentCount = Number(dependentCount);
       }
 
-      // Handle Date Fields
       if (dateOfBirth) {
         updatePayload.dateOfBirth = new Date(dateOfBirth);
       }
 
-      // Handle Password Hashing (Jika ada perubahan password)
       if (password) {
         const salt = await bcrypt.genSalt();
         updatePayload.passwordHash = await bcrypt.hash(password, salt);
+      }
+
+      // Handle Agency Change
+      if (agencyId !== undefined) {
+        updatePayload.agencyId = agencyId === '' ? null : agencyId;
       }
 
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
         data: updatePayload,
         include: {
-          usage: true,
+          agency: true,
           subscription: true,
         },
       });
@@ -276,30 +311,35 @@ export class UsersService {
       this.logger.error(`Failed update user ${userId}: ${error.message}`);
       if (error.code === 'P2025') throw new NotFoundException('User not found');
       if (error.code === 'P2003')
-        throw new BadRequestException('Unit Kerja ID tidak valid');
+        throw new BadRequestException('Agency ID tidak valid');
       throw error;
     }
   }
 
+  /**
+   * Menyinkronkan data user ke Meilisearch/Algolia
+   * Mapping field disesuaikan dengan kebutuhan pencarian SaaS
+   */
   private async syncToSearch(user: any) {
     try {
-      // Payload disesuaikan dengan skema index Meilisearch
+      // [FIX] Perbaikan logika check isPro untuk relasi One-to-One
+      const isPro = user.subscription?.status === 'ACTIVE';
+
       const searchPayload = {
         id: user.id,
         redirectId: user.id,
-        type: 'PERSON',
+        type: 'AGENT', // Tipe dokumen untuk search filter
         title: user.fullName,
         subtitle: user.email,
+        description:
+          user.agency?.name || user.companyName || 'Independent Agent',
         role: user.role,
-        unitKerjaId: user.unitKerjaId,
+        // Facets untuk filtering
+        agencyId: user.agencyId,
         agentLevel: user.agentLevel,
-        agencyName: user.agencyName,
-        address: user.address,
-        gender: user.gender,
-        companyName: user.companyName,
-        goals: user.goals,
-        // Optional: Tambahkan flag isPro untuk filtering di search
-        isPro: user.subscription?.status === 'ACTIVE',
+        isPro: isPro,
+        location: user.address,
+        goals: user.goals, // Bisa dicari berdasarkan goals (e.g., "MDRT")
       };
 
       await this.searchService.addDocuments('global_search', [searchPayload]);

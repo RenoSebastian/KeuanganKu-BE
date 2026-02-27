@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import * as express from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler'; // [NEW] Import Throttle decorator
 
 // Services
 import { FinancialService } from './financial.service';
@@ -34,7 +35,7 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { CalculateRiskProfileDto } from './dto/calculate-risk-profile.dto';
 import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 
-// DTOs - Agent Simulation (Phase 2 & 5)
+// DTOs - Agent Simulation
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
@@ -47,7 +48,7 @@ import { CreateEducationSimulationDto } from './dto/create-education-simulation.
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import * as client from '@prisma/client'; // Import User type for type-safety
+import * as client from '@prisma/client';
 
 @ApiTags('Financial Engine')
 @UseGuards(JwtAuthGuard)
@@ -68,8 +69,7 @@ export class FinancialController {
   @Post('checkup')
   @ApiOperation({ summary: 'Simpan Data Checkup & Jalankan Analisa' })
   async createCheckup(@GetUser('id') userId: string, @Body() dto: CreateFinancialRecordDto) {
-    const result = await this.financialService.createCheckup(userId, dto);
-    return result;
+    return this.financialService.createCheckup(userId, dto);
   }
 
   @Get('checkup/latest')
@@ -92,6 +92,7 @@ export class FinancialController {
 
   @Get('checkup/pdf/:id')
   @ApiOperation({ summary: 'Download PDF Report (Server-Side Generated)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // Limit download PDF
   async downloadCheckupPdf(
     @Param('id') id: string,
     @GetUser('id') userId: string,
@@ -114,12 +115,11 @@ export class FinancialController {
 
   @Get('budget/pdf/:id')
   @ApiOperation({ summary: 'Download Budget PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadBudgetPdf(@Param('id') id: string, @Res() res: express.Response) {
     const budgetData = await this.prisma.budgetPlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!budgetData) throw new NotFoundException('Data budget tidak ditemukan');
@@ -136,12 +136,11 @@ export class FinancialController {
 
   @Get('pension/pdf/:id')
   @ApiOperation({ summary: 'Download Pension Plan PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadPensionPdf(@Param('id') id: string, @Res() res: express.Response) {
     const pensionData = await this.prisma.pensionPlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!pensionData) throw new NotFoundException('Data rencana pensiun tidak ditemukan');
@@ -158,12 +157,11 @@ export class FinancialController {
 
   @Get('insurance/pdf/:id')
   @ApiOperation({ summary: 'Download Insurance Plan PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadInsurancePdf(@Param('id') id: string, @Res() res: express.Response) {
     const insuranceData = await this.prisma.insurancePlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!insuranceData) throw new NotFoundException('Data rencana asuransi tidak ditemukan');
@@ -183,7 +181,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('budget')
-  @ApiOperation({ summary: 'Simpan rencana anggaran bulanan (Auto-Calculate supported)' })
+  @ApiOperation({ summary: 'Simpan rencana anggaran bulanan' })
   async createBudget(@GetUser('id') userId: string, @Body() dto: CreateBudgetDto) {
     return this.financialService.createBudget(userId, dto);
   }
@@ -219,7 +217,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('goals/simulate')
-  @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (FV & PMT) - Tidak Simpan DB' })
+  @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (Stateless)' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } }) // Lebih longgar karena ringan
   simulateGoal(@GetUser('id') userId: string, @Body() dto: SimulateGoalDto) {
     return this.financialService.simulateGoal(userId, dto);
   }
@@ -232,12 +231,11 @@ export class FinancialController {
 
   @Get('goals/pdf/:id')
   @ApiOperation({ summary: 'Download Financial Goal PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadGoalPdf(@Param('id') id: string, @Res() res: express.Response) {
     const goalData = await this.prisma.goalPlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!goalData) throw new NotFoundException('Data tujuan keuangan tidak ditemukan');
@@ -276,13 +274,12 @@ export class FinancialController {
 
   @Get('education/pdf')
   @ApiOperation({ summary: 'Download Education Plan PDF (All Children)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadEducationPdf(@GetUser('id') userId: string, @Res() res: express.Response) {
     const educationPlans = await this.prisma.educationPlan.findMany({
       where: { userId },
       include: {
-        stages: {
-          orderBy: { yearsToStart: 'asc' }
-        }
+        stages: { orderBy: { yearsToStart: 'asc' } }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -298,7 +295,7 @@ export class FinancialController {
       return {
         plan: p,
         calculation: {
-          totalFutureCost: totalFutureCost,
+          totalFutureCost,
           monthlySaving: totalMonthlySaving,
           stagesBreakdown: p.stages
         }
@@ -317,6 +314,7 @@ export class FinancialController {
 
   @Get('checkup/history/pdf/:id')
   @ApiOperation({ summary: 'Download History PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadHistoryPdf(@Param('id') id: string, @GetUser('id') userId: string, @Res() res: express.Response) {
     const checkupDetail = await this.financialService.getCheckupDetail(userId, id);
 
@@ -337,22 +335,16 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/risk-profile')
-  @ApiOperation({
-    summary: 'Kalkulasi Profil Risiko (Stateless)',
-    description:
-      'Menerima jawaban kuesioner, mengembalikan skor, tipe profil, dan rekomendasi alokasi aset. Data tidak disimpan ke database.',
-  })
+  @ApiOperation({ summary: 'Kalkulasi Profil Risiko (Stateless)' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiResponse({ status: 200, type: RiskProfileResponseDto })
   calculateRiskProfile(@Body() dto: CalculateRiskProfileDto): RiskProfileResponseDto {
     return this.financialService.calculateRiskProfile(dto);
   }
 
   @Post('simulation/risk-profile-pdf')
-  @ApiOperation({
-    summary: 'Simulasi Risk Profile & Download PDF Langsung (Stateless)',
-    description:
-      'Menghitung profil risiko, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.',
-  })
+  @ApiOperation({ summary: 'Simulasi Risk Profile & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // Berat (PDF Gen)
   async createRiskProfileSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateRiskProfileSimulationDto,
@@ -382,11 +374,8 @@ export class FinancialController {
   }
 
   @Post('export/risk-profile-pdf')
-  @ApiOperation({
-    summary: 'Generate PDF Laporan Profil Risiko (Legacy/Direct Export)',
-    description:
-      'Menerima Object Hasil Kalkulasi (RiskProfileResponseDto) dan menghasilkan file PDF untuk diunduh.',
-  })
+  @ApiOperation({ summary: 'Generate PDF Laporan Profil Risiko (Legacy)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Header('Content-Type', 'application/pdf')
   @Header('Content-Disposition', 'attachment; filename="Risk_Profile_Report.pdf"')
   async exportRiskProfilePdf(
@@ -410,7 +399,7 @@ export class FinancialController {
       action: 'EXPORT_PDF',
       entity: 'RiskProfileSimulation',
       entityId: 'STATELESS',
-      details: `Agent generated Risk Profile PDF for client: ${data.clientName} (Profile: ${data.riskProfile})`,
+      details: `Agent generated Risk Profile PDF for client: ${data.clientName}`,
     });
 
     return new StreamableFile(pdfBuffer);
@@ -421,7 +410,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/budget')
-  @ApiOperation({ summary: 'Simulasi Budget & Download PDF Langsung (Stateless)' })
+  @ApiOperation({ summary: 'Simulasi Budget & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createBudgetSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateBudgetSimulationDto,
@@ -450,12 +440,9 @@ export class FinancialController {
     res.end(result.pdfBuffer);
   }
 
-  // [UPDATED] Decoding Endpoint - now supports Smart Resolver for Education
   @Post('simulation/decode')
-  @ApiOperation({
-    summary: 'Decode Token Simulasi (.mgc) untuk Import Data',
-    description: 'Mendukung format token baru (Education dengan auto-mapping) dan format lama.'
-  })
+  @ApiOperation({ summary: 'Decode Token Simulasi (.mgc)' })
+  @Throttle({ default: { limit: 50, ttl: 60000 } }) // Ringan (Crypto only)
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
     await this.auditService.logActivity({
       userId,
@@ -465,7 +452,6 @@ export class FinancialController {
       details: 'Agent imported a .mgc simulation file'
     });
 
-    // Panggil Service yang sudah di-update dengan Logic Smart Resolver
     return this.financialService.verifyAndDecodeSimulationToken(dto);
   }
 
@@ -474,10 +460,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/insurance')
-  @ApiOperation({
-    summary: 'Simulasi Asuransi & Download PDF Langsung (Stateless)',
-    description: 'Menghitung kebutuhan proteksi, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
+  @ApiOperation({ summary: 'Simulasi Asuransi & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createInsuranceSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateInsuranceSimulationDto,
@@ -511,10 +495,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/pension')
-  @ApiOperation({
-    summary: 'Simulasi Pensiun & Download PDF Langsung (Stateless)',
-    description: 'Menghitung kebutuhan dana pensiun, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
+  @ApiOperation({ summary: 'Simulasi Pensiun & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createPensionSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreatePensionSimulationDto,
@@ -548,10 +530,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/goals')
-  @ApiOperation({
-    summary: 'Simulasi Tujuan Keuangan & Download PDF Langsung (Stateless)',
-    description: 'Menghitung strategi pencapaian tujuan keuangan, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
+  @ApiOperation({ summary: 'Simulasi Tujuan Keuangan & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createGoalSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateGoalSimulationDto,
@@ -585,10 +565,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/checkup')
-  @ApiOperation({
-    summary: 'Simulasi Financial Checkup & Return JSON (PDF Buffer + Data)',
-    description: 'Mengembalikan Object JSON lengkap berisi hasil analisa, token .mgc, dan buffer PDF untuk ditampilkan di Frontend.'
-  })
+  @ApiOperation({ summary: 'Simulasi Financial Checkup (JSON)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
@@ -613,24 +591,19 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/education/calculate')
-  @ApiOperation({
-    summary: 'Simulasi Pendidikan - Hitung (JSON Only)',
-    description: 'Menghitung rencana pendidikan, menyimpan log, dan mengembalikan hasil angka + mgcToken + simulationId.',
-  })
+  @ApiOperation({ summary: 'Simulasi Pendidikan - Hitung (JSON Only)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async calculateEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
   ) {
-    // 1. Service Call (Hitung & Simpan)
-    // Return: { status, data, simulationId, mgcToken, filename }
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
-      entityId: result.simulationId, // Log ID simulasi yang baru dibuat
+      entityId: result.simulationId,
       details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
@@ -640,10 +613,8 @@ export class FinancialController {
   }
 
   @Get('simulation/education/:id/pdf')
-  @ApiOperation({
-    summary: 'Simulasi Pendidikan - Download PDF (Stream)',
-    description: 'Mengunduh file PDF berdasarkan ID simulasi yang didapat dari tahap kalkulasi.',
-  })
+  @ApiOperation({ summary: 'Simulasi Pendidikan - Download PDF (Stream)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async downloadEducationPdfById(
     @Param('id') id: string,
     @GetUser() user: client.User,
@@ -665,7 +636,7 @@ export class FinancialController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Education_Plan_${id}.pdf"`,
-      'Content-Length': pdfBuffer.length,
+      'Content-Length': (pdfBuffer as Buffer).length, // [FIXED] Force cast to Buffer for safety
     });
 
     res.end(pdfBuffer);

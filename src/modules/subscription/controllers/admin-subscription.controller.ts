@@ -8,8 +8,8 @@ import {
     UseGuards,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsUUID } from 'class-validator';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody, ApiProperty } from '@nestjs/swagger';
+import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
 
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -20,26 +20,39 @@ import { VerifyOrderDto } from '../dto/verify-order.dto';
 
 // --- DTO Internal untuk Keamanan Validasi ---
 
-class ManualOverrideDto {
+export class ManualOverrideDto {
+    @ApiProperty({ description: 'ID User yang akan diberikan akses' })
     @IsNotEmpty()
     @IsUUID()
     userId: string;
 
+    @ApiProperty({ description: 'ID Plan (Paket) yang diberikan' })
     @IsNotEmpty()
     @IsUUID()
     planId: string;
 
+    @ApiProperty({ description: 'Durasi akses dalam bulan (Opsional, default ikut plan)', required: false })
     @IsOptional()
     @IsNumber()
     @IsPositive()
     durationMonths?: number;
+
+    @ApiProperty({ description: 'Alasan pemberian akses (untuk Audit Log)', example: 'Bonus Marketing Campaign' })
+    @IsOptional()
+    @IsString()
+    reason?: string;
 }
 
-class TopUpQuotaDto {
+export class InjectQuotaDto {
+    @ApiProperty({ description: 'Jumlah token (Positif untuk tambah, Negatif untuk kurang)' })
     @IsNotEmpty()
     @IsNumber()
-    // Note: Tidak pakai @IsPositive agar Admin bisa input negatif (koreksi pengurangan) jika perlu
     amount: number;
+
+    @ApiProperty({ description: 'Alasan penambahan/pengurangan (Wajib untuk Audit)', example: 'Kompensasi error sistem' })
+    @IsNotEmpty()
+    @IsString()
+    reason: string;
 }
 
 @ApiTags('Admin Subscription & Quota')
@@ -65,14 +78,12 @@ export class AdminSubscriptionController {
     /**
      * Endpoint: PATCH /admin/subscription/verify
      * Eksekusi validasi bukti bayar.
-     * Logic: 
-     * - Jika VALID, jatah limit user di set ke PRO (9999).
-     * - Jika INVALID, status user dicabut (REVOKED) dan limit kembali ke FREE (3).
+     * Mencatat Audit Log siapa admin yang memverifikasi.
      */
     @Patch('verify')
     @ApiOperation({ summary: 'Approve or Reject subscription order' })
     async verifyOrder(
-        @GetUser('id') adminId: string,
+        @GetUser('id') adminId: string, // [NEW] Track Admin ID
         @Body() dto: VerifyOrderDto,
     ) {
         return this.adminSubscriptionService.verifyOrder(adminId, dto);
@@ -85,32 +96,42 @@ export class AdminSubscriptionController {
      */
     @Post('override')
     @ApiOperation({ summary: 'Manual override to give PRO access (Super Admin)' })
-    async manualOverride(@Body() dto: ManualOverrideDto) {
+    async manualOverride(
+        @GetUser('id') adminId: string,
+        @Body() dto: ManualOverrideDto,
+    ) {
         return this.adminSubscriptionService.manualOverride(
+            adminId,
             dto.userId,
             dto.planId,
             dto.durationMonths,
+            dto.reason,
         );
     }
 
     /**
      * [PHASE 5 UPDATE]
-     * Endpoint: PATCH /admin/subscription/topup-quota/:userId
+     * Endpoint: PATCH /admin/subscription/users/:userId/quota
      * Implementasi 'The Safety Net'.
-     * Memberikan tambahan Token Kuota secara manual kepada user tertentu 
-     * untuk menangani komplain atau bonus.
+     * Memberikan tambahan Token Kuota secara manual kepada user tertentu.
+     * Menggunakan Ledger System di backend.
      */
-    @Patch('topup-quota/:userId')
+    @Patch('users/:userId/quota') // URL diperbaiki agar RESTful
     @ApiOperation({
         summary: 'Inject/Top-up Simulation Quota manually',
-        description: 'Menambah token kuota user. Masukkan nilai negatif untuk mengurangi.'
+        description: 'Menambah token kuota user. Wajib menyertakan alasan untuk audit.',
     })
-    @ApiBody({ type: TopUpQuotaDto })
-    async topUpQuota(
+    @ApiBody({ type: InjectQuotaDto })
+    async injectQuota(
+        @GetUser('id') adminId: string,
         @Param('userId') userId: string,
-        @Body() dto: TopUpQuotaDto,
+        @Body() dto: InjectQuotaDto,
     ) {
-        // Memanggil logic update kuota di service layer
-        return this.adminSubscriptionService.topUpQuota(userId, dto.amount);
+        return this.adminSubscriptionService.injectQuota(
+            adminId,
+            userId,
+            dto.amount,
+            dto.reason,
+        );
     }
 }

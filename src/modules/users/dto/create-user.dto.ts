@@ -14,21 +14,21 @@ import {
 } from 'class-validator';
 
 export class CreateUserDto {
-    @ApiProperty({ example: 'John Doe', description: 'Nama lengkap pegawai' })
+    @ApiProperty({ example: 'John Doe', description: 'Nama lengkap agen/user' })
     @IsString()
     @IsNotEmpty()
     fullName: string;
 
-    @ApiProperty({ example: 'john@kantor.com', description: 'Email unik pegawai' })
+    @ApiProperty({ example: 'john@agency.com', description: 'Email unik user' })
     @IsEmail()
     @IsNotEmpty()
     @Transform(({ value }) => value?.toLowerCase().trim()) // Auto lowercase email
     email: string;
 
-    @ApiProperty({ example: '12345678', description: 'NIP Pegawai' })
+    @ApiPropertyOptional({ example: '12345678', description: 'Nomor Induk Agen / NIP' })
     @IsString()
     @IsOptional()
-    nip: string;
+    nip?: string;
 
     @ApiProperty({ example: 'Rahasia123', description: 'Password awal' })
     @IsString()
@@ -36,22 +36,22 @@ export class CreateUserDto {
     @MinLength(6)
     password: string;
 
-    @ApiProperty({ enum: Role, example: Role.USER, description: 'Role akses pegawai' })
+    @ApiProperty({ enum: Role, example: Role.USER, description: 'Role akses sistem' })
     @IsEnum(Role)
     @IsNotEmpty()
     role: Role;
 
-    @ApiProperty({ example: 'uuid-unit-kerja', description: 'ID Unit Kerja' })
+    // [REFACTORED] Menggantikan unitKerjaId menjadi agencyId
+    @ApiPropertyOptional({ example: 'uuid-agency-id', description: 'ID Agensi (Jika berafiliasi)' })
     @IsUUID()
     @IsOptional()
-    // Jika string kosong, ubah jadi null agar validator teriak "IsNotEmpty" bukan "Invalid UUID"
     @Transform(({ value }) => (value === '' ? null : value))
-    unitKerjaId: string;
+    agencyId?: string;
 
-    @ApiProperty({ example: '1990-01-01', description: 'Tanggal lahir (Wajib)' })
-    @IsDateString() // Ubah jadi Wajib karena DB require
+    @ApiPropertyOptional({ example: '1990-01-01', description: 'Tanggal lahir' })
+    @IsDateString()
     @IsOptional()
-    dateOfBirth: string;
+    dateOfBirth?: string;
 
     @ApiPropertyOptional({ example: 0, description: 'Jumlah tanggungan' })
     @IsOptional()
@@ -59,7 +59,7 @@ export class CreateUserDto {
     dependentCount?: number;
 
     // =================================================================
-    // [NEW] PHASE 4: ADDITIONAL PROFILE FIELDS (Admin Input)
+    // [NEW] PHASE 4: ADDITIONAL PROFILE FIELDS
     // =================================================================
 
     @ApiPropertyOptional({ example: 'Laki-laki', description: 'Jenis Kelamin' })
@@ -72,13 +72,18 @@ export class CreateUserDto {
     @IsString()
     address?: string;
 
-    @ApiPropertyOptional({ example: 'PT Asuransi Sejahtera', description: 'Nama Perusahaan Agen' })
+    @ApiPropertyOptional({ example: 'PT Prudential Life', description: 'Nama Perusahaan Asuransi Induk' })
     @IsOptional()
     @IsString()
-    agencyName?: string;
+    companyName?: string;
 
     @ApiPropertyOptional({ example: 'Senior Agent', description: 'Jabatan/Level Agen' })
     @IsOptional()
     @IsString()
     agentLevel?: string;
+
+    @ApiPropertyOptional({ example: 'Ingin mencapai MDRT tahun ini', description: 'Tujuan/Goal Agen' })
+    @IsOptional()
+    @IsString()
+    goals?: string;
 }

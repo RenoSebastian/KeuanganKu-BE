@@ -64,14 +64,13 @@ export class SearchService implements OnModuleInit {
             const task = await index.addDocuments(documents);
             this.logger.debug(`AddDocuments Task Enqueued: ${task.taskUid}`);
             return task;
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`Failed to add documents to ${indexName}: ${error.message}`);
         }
     }
 
     /**
-     * [FIX] Menghapus satu dokumen dari index Meilisearch berdasarkan ID
-     * Metode ini yang sebelumnya hilang dan menyebabkan error di UsersService.
+     * Menghapus satu dokumen dari index Meilisearch berdasarkan ID
      */
     async removeDocument(indexName: string, documentId: string) {
         if (!this.isMeiliHealthy) return;
@@ -83,7 +82,7 @@ export class SearchService implements OnModuleInit {
             const task = await index.deleteDocument(documentId);
             this.logger.debug(`RemoveDocument Task Enqueued for ID ${documentId}: ${task.taskUid}`);
             return task;
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`Failed to remove document ${documentId}: ${error.message}`);
         }
     }
@@ -125,7 +124,7 @@ export class SearchService implements OnModuleInit {
             ]);
 
             this.logger.log(`⚙️ Meilisearch Index Configured: Optimized for Fuzzy Search.`);
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`❌ Failed to configure Meilisearch index: ${error.message}`);
         }
     }
@@ -189,7 +188,7 @@ export class SearchService implements OnModuleInit {
                 subtitle: hit._formatted?.subtitle || hit.subtitle,
                 source: 'meilisearch'
             }));
-        } catch (error) {
+        } catch (error: any) {
             this.logger.warn(`Meilisearch query failed: ${error.message}`);
             return [];
         }
@@ -200,6 +199,7 @@ export class SearchService implements OnModuleInit {
         const paramTrgm = query;
         const safeLimit = Math.max(1, Math.floor(limit));
 
+        // [FIXED] Updated raw SQL to match new 'agencies' schema
         const sqlQuery = `
       (
         SELECT 
@@ -220,15 +220,15 @@ export class SearchService implements OnModuleInit {
       (
         SELECT 
           id::text as "redirectId", 
-          nama_unit as "title", 
-          kode_unit as "subtitle", 
+          agency_name as "title", 
+          agency_code as "subtitle", 
           'UNIT' as "type",
-          (nama_unit <-> $2) as "dist"
-        FROM unit_kerja 
+          (agency_name <-> $2) as "dist"
+        FROM agencies 
         WHERE 
-          nama_unit ILIKE $1 
-          OR kode_unit ILIKE $1
-          OR nama_unit % $2
+          agency_name ILIKE $1 
+          OR agency_code ILIKE $1
+          OR agency_name % $2
         ORDER BY "dist" ASC
         LIMIT $3
       )
@@ -253,7 +253,7 @@ export class SearchService implements OnModuleInit {
                 source: 'postgres_trigram',
                 score: 1 - (row.dist || 0)
             }));
-        } catch (e) {
+        } catch (e: any) {
             this.logger.error(`Postgres Trigram Search failed: ${e.message}`);
             return [];
         }
@@ -272,24 +272,26 @@ export class SearchService implements OnModuleInit {
             select: { id: true, fullName: true, nip: true, email: true }
         });
 
-        const units = await this.prisma.unitKerja.findMany({
-            select: { id: true, namaUnit: true, kodeUnit: true }
+        // [FIXED] Updated prisma select for Agency
+        const units = await this.prisma.agency.findMany({
+            select: { id: true, name: true, code: true }
         });
 
         const documents = [
             ...users.map(u => ({
-                id: u.id,                   // Konsisten dengan removeDocument yang memakai ID User
+                id: u.id,
                 redirectId: u.id,
                 type: 'PERSON',
                 title: u.fullName,
-                subtitle: `${u.nip} • ${u.email}`
+                subtitle: `${u.nip || '-'} • ${u.email}`
             })),
+            // [FIXED] Updated mapping for Agency
             ...units.map(uk => ({
-                id: uk.id,                  // Konsisten dengan removeDocument
+                id: uk.id,
                 redirectId: uk.id,
                 type: 'UNIT',
-                title: uk.namaUnit,
-                subtitle: uk.kodeUnit
+                title: uk.name,
+                subtitle: uk.code
             }))
         ];
 

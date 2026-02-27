@@ -22,6 +22,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
     ],
     controllers: [NotificationController],
     providers: [NotificationService, NotificationGateway],
-    exports: [NotificationService], // [PENTING] Export service agar bisa di-inject di FinancialModule
+
+    // [MODIFIED] Mengekspor NotificationGateway sangat krusial di sini.
+    // Ini membuka jalur akses agar AuthService dapat memanggil metode forceDisconnectClient()
+    // untuk mengamankan ekosistem Single Concurrent Session.
+    exports: [NotificationService, NotificationGateway],
 })
 export class NotificationModule { }

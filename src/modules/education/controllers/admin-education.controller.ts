@@ -29,7 +29,7 @@ import { Get } from '@nestjs/common';
 @ApiTags('Admin - Education Management')
 @Controller('admin/education')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN, Role.DIRECTOR) // Security Gate: Hanya Admin & Director
+@Roles(Role.ADMIN) // Security Gate: Hanya Admin & Director
 @ApiBearerAuth()
 @UseInterceptors(ClassSerializerInterceptor) // Transformasi Output (Exclude sensitive fields)
 export class AdminEducationController {

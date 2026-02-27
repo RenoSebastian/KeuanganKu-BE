@@ -84,11 +84,13 @@ export class CreateInsuranceSimulationDto {
     @IsNotEmpty()
     type: SimulationInsuranceType;
 
+    // [UPDATED] Menggunakan nama 'dependents' agar sinkron dengan Template PDF
     @ApiProperty({ example: 2, description: 'Jumlah tanggungan (istri/anak)' })
+    @IsOptional()
     @IsNumber()
     @Min(0)
     @Type(() => Number)
-    dependentCount: number;
+    dependents: number = 0;
 
     @ApiProperty({ example: 15000000, description: 'Pengeluaran rutin bulanan keluarga' })
     @IsNumber()

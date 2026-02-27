@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, IsEnum } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
@@ -47,4 +47,38 @@ export class LoginDto {
   @IsString()
   @IsOptional()
   unitKerjaId?: string;
+
+  // ====================================================================
+  // [NEW] SINGLE CONCURRENT SESSION IDENTIFIER
+  // ====================================================================
+  // Atribut ini wajib. Di Controller, kita akan menangkapnya dari
+  // HTTP Header 'x-device-id' dan memasukkannya ke payload ini.
+  @ApiProperty({
+    example: 'c2f7b8a1-3d9a-4f81-9b62-1b8a5d4c3f91',
+    description: 'Device Fingerprint / AppMySite Client ID'
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Device ID tidak boleh kosong untuk pelacakan sesi' })
+  deviceId: string;
+}
+
+// ====================================================================
+// [NEW] DTO UNTUK REFRESH TOKEN ROTATION
+// ====================================================================
+export class RefreshTokenDto {
+  @ApiProperty({
+    example: 'd8a...[opaque_token_string]...',
+    description: 'Long-lived Refresh Token'
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Refresh token wajib disertakan' })
+  refreshToken: string;
+
+  @ApiProperty({
+    example: 'c2f7b8a1-3d9a-4f81-9b62-1b8a5d4c3f91',
+    description: 'Harus cocok dengan perangkat saat login awal'
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Device ID wajib disertakan untuk validasi rotasi token' })
+  deviceId: string;
 }
