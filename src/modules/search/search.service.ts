@@ -36,7 +36,7 @@ export class SearchService implements OnModuleInit {
             if (this.isMeiliHealthy) {
                 this.logger.log('✅ Meilisearch Connected. Hybrid Search Engine Ready.');
                 await this.configureMeiliIndex();
-                // Opsional: Jalankan sync saat startup jika perlu (hati-hati di production)
+                // Opsional: Jalankan sync saat startup jika perlu
                 // await this.syncAllData(); 
             }
         } catch (e) {
@@ -45,6 +45,9 @@ export class SearchService implements OnModuleInit {
         }
     }
 
+    /**
+     * Menambahkan atau Mengupdate dokumen di Meilisearch
+     */
     async addDocuments(indexName: string, documents: any[]) {
         // Fail-safe: Jika Meili mati, jangan throw error agar flow aplikasi tetap jalan
         if (!this.isMeiliHealthy) {
@@ -61,8 +64,26 @@ export class SearchService implements OnModuleInit {
             const task = await index.addDocuments(documents);
             this.logger.debug(`AddDocuments Task Enqueued: ${task.taskUid}`);
             return task;
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`Failed to add documents to ${indexName}: ${error.message}`);
+        }
+    }
+
+    /**
+     * Menghapus satu dokumen dari index Meilisearch berdasarkan ID
+     */
+    async removeDocument(indexName: string, documentId: string) {
+        if (!this.isMeiliHealthy) return;
+
+        try {
+            const targetIndex = indexName || this.INDEX_NAME;
+            const index = this.client.index(targetIndex);
+
+            const task = await index.deleteDocument(documentId);
+            this.logger.debug(`RemoveDocument Task Enqueued for ID ${documentId}: ${task.taskUid}`);
+            return task;
+        } catch (error: any) {
+            this.logger.error(`Failed to remove document ${documentId}: ${error.message}`);
         }
     }
 
@@ -77,35 +98,33 @@ export class SearchService implements OnModuleInit {
             await index.updateFilterableAttributes(['type', 'redirectId']);
 
             // B. Typo Tolerance (Fuzzy Logic Config)
-            // "Reno" (4 huruf) -> butuh 1 typo tolerance
-            // "Financial" (9 huruf) -> butuh 2 typo tolerance
             await index.updateTypoTolerance({
                 minWordSizeForTypos: {
                     oneTypo: 3,
                     twoTypos: 8
                 },
-                disableOnAttributes: ['redirectId'] // Jangan typo di ID
+                disableOnAttributes: ['redirectId']
             });
 
             // C. Searchable Fields
             await index.updateSearchableAttributes([
                 'title',
                 'subtitle',
-                'keywords' // Opsional: jika ada field hidden keywords
+                'keywords'
             ]);
 
-            // D. Ranking Rules (Algoritma Relevansi)
+            // D. Ranking Rules
             await index.updateRankingRules([
-                'words',      // Jumlah kata yang cocok
-                'typo',       // Sedikit typo lebih baik
-                'proximity',  // Kata yang berdekatan lebih baik
-                'attribute',  // Judul lebih penting dari subjudul
+                'words',
+                'typo',
+                'proximity',
+                'attribute',
                 'sort',
                 'exactness'
             ]);
 
             this.logger.log(`⚙️ Meilisearch Index Configured: Optimized for Fuzzy Search.`);
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`❌ Failed to configure Meilisearch index: ${error.message}`);
         }
     }
@@ -114,40 +133,28 @@ export class SearchService implements OnModuleInit {
 
     async searchEmployees(queryDto: SearchQueryDto): Promise<StandardSearchResult[]> {
         const { q, limit = 10 } = queryDto;
-        // Sanitasi input dasar
         const cleanQuery = q?.replace(/[^\w\s]/gi, '').trim();
 
         if (!cleanQuery) return [];
 
         // 1. PRIMARY SEARCH: Meilisearch
-        // Kita jalankan dulu engine utama yang paling cepat
         const meiliHits = await this.executeMeiliSearch(cleanQuery, limit);
 
-        // 2. CHECK SUFFICIENCY (Optimization)
-        // Jika hasil Meili sudah memenuhi limit user, STOP. Jangan ganggu DB.
+        // 2. CHECK SUFFICIENCY
         if (meiliHits.length >= limit) {
             return meiliHits.slice(0, limit);
         }
 
-        // 3. SECONDARY SEARCH: PostgreSQL Trigram (Gap Filler)
-        // Hanya cari sisa kekurangannya
+        // 3. SECONDARY SEARCH: PostgreSQL Trigram
         const remainingLimit = limit - meiliHits.length;
         let dbHits: StandardSearchResult[] = [];
 
-        // Trigger DB search hanya jika perlu
         if (remainingLimit > 0) {
-            // Log debug jika environment development
-            if (process.env.NODE_ENV === 'development') {
-                this.logger.debug(`🔍 Meili only found ${meiliHits.length}. Fetching ${remainingLimit} gap-fillers from DB...`);
-            }
             dbHits = await this.executePgTrigramSearch(cleanQuery, remainingLimit);
         }
 
-        // 4. MERGE & DEDUPLICATE (Smart Logic)
+        // 4. MERGE & DEDUPLICATE
         const combinedResults = [...meiliHits];
-
-        // Gunakan Set untuk mencatat redirectId yang sudah ada di Meili
-        // (Agar data tidak muncul 2x jika ada di Meili DAN di DB)
         const seenIds = new Set(meiliHits.map(item => item.redirectId));
 
         for (const dbHit of dbHits) {
@@ -162,9 +169,6 @@ export class SearchService implements OnModuleInit {
 
     // --- [PHASE 3] PRIVATE EXECUTORS ---
 
-    /**
-     * Eksekusi pencarian ke Meilisearch
-     */
     private async executeMeiliSearch(query: string, limit: number): Promise<StandardSearchResult[]> {
         if (!this.isMeiliHealthy) return [];
 
@@ -172,7 +176,7 @@ export class SearchService implements OnModuleInit {
             const index = this.client.index(this.INDEX_NAME);
             const searchResult = await index.search(query, {
                 limit: limit,
-                attributesToHighlight: ['title', 'subtitle'], // Untuk UI highlighting nanti
+                attributesToHighlight: ['title', 'subtitle'],
                 showMatchesPosition: true,
             });
 
@@ -184,23 +188,18 @@ export class SearchService implements OnModuleInit {
                 subtitle: hit._formatted?.subtitle || hit.subtitle,
                 source: 'meilisearch'
             }));
-        } catch (error) {
+        } catch (error: any) {
             this.logger.warn(`Meilisearch query failed: ${error.message}`);
-            return []; // Return kosong agar hybrid logic lanjut ke DB
+            return [];
         }
     }
 
-    /**
-     * Eksekusi pencarian ke PostgreSQL menggunakan pg_trgm
-     */
     private async executePgTrigramSearch(query: string, limit: number): Promise<StandardSearchResult[]> {
         const paramLike = `%${query}%`;
         const paramTrgm = query;
-        // Pastikan limit minimal 1 agar query valid
         const safeLimit = Math.max(1, Math.floor(limit));
 
-        // Query Union: Cari di Users DAN Unit Kerja
-        // Menggunakan operator <-> (jarak) untuk sorting kemiripan
+        // [FIXED] Updated raw SQL to match new 'agencies' schema
         const sqlQuery = `
       (
         SELECT 
@@ -208,12 +207,12 @@ export class SearchService implements OnModuleInit {
           full_name as "title", 
           nip as "subtitle", 
           'PERSON' as "type",
-          (full_name <-> $2) as "dist" -- Hitung jarak trigram
+          (full_name <-> $2) as "dist"
         FROM users 
         WHERE 
           full_name ILIKE $1 
           OR nip ILIKE $1
-          OR full_name % $2  -- Fuzzy Match Operator
+          OR full_name % $2
         ORDER BY "dist" ASC 
         LIMIT $3
       )
@@ -221,15 +220,15 @@ export class SearchService implements OnModuleInit {
       (
         SELECT 
           id::text as "redirectId", 
-          nama_unit as "title", 
-          kode_unit as "subtitle", 
+          agency_name as "title", 
+          agency_code as "subtitle", 
           'UNIT' as "type",
-          (nama_unit <-> $2) as "dist"
-        FROM unit_kerja 
+          (agency_name <-> $2) as "dist"
+        FROM agencies 
         WHERE 
-          nama_unit ILIKE $1 
-          OR kode_unit ILIKE $1
-          OR nama_unit % $2
+          agency_name ILIKE $1 
+          OR agency_code ILIKE $1
+          OR agency_name % $2
         ORDER BY "dist" ASC
         LIMIT $3
       )
@@ -240,9 +239,9 @@ export class SearchService implements OnModuleInit {
         try {
             const dbResults: any[] = await this.prisma.$queryRawUnsafe(
                 sqlQuery,
-                paramLike, // $1
-                paramTrgm, // $2
-                safeLimit  // $3
+                paramLike,
+                paramTrgm,
+                safeLimit
             );
 
             return dbResults.map(row => ({
@@ -252,9 +251,9 @@ export class SearchService implements OnModuleInit {
                 title: row.title,
                 subtitle: row.subtitle,
                 source: 'postgres_trigram',
-                score: 1 - (row.dist || 0) // Konversi jarak (0=mirip) menjadi skor (1=mirip)
+                score: 1 - (row.dist || 0)
             }));
-        } catch (e) {
+        } catch (e: any) {
             this.logger.error(`Postgres Trigram Search failed: ${e.message}`);
             return [];
         }
@@ -262,10 +261,6 @@ export class SearchService implements OnModuleInit {
 
     // --- [PHASE 4] UTILITY: DATA SYNC ---
 
-    /**
-     * Helper untuk memasukkan data dari DB ke Meilisearch.
-     * Dipanggil manual via endpoint /search/sync atau Scheduler.
-     */
     async syncAllData() {
         if (!this.isMeiliHealthy) {
             throw new Error("Cannot sync: Meilisearch is offline");
@@ -273,37 +268,35 @@ export class SearchService implements OnModuleInit {
 
         this.logger.log("🔄 Starting Full Data Sync to Meilisearch...");
 
-        // 1. Fetch Users
         const users = await this.prisma.user.findMany({
             select: { id: true, fullName: true, nip: true, email: true }
         });
 
-        // 2. Fetch Units
-        const units = await this.prisma.unitKerja.findMany({
-            select: { id: true, namaUnit: true, kodeUnit: true }
+        // [FIXED] Updated prisma select for Agency
+        const units = await this.prisma.agency.findMany({
+            select: { id: true, name: true, code: true }
         });
 
-        // 3. Format Documents
         const documents = [
             ...users.map(u => ({
-                id: `user_${u.id}`,         // ID dokumen Meili (harus string unik)
-                redirectId: u.id,           // ID asli untuk navigasi
+                id: u.id,
+                redirectId: u.id,
                 type: 'PERSON',
                 title: u.fullName,
-                subtitle: `${u.nip} • ${u.email}` // Gabung info untuk pencarian lebih kaya
+                subtitle: `${u.nip || '-'} • ${u.email}`
             })),
+            // [FIXED] Updated mapping for Agency
             ...units.map(uk => ({
-                id: `unit_${uk.id}`,
+                id: uk.id,
                 redirectId: uk.id,
                 type: 'UNIT',
-                title: uk.namaUnit,
-                subtitle: uk.kodeUnit
+                title: uk.name,
+                subtitle: uk.code
             }))
         ];
 
-        // 4. Upload in Batches
         const index = this.client.index(this.INDEX_NAME);
-        await index.deleteAllDocuments(); // Reset index lama agar bersih
+        await index.deleteAllDocuments();
         const task = await index.addDocuments(documents);
 
         this.logger.log(`✅ Sync Queued. Task UID: ${task.taskUid}. Documents: ${documents.length}`);

@@ -15,6 +15,7 @@ import {
 } from '@nestjs/common';
 import * as express from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler'; // [NEW] Import Throttle decorator
 
 // Services
 import { FinancialService } from './financial.service';
@@ -22,7 +23,7 @@ import { PdfGeneratorService } from './services/pdf-generator.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 
-// DTOs
+// DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
 import { CreateFinancialRecordDto } from './dto/create-financial-record.dto';
 import { CreatePensionDto } from './dto/create-pension.dto';
@@ -34,7 +35,7 @@ import { CreateEducationPlanDto } from './dto/create-education.dto';
 import { CalculateRiskProfileDto } from './dto/calculate-risk-profile.dto';
 import { RiskProfileResponseDto } from './dto/risk-profile-response.dto';
 
-// [NEW] DTOs - Agent Simulation (Phase 2 & 5)
+// DTOs - Agent Simulation
 import { CreateBudgetSimulationDto } from './dto/create-budget-simulation.dto';
 import { ImportSimulationDto } from './dto/import-simulation.dto';
 import { CreateInsuranceSimulationDto } from './dto/create-insurance-simulation.dto';
@@ -42,12 +43,12 @@ import { CreatePensionSimulationDto } from './dto/create-pension-simulation.dto'
 import { CreateGoalSimulationDto } from './dto/create-goal-simulation.dto';
 import { CreateCheckupSimulationDto } from './dto/create-checkup-simulation.dto';
 import { CreateRiskProfileSimulationDto } from './dto/create-risk-profile-simulation.dto';
-import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto'; // [ADDED] DTO Baru
+import { CreateEducationSimulationDto } from './dto/create-education-simulation.dto';
 
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
-import * as client from '@prisma/client'; // Import User type for type-safety
+import * as client from '@prisma/client';
 
 @ApiTags('Financial Engine')
 @UseGuards(JwtAuthGuard)
@@ -68,8 +69,7 @@ export class FinancialController {
   @Post('checkup')
   @ApiOperation({ summary: 'Simpan Data Checkup & Jalankan Analisa' })
   async createCheckup(@GetUser('id') userId: string, @Body() dto: CreateFinancialRecordDto) {
-    const result = await this.financialService.createCheckup(userId, dto);
-    return result;
+    return this.financialService.createCheckup(userId, dto);
   }
 
   @Get('checkup/latest')
@@ -84,7 +84,6 @@ export class FinancialController {
     return this.financialService.getCheckupHistory(userId);
   }
 
-  // [NEW] Endpoint Detail Checkup (Roadmap Part 1)
   @Get('checkup/detail/:id')
   @ApiOperation({ summary: 'Ambil detail checkup spesifik berdasarkan ID' })
   async getCheckupDetail(@GetUser('id') userId: string, @Param('id') id: string) {
@@ -93,20 +92,18 @@ export class FinancialController {
 
   @Get('checkup/pdf/:id')
   @ApiOperation({ summary: 'Download PDF Report (Server-Side Generated)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } }) // Limit download PDF
   async downloadCheckupPdf(
     @Param('id') id: string,
     @GetUser('id') userId: string,
     @Res() res: express.Response
   ) {
-    // 1. Ambil Data (Reuse logic getCheckupDetail)
     const checkupData = await this.financialService.getLatestCheckup(userId);
 
     if (!checkupData) throw new NotFoundException('Data not found');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generateCheckupPdf(checkupData);
 
-    // 3. Stream Response
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Financial-Checkup-${id}.pdf`,
@@ -116,24 +113,19 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [UPDATED] Endpoint Download Budget PDF
   @Get('budget/pdf/:id')
   @ApiOperation({ summary: 'Download Budget PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadBudgetPdf(@Param('id') id: string, @Res() res: express.Response) {
-    // 1. Ambil Data Budget + User Profile
     const budgetData = await this.prisma.budgetPlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!budgetData) throw new NotFoundException('Data budget tidak ditemukan');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generateBudgetPdf(budgetData);
 
-    // 3. Return Stream
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Budget-Report-${id}.pdf`,
@@ -142,24 +134,19 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [NEW] Endpoint Download Pension PDF
   @Get('pension/pdf/:id')
   @ApiOperation({ summary: 'Download Pension Plan PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadPensionPdf(@Param('id') id: string, @Res() res: express.Response) {
-    // 1. Ambil Data Pension berdasarkan ID, include User
     const pensionData = await this.prisma.pensionPlan.findUnique({
       where: { id },
-      include: {
-        user: true // Include data user untuk ambil nama
-      }
+      include: { user: true }
     });
 
     if (!pensionData) throw new NotFoundException('Data rencana pensiun tidak ditemukan');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generatePensionPdf(pensionData);
 
-    // 3. Return Stream
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Pension-Plan-${id}.pdf`,
@@ -168,15 +155,13 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [NEW] Endpoint Download Insurance PDF
   @Get('insurance/pdf/:id')
   @ApiOperation({ summary: 'Download Insurance Plan PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadInsurancePdf(@Param('id') id: string, @Res() res: express.Response) {
     const insuranceData = await this.prisma.insurancePlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!insuranceData) throw new NotFoundException('Data rencana asuransi tidak ditemukan');
@@ -196,10 +181,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('budget')
-  @ApiOperation({ summary: 'Simpan rencana anggaran bulanan (Auto-Calculate supported)' })
+  @ApiOperation({ summary: 'Simpan rencana anggaran bulanan' })
   async createBudget(@GetUser('id') userId: string, @Body() dto: CreateBudgetDto) {
-    // Controller akan mengembalikan objek { budget, analysis } 
-    // yang sudah berisi angka hasil kalkulasi otomatis dari Service
     return this.financialService.createBudget(userId, dto);
   }
 
@@ -234,7 +217,8 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('goals/simulate')
-  @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (FV & PMT) - Tidak Simpan DB' })
+  @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (Stateless)' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } }) // Lebih longgar karena ringan
   simulateGoal(@GetUser('id') userId: string, @Body() dto: SimulateGoalDto) {
     return this.financialService.simulateGoal(userId, dto);
   }
@@ -245,24 +229,19 @@ export class FinancialController {
     return this.financialService.calculateAndSaveGoal(userId, dto);
   }
 
-  // [NEW] Endpoint Download Goal PDF
   @Get('goals/pdf/:id')
   @ApiOperation({ summary: 'Download Financial Goal PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadGoalPdf(@Param('id') id: string, @Res() res: express.Response) {
-    // 1. Ambil Data Goal
     const goalData = await this.prisma.goalPlan.findUnique({
       where: { id },
-      include: {
-        user: true
-      }
+      include: { user: true }
     });
 
     if (!goalData) throw new NotFoundException('Data tujuan keuangan tidak ditemukan');
 
-    // 2. Generate PDF
     const buffer = await this.pdfGeneratorService.generateGoalPdf(goalData);
 
-    // 3. Stream Response
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Goal-Plan-${id}.pdf`,
@@ -272,13 +251,12 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 6: CALCULATOR - EDUCATION PLAN
+  // MODULE 6: CALCULATOR - EDUCATION PLAN (EXISTING)
   // ===========================================================================
 
   @Post('calculator/education')
   @ApiOperation({ summary: 'Hitung & Simpan Rencana Pendidikan Anak' })
   async calculateEducation(@GetUser('id') userId: string, @Body() dto: CreateEducationPlanDto) {
-    // Method ini mengembalikan { plan, calculation: { total, monthly, stagesBreakdown } }
     return this.financialService.calculateAndSaveEducation(userId, dto);
   }
 
@@ -294,16 +272,14 @@ export class FinancialController {
     return this.financialService.deleteEducationPlan(userId, id);
   }
 
-  // [UPDATED] Endpoint Download Education PDF (Family Report)
   @Get('education/pdf')
   @ApiOperation({ summary: 'Download Education Plan PDF (All Children)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadEducationPdf(@GetUser('id') userId: string, @Res() res: express.Response) {
     const educationPlans = await this.prisma.educationPlan.findMany({
       where: { userId },
       include: {
-        stages: {
-          orderBy: { yearsToStart: 'asc' }
-        }
+        stages: { orderBy: { yearsToStart: 'asc' } }
       },
       orderBy: { createdAt: 'desc' }
     });
@@ -312,7 +288,6 @@ export class FinancialController {
       throw new NotFoundException('Belum ada rencana pendidikan yang dibuat.');
     }
 
-    // 2. Transform Data Structure
     const formattedData = educationPlans.map(p => {
       const totalFutureCost = p.stages.reduce((sum, stage) => sum + Number(stage.futureCost), 0);
       const totalMonthlySaving = p.stages.reduce((sum, stage) => sum + Number(stage.monthlySaving), 0);
@@ -320,14 +295,13 @@ export class FinancialController {
       return {
         plan: p,
         calculation: {
-          totalFutureCost: totalFutureCost,
+          totalFutureCost,
           monthlySaving: totalMonthlySaving,
           stagesBreakdown: p.stages
         }
       };
     });
 
-    // 3. Generate PDF
     const buffer = await this.pdfGeneratorService.generateEducationPdf(formattedData);
 
     res.set({
@@ -338,19 +312,16 @@ export class FinancialController {
     res.end(buffer);
   }
 
-  // [NEW] Endpoint Download PDF from History Detail
   @Get('checkup/history/pdf/:id')
   @ApiOperation({ summary: 'Download History PDF Report' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadHistoryPdf(@Param('id') id: string, @GetUser('id') userId: string, @Res() res: express.Response) {
-    // 1. Ambil Data Detail (Gabungan Raw + Analisa)
     const checkupDetail = await this.financialService.getCheckupDetail(userId, id);
 
     if (!checkupDetail) throw new NotFoundException('Data riwayat tidak ditemukan');
 
-    // 2. Generate PDF dengan Template History
     const buffer = await this.pdfGeneratorService.generateHistoryCheckupPdf(checkupDetail);
 
-    // 3. Stream Response
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Checkup-Report-${id}.pdf`,
@@ -364,65 +335,47 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/risk-profile')
-  @ApiOperation({
-    summary: 'Kalkulasi Profil Risiko (Stateless)',
-    description:
-      'Menerima jawaban kuesioner, mengembalikan skor, tipe profil, dan rekomendasi alokasi aset. Data tidak disimpan ke database.',
-  })
+  @ApiOperation({ summary: 'Kalkulasi Profil Risiko (Stateless)' })
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiResponse({ status: 200, type: RiskProfileResponseDto })
   calculateRiskProfile(@Body() dto: CalculateRiskProfileDto): RiskProfileResponseDto {
     return this.financialService.calculateRiskProfile(dto);
   }
 
-  // [NEW] ENDPOINT SIMULASI RISK PROFILE DENGAN PDF STREAM & TOKEN
   @Post('simulation/risk-profile-pdf')
-  @ApiOperation({
-    summary: 'Simulasi Risk Profile & Download PDF Langsung (Stateless)',
-    description:
-      'Menghitung profil risiko, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.',
-  })
+  @ApiOperation({ summary: 'Simulasi Risk Profile & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } }) // Berat (PDF Gen)
   async createRiskProfileSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateRiskProfileSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentRiskProfile(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_RISK_PROFILE',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated risk profile simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0', // Bisa diganti dengan req.ip jika tersedia
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem',
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
   @Post('export/risk-profile-pdf')
-  @ApiOperation({
-    summary: 'Generate PDF Laporan Profil Risiko (Legacy/Direct Export)',
-    description:
-      'Menerima Object Hasil Kalkulasi (RiskProfileResponseDto) dan menghasilkan file PDF untuk diunduh.',
-  })
+  @ApiOperation({ summary: 'Generate PDF Laporan Profil Risiko (Legacy)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Header('Content-Type', 'application/pdf')
   @Header('Content-Disposition', 'attachment; filename="Risk_Profile_Report.pdf"')
   async exportRiskProfilePdf(
@@ -430,10 +383,8 @@ export class FinancialController {
     @Body() data: RiskProfileResponseDto,
     @Res({ passthrough: true }) res: express.Response,
   ): Promise<StreamableFile> {
-    // 1. Generate PDF Buffer
     const pdfBuffer = await this.pdfGeneratorService.generateRiskProfilePdf(data);
 
-    // 2. Setup Filename yang deskriptif
     const cleanName = data.clientName.replace(/[^a-zA-Z0-9]/g, '_');
     const filename = `RiskProfile_${cleanName}_${new Date().getTime()}.pdf`;
 
@@ -443,16 +394,14 @@ export class FinancialController {
       'Content-Length': pdfBuffer.length,
     });
 
-    // 3. Audit Log
     await this.auditService.logActivity({
       userId,
       action: 'EXPORT_PDF',
-      entity: 'RiskProfileSimulation', // Virtual Entity
+      entity: 'RiskProfileSimulation',
       entityId: 'STATELESS',
-      details: `Agent generated Risk Profile PDF for client: ${data.clientName} (Profile: ${data.riskProfile})`,
+      details: `Agent generated Risk Profile PDF for client: ${data.clientName}`,
     });
 
-    // 4. Return Stream
     return new StreamableFile(pdfBuffer);
   }
 
@@ -461,54 +410,46 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/budget')
-  @ApiOperation({ summary: 'Simulasi Budget & Download PDF Langsung (Stateless)' })
+  @ApiOperation({ summary: 'Simulasi Budget & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createBudgetSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateBudgetSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentBudget(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_BUDGET',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated stateless simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0', // [FIXED] Changed 'ipAddress' to 'ip'
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
   @Post('simulation/decode')
-  @ApiOperation({ summary: 'Decode Token Simulasi (.mgc) untuk Import Data' })
+  @ApiOperation({ summary: 'Decode Token Simulasi (.mgc)' })
+  @Throttle({ default: { limit: 50, ttl: 60000 } }) // Ringan (Crypto only)
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
-    // Audit Log untuk Import Action
     await this.auditService.logActivity({
       userId,
       action: 'IMPORT_SIMULATION',
       entity: 'SimulationToken',
       entityId: 'STATELESS',
-      details: 'Agent successfully imported a .mgc simulation file'
+      details: 'Agent imported a .mgc simulation file'
     });
 
     return this.financialService.verifyAndDecodeSimulationToken(dto);
@@ -519,44 +460,33 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/insurance')
-  @ApiOperation({
-    summary: 'Simulasi Asuransi & Download PDF Langsung (Stateless)',
-    description: 'Menghitung kebutuhan proteksi, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
+  @ApiOperation({ summary: 'Simulasi Asuransi & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createInsuranceSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateInsuranceSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentInsurance(user, dto);
 
-    // 2. Audit Log (Tetap catat aktivitas)
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_INSURANCE',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
       details: `Agent ${user.fullName} generated insurance simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0', // Atau ambil dari @Req() jika perlu
+      ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -565,19 +495,15 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/pension')
-  @ApiOperation({
-    summary: 'Simulasi Pensiun & Download PDF Langsung (Stateless)',
-    description: 'Menghitung kebutuhan dana pensiun, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
+  @ApiOperation({ summary: 'Simulasi Pensiun & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createPensionSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreatePensionSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentPension(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_PENSION',
@@ -588,21 +514,14 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -611,19 +530,15 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/goals')
-  @ApiOperation({
-    summary: 'Simulasi Tujuan Keuangan & Download PDF Langsung (Stateless)',
-    description: 'Menghitung strategi pencapaian tujuan keuangan, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
+  @ApiOperation({ summary: 'Simulasi Tujuan Keuangan & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createGoalSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateGoalSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentGoal(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_GOAL',
@@ -634,21 +549,14 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
-
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      // tanpa harus mengotori body file PDF
       'X-MGC-Token': result.mgcToken,
-
-      // Mengizinkan Browser/Frontend membaca header custom ini
       'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
     res.end(result.pdfBuffer);
   }
 
@@ -657,19 +565,14 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/checkup')
-  @ApiOperation({
-    summary: 'Simulasi Financial Checkup & Return JSON (PDF Buffer + Data)',
-    description: 'Mengembalikan Object JSON lengkap berisi hasil analisa, token .mgc, dan buffer PDF untuk ditampilkan di Frontend.'
-  })
+  @ApiOperation({ summary: 'Simulasi Financial Checkup (JSON)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
-    // [FIX] Hapus @Res() agar NestJS mengembalikan return value sebagai JSON Body secara otomatis
   ) {
-    // 1. Eksekusi Service -> Dapat Object { pdfBuffer, mgcToken, data: {...} }
     const result = await this.financialService.simulateAgentCheckup(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_CHECKUP',
@@ -680,54 +583,62 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. Return Object JSON (NestJS Auto-Serialize)
-    // Note: Buffer PDF akan diserialisasi menjadi { type: 'Buffer', data: [...] }
-    // Frontend harus mengubahnya kembali menjadi Blob/File.
     return result;
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (STATELESS STREAMING)
+  // MODULE 13: AGENT EDUCATION SIMULATION (SCENARIO B: SPLIT ENDPOINTS)
   // ===========================================================================
 
-  @Post('simulation/education')
-  @ApiOperation({
-    summary: 'Simulasi Pendidikan & Download PDF Langsung (Stateless)',
-    description: 'Menghitung rencana pendidikan anak, membuat log analitik, dan mengembalikan PDF + Token .mgc tanpa menyimpan data detail ke database.'
-  })
-  async createEducationSimulation(
+  @Post('simulation/education/calculate')
+  @ApiOperation({ summary: 'Simulasi Pendidikan - Hitung (JSON Only)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async calculateEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
-    @Res() res: express.Response,
   ) {
-    // 1. Eksekusi Service -> Dapat Buffer PDF & Token
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
-      entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated education simulation for client ${dto.clientName}`,
+      entityId: result.simulationId,
+      details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    // 3. SET HTTP HEADERS (CRITICAL STEP)
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${result.filename}"`,
-      'Content-Length': result.pdfBuffer.length,
+    return result;
+  }
 
-      // [SECURITY HEADER] Kirim Token .mgc via Header agar FE bisa menangkapnya
-      'X-MGC-Token': result.mgcToken,
+  @Get('simulation/education/:id/pdf')
+  @ApiOperation({ summary: 'Simulasi Pendidikan - Download PDF (Stream)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async downloadEducationPdfById(
+    @Param('id') id: string,
+    @GetUser() user: client.User,
+    @Res() res: express.Response,
+  ) {
+    // 1. Service Call (Generate PDF on-demand)
+    const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
 
-      // Mengizinkan Browser/Frontend membaca header custom ini
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+    // 2. Audit Log (Download Event)
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'DOWNLOAD_SIMULATION_PDF',
+      entity: 'SimulationLog',
+      entityId: id,
+      details: `Agent ${user.fullName} downloaded education PDF ${id}`,
     });
 
-    // 4. STREAM DATA LANGSUNG KE CLIENT
-    res.end(result.pdfBuffer);
+    // 3. Return Stream
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Education_Plan_${id}.pdf"`,
+      'Content-Length': (pdfBuffer as Buffer).length, // [FIXED] Force cast to Buffer for safety
+    });
+
+    res.end(pdfBuffer);
   }
 }

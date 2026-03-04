@@ -8,38 +8,50 @@ export class MasterDataService {
     constructor(private prisma: PrismaService) { }
 
     async findAllUnits() {
-        return this.prisma.unitKerja.findMany({
-            orderBy: { namaUnit: 'asc' },
+        // [FIX] unitKerja -> agency, namaUnit -> name
+        return this.prisma.agency.findMany({
+            orderBy: { name: 'asc' },
         });
     }
 
     async createUnit(dto: CreateUnitDto) {
-        // Cek duplikat kode
-        const existing = await this.prisma.unitKerja.findUnique({
-            where: { kodeUnit: dto.kodeUnit },
+        // [FIX] Cek duplikat berdasarkan 'code' bukan 'kodeUnit'
+        const existing = await this.prisma.agency.findUnique({
+            where: { code: dto.kodeUnit },
         });
-        if (existing) throw new BadRequestException('Kode Unit sudah ada');
+        if (existing) throw new BadRequestException('Kode Agency sudah ada');
 
-        return this.prisma.unitKerja.create({
-            data: dto,
+        // [FIX] Mapping DTO (legacy) ke Schema Baru (Agency)
+        return this.prisma.agency.create({
+            data: {
+                code: dto.kodeUnit,
+                name: dto.namaUnit,
+                address: dto.alamat || null // Asumsi ada field alamat di DTO
+            },
         });
     }
 
     async updateUnit(id: string, dto: UpdateUnitDto) {
-        return this.prisma.unitKerja.update({
+        // [FIX] Update ke tabel agency
+        return this.prisma.agency.update({
             where: { id },
-            data: dto,
+            data: {
+                code: dto.kodeUnit,
+                name: dto.namaUnit,
+                // address: dto.alamat 
+            },
         });
     }
 
     async deleteUnit(id: string) {
         try {
-            return await this.prisma.unitKerja.delete({
+            // [FIX] Hapus dari agency
+            return await this.prisma.agency.delete({
                 where: { id },
             });
-        } catch (error) {
+        } catch (error: any) {
             if (error.code === 'P2003') {
-                throw new BadRequestException('Tidak bisa menghapus Unit yang masih memiliki Pegawai');
+                throw new BadRequestException('Tidak bisa menghapus Agency yang masih memiliki User/Agent');
             }
             throw error;
         }

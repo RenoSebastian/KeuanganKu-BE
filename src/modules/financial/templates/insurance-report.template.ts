@@ -3,17 +3,15 @@ import * as path from 'path';
 
 /**
  * UTILITY: Image to Base64 Converter
- * Memastikan aset gambar lokal dapat dirender oleh Puppeteer tanpa masalah path.
  */
 function getImageBase64(filePath: string): string {
   try {
     if (!fs.existsSync(filePath)) {
-      console.warn(`[PDF Template] Asset missing: ${filePath}`);
       return '';
     }
     const bitmap = fs.readFileSync(filePath);
     const extension = path.extname(filePath).toLowerCase().replace('.', '');
-    
+
     let mimeType = '';
     switch (extension) {
       case 'webp': mimeType = 'image/webp'; break;
@@ -31,17 +29,26 @@ function getImageBase64(filePath: string): string {
   }
 }
 
-// Define Asset Paths
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 const assets = {
-  // Logo
   logo: getImageBase64(path.join(ASSET_BASE_PATH, 'logokeuanganku.png')),
-  // Header Visuals (Asuransi Specific)
   header1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangproteksi1.webp')),
-  header2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangproteksi2.webp'))
+  header2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangproteksi2.webp')),
 };
 
-export const insuranceReportTemplate = `
+/**
+ * GENERATOR FUNCTION (Template Literal)
+ */
+export const generateInsuranceReportHtml = (data: any) => {
+  const { client, agent, input, result, meta } = data;
+
+  const coveragePercent = Math.min(Math.round((input.existingCoverageRaw / result.totalNeededRaw) * 100) || 0, 100);
+
+  const statusColor = coveragePercent >= 90 ? '#10b981' : (coveragePercent >= 50 ? '#f59e0b' : '#be123c');
+  const statusBg = coveragePercent >= 90 ? '#ecfdf5' : (coveragePercent >= 50 ? '#fffbeb' : '#fff1f2');
+  const statusText = coveragePercent >= 90 ? 'AMAN' : (coveragePercent >= 50 ? 'WASPADA' : 'BERISIKO');
+
+  return `
 <!DOCTYPE html>
 <html lang="id">
 <head>
@@ -49,160 +56,188 @@ export const insuranceReportTemplate = `
   <title>Laporan Perencanaan Asuransi</title>
   <style>
     :root {
-      --primary: #be123c;      /* Rose 700 - Insurance Theme */
-      --primary-soft: #fff1f2; /* Rose 50 */
-      --secondary: #64748b;    /* Slate 500 */
+      --primary: #be123c;      /* Rose 700 */
+      --primary-dark: #881337; /* Rose 900 */
+      --secondary: #475569;    /* Slate 600 */
       --dark: #0f172a;         /* Slate 900 */
       --border: #e2e8f0;       /* Slate 200 */
-      --accent: #0369a1;       /* Sky 700 (Secondary Accent) */
+      --bg-soft: #f8fafc;      /* Slate 50 */
+      --white: #ffffff;
     }
 
-    /* --- PAGE SETUP --- */
-    @page {
-      size: A4;
-      margin: 0;
+    @page { 
+      size: A4; 
+      margin: 0; /* Margin dikontrol oleh padding .page */
     }
     
-    * { 
-      box-sizing: border-box; 
-      -webkit-print-color-adjust: exact !important; 
-      print-color-adjust: exact !important; 
-    }
+    * { box-sizing: border-box; -webkit-print-color-adjust: exact !important; }
 
     body {
       margin: 0; padding: 0;
-      font-family: 'Helvetica', 'Arial', sans-serif;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
       color: var(--dark);
-      background-color: #ffffff;
-      font-size: 11px;
-      line-height: 1.4;
+      background-color: #f1f5f9;
+      line-height: 1.6;
     }
 
     .page {
       width: 210mm;
       min-height: 297mm;
-      padding: 15mm;
+      background: var(--white);
+      margin: 0 auto;
+      padding: 15mm 15mm 20mm 15mm;
       position: relative;
       overflow: hidden;
-      display: flex;
-      flex-direction: column;
+      box-shadow: 0 0 20px rgba(0,0,0,0.1);
     }
 
-    /* --- HEADER GRID 2x2 (PROFESSIONAL LAYOUT) --- */
+    @media print {
+      body { background: none; }
+      .page { margin: 0; box-shadow: none; page-break-after: always; }
+    }
+
+    /* --- FOOTER (Repeating) --- */
+    .footer {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 15mm; padding: 0 15mm;
+      border-top: 1px solid var(--border);
+      display: flex; justify-content: space-between; align-items: center;
+      background: var(--white);
+      font-size: 9px; color: var(--secondary);
+    }
+
+    /* --- HEADER GRID --- */
     .header-grid {
       display: grid;
       grid-template-columns: 2fr 1fr;
       grid-template-rows: 110px 70px;
-      gap: 8px;
-      margin-bottom: 25px;
+      gap: 10px;
+      margin-bottom: 30px;
     }
     .h-title-box {
-      background-color: var(--primary);
-      color: white;
-      padding: 20px 30px;
-      border-top-left-radius: 20px;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+      color: var(--white);
+      padding: 25px 35px;
+      border-radius: 20px 4px 20px 4px;
       display: flex; flex-direction: column; justify-content: center;
     }
+    .main-heading { font-size: 32px; font-weight: 800; line-height: 1; margin: 0; letter-spacing: -0.5px; }
+    .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 3px; opacity: 0.9; margin-bottom: 6px; font-weight: 600; }
+
     .h-image-right-top {
       background-image: url('${assets.header1}');
       background-size: cover; background-position: center;
-      border-top-right-radius: 20px;
-      background-color: var(--dark); /* Fallback */
+      border-radius: 4px 20px 4px 20px;
     }
     .h-image-left-bottom {
       background-image: url('${assets.header2}');
       background-size: cover; background-position: center;
-      border-bottom-left-radius: 20px;
-      background-color: var(--secondary); /* Fallback */
+      border-radius: 4px 20px 4px 20px;
     }
     .h-brand-box {
-      background-color: #ffffff;
-      border: 1px solid var(--border);
-      border-bottom-right-radius: 20px;
-      display: flex; align-items: center; justify-content: center;
-      padding: 10px;
+        background: var(--white);
+        display: flex; align-items: center; justify-content: center;
+        border: 1px solid var(--border);
+        border-radius: 20px 4px 20px 4px;
+        padding: 10px;
     }
-    .logo-img { height: 50px; width: auto; }
+    .logo-img { height: 50px; width: auto; object-fit: contain; }
 
-    .main-heading { font-size: 28px; font-weight: 800; margin: 0; line-height: 1; }
-    .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
-
-    /* --- SECTION COMPONENTS --- */
+    /* --- SECTION HELPERS --- */
     .section-title {
       font-size: 11px; font-weight: 800; color: var(--secondary);
-      text-transform: uppercase; letter-spacing: 1px;
-      border-bottom: 2px solid var(--border);
-      padding-bottom: 5px; margin-top: 20px; margin-bottom: 12px;
+      text-transform: uppercase; letter-spacing: 1.5px;
+      border-bottom: 2px solid var(--bg-soft);
+      padding-bottom: 6px; margin-bottom: 15px; margin-top: 25px;
+      display: flex; align-items: center;
+    }
+    .section-title::before {
+      content: ''; display: inline-block; width: 4px; height: 14px; background: var(--primary); margin-right: 8px; border-radius: 2px;
     }
 
-    /* --- INFO CARD (PROFILE) --- */
-    .info-container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    /* --- INFO CARDS --- */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
     .info-card {
-      background: #f8fafc; border: 1px solid var(--border);
-      border-radius: 12px; padding: 15px;
+      background: var(--bg-soft); border: 1px solid var(--border);
+      border-radius: 16px; padding: 18px;
     }
-    .info-row { display: flex; justify-content: space-between; margin-bottom: 5px; font-size: 10.5px; }
-    .label { color: var(--secondary); font-weight: 600; }
-    .value { font-weight: 700; color: var(--dark); text-align: right; }
+    .row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; }
+    .row.highlight { 
+      background: var(--white); padding: 8px 12px; border-radius: 10px; 
+      border-left: 4px solid var(--primary); margin-top: 10px;
+    }
+    .label { color: var(--secondary); font-weight: 500; }
+    .val { font-weight: 700; color: var(--dark); text-align: right; }
 
-    /* --- BREAKDOWN CARDS (A vs B) --- */
-    .breakdown-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px; }
-    .bd-card {
-      border: 1px solid var(--border); border-radius: 12px; padding: 15px;
-      background: white; display: flex; flex-direction: column; justify-content: space-between;
-    }
-    .bd-title {
-      font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px;
-      margin-bottom: 8px;
-    }
-    .bd-desc { font-size: 9px; color: var(--secondary); margin-bottom: 10px; line-height: 1.3; min-height: 24px; }
-    
-    .bd-row { display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 10px; }
-    .bd-val { font-family: monospace; font-weight: 700; }
-    
-    .bd-total {
-      margin-top: 10px; padding: 8px; border-radius: 6px;
-      display: flex; justify-content: space-between; align-items: center;
-      font-weight: 800; font-size: 11px;
-    }
-
-    /* --- CALCULATION SUMMARY --- */
+    /* --- CALCULATION BOXES --- */
+    .calc-container { display: flex; gap: 15px; margin-bottom: 25px; }
     .calc-box {
-      background: linear-gradient(to right, #fff1f2, #ffffff);
-      border-left: 4px solid var(--primary);
-      border-radius: 10px; padding: 15px;
-      margin-bottom: 20px;
+      flex: 1; border: 1px solid var(--border); border-radius: 14px; padding: 18px;
+      background: var(--white); position: relative;
     }
-    .calc-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .calc-row.final { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--primary); }
-    .big-num { font-size: 18px; font-weight: 800; font-family: monospace; color: var(--primary); }
+    .calc-title { font-size: 9px; font-weight: 800; color: var(--secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
+    .calc-desc { font-size: 10px; color: var(--secondary); margin-bottom: 12px; height: 45px; line-height: 1.4; }
+    .calc-amount { font-size: 16px; font-weight: 800; color: var(--dark); font-family: 'Inter', sans-serif; }
+    
+    .calc-box.total { 
+      background: linear-gradient(135deg, #fff1f2 0%, var(--white) 100%);
+      border-color: #fecdd3; border-width: 1.5px;
+    }
+    .calc-box.total .calc-title { color: var(--primary); }
+    .calc-box.total .calc-amount { color: var(--primary); font-size: 18px; }
 
-    /* --- RECOMMENDATION BOX --- */
+    /* --- GAP ANALYSIS --- */
+    .gap-card {
+      background: var(--white); border: 1.5px solid var(--border);
+      border-radius: 20px; padding: 25px; margin-bottom: 30px;
+    }
+    .gap-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+    .status-badge {
+      background: ${statusBg}; color: ${statusColor};
+      padding: 6px 14px; border-radius: 30px; font-weight: 800; font-size: 12px;
+      border: 1px solid ${statusColor}44;
+    }
+    .gap-amount-label { font-size: 10px; color: var(--secondary); text-transform: uppercase; font-weight: 700; }
+    .gap-value { font-size: 28px; font-weight: 800; color: var(--primary); letter-spacing: -1px; }
+
+    .progress-wrapper { margin-bottom: 10px; }
+    .bar-container {
+      height: 28px; width: 100%; background: #f1f5f9; border-radius: 40px;
+      overflow: hidden; border: 1px solid var(--border);
+    }
+    .bar-fill {
+      height: 100%; background: ${statusColor}; width: ${coveragePercent}%;
+      transition: width 1s ease-in-out; display: flex; align-items: center; justify-content: flex-end;
+      padding-right: 15px; color: white; font-size: 11px; font-weight: 700;
+    }
+    .bar-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--secondary); margin-top: 8px; font-weight: 600; }
+
+    /* --- RECOMMENDATION --- */
     .rec-box {
-      background: var(--primary); color: white;
-      border-radius: 12px; padding: 20px; text-align: center;
-      box-shadow: 0 4px 6px -1px rgba(190, 18, 60, 0.2);
+      background: #f0f9ff; border: 1px solid #bae6fd;
+      border-radius: 16px; padding: 25px; display: flex; gap: 20px; align-items: flex-start;
     }
-    .rec-label { font-size: 10px; text-transform: uppercase; letter-spacing: 2px; opacity: 0.9; margin-bottom: 5px; }
-    .rec-amount { font-size: 32px; font-weight: 800; margin-bottom: 10px; font-family: monospace; line-height: 1; }
-    .rec-text { 
-      font-size: 11px; background: rgba(255,255,255,0.15); 
-      padding: 10px; border-radius: 8px; display: inline-block; 
+    .rec-icon {
+      background: #0ea5e9; color: white; width: 40px; height: 40px; 
+      border-radius: 12px; display: flex; align-items: center; justify-content: center;
+      flex-shrink: 0; font-size: 20px;
     }
+    .rec-content { flex: 1; }
+    .rec-title { font-size: 13px; font-weight: 800; color: #0369a1; margin-bottom: 6px; text-transform: uppercase; }
+    .rec-text { font-size: 11px; line-height: 1.6; color: #0c4a6e; }
 
-    /* --- FOOTER --- */
-    .footer {
-      position: absolute; bottom: 0; left: 0; right: 0;
-      height: 12mm; padding: 0 15mm;
-      display: flex; justify-content: space-between; align-items: center;
-      border-top: 1px solid var(--border);
-      font-size: 9px; color: var(--secondary); background: white;
-    }
   </style>
 </head>
 <body>
+  
   <div class="page">
-    
+    <div class="footer">
+      <div>KeuanganKu Agent Platform • ${meta.documentId}</div>
+      <div>CONFIDENTIAL • Generated on ${meta.generatedAt}</div>
+    </div>
+
+    <!-- Header -->
     <div class="header-grid">
       <div class="h-title-box">
         <div class="sub-heading">Financial Protection Plan</div>
@@ -215,122 +250,118 @@ export const insuranceReportTemplate = `
       </div>
     </div>
 
-    <div class="info-container">
-      <div>
+    <div class="grid-2">
+      <!-- Client Profile -->
+      <section>
         <div class="section-title">01. Profil Klien</div>
         <div class="info-card">
-          <div class="info-row"><span class="label">Nama Lengkap</span><span class="value">{{client.name}}</span></div>
-          <div class="info-row"><span class="label">Pekerjaan</span><span class="value">{{client.job}}</span></div>
-          <div class="info-row"><span class="label">Domisili</span><span class="value">{{client.city}}</span></div>
-          <div class="info-row"><span class="label">Tgl Lahir</span><span class="value">{{client.dob}}</span></div>
+          <div class="row"><span class="label">Nama Lengkap</span><span class="val">${client.name}</span></div>
+          <div class="row"><span class="label">Pekerjaan</span><span class="val">${client.job}</span></div>
+          <div class="row"><span class="label">Domisili</span><span class="val">${client.city}</span></div>
+          <div class="row"><span class="label">Tanggal Lahir</span><span class="val">${client.dob}</span></div>
+          <div class="row highlight">
+            <span class="label" style="color: var(--primary);">Jumlah Tanggungan</span>
+            <span class="val" style="color: var(--primary);">${input.dependents} Orang</span>
+          </div>
         </div>
-      </div>
-      <div>
+      </section>
+
+      <!-- Consultant Profile -->
+      <section>
         <div class="section-title">02. Profil Konsultan</div>
-        <div class="info-card" style="border-left: 4px solid var(--primary);">
-          <div class="info-row"><span class="label">Nama Agen</span><span class="value">{{agent.name}}</span></div>
-          <div class="info-row"><span class="label">Perusahaan</span><span class="value">{{agent.parentCompany}}</span></div>
-          <div class="info-row"><span class="label">Group Agency</span><span class="value">{{agent.groupAgency}}</span></div>
-          <div class="info-row"><span class="label">Level</span><span class="value">{{agent.level}}</span></div>
+        <div class="info-card">
+          <div class="row"><span class="label">Nama Agen</span><span class="val">${agent.name}</span></div>
+          <div class="row"><span class="label">Perusahaan</span><span class="val">${agent.companyName}</span></div>
+          <div class="row"><span class="label">Level</span><span class="val">${agent.level}</span></div>
+          <div class="row" style="margin-top: 22px;"><span class="label">Metode Analisa</span><span class="val">Income Replacement</span></div>
         </div>
-      </div>
+      </section>
     </div>
 
-    <div class="section-title">03. Parameter Analisa Risiko</div>
-    <div class="info-card" style="margin-bottom: 20px;">
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-        <div>
-          <div class="info-row"><span class="label">Jenis Asuransi</span><span class="value" style="color:var(--primary);">{{input.typeLabel}}</span></div>
-          <div class="info-row"><span class="label">Jumlah Tanggungan</span><span class="value">{{input.dependentCount}} Orang</span></div>
-          <div class="info-row"><span class="label">Durasi Proteksi</span><span class="value">{{input.protectionDuration}} Tahun</span></div>
-        </div>
-        <div>
-          <div class="info-row"><span class="label">Asumsi Inflasi</span><span class="value">{{input.inflationRate}}%</span></div>
-          <div class="info-row"><span class="label">Asumsi Return</span><span class="value">{{input.returnRate}}%</span></div>
-          <div class="info-row"><span class="label">UP Saat Ini (Existing)</span><span class="value">{{input.existingCoverage}}</span></div>
+    <!-- Parameters -->
+    <section>
+      <div class="section-title">03. Parameter & Asumsi Keuangan</div>
+      <div class="info-card">
+        <div class="grid-2">
+            <div>
+                <div class="row"><span class="label">Biaya Hidup Bulanan</span><span class="val">${input.monthlyExpense}</span></div>
+                <div class="row"><span class="label">Sisa Hutang Berjalan</span><span class="val">${input.existingDebt}</span></div>
+                <div class="row"><span class="label">Biaya Akhir Hayat</span><span class="val">${input.finalExpense}</span></div>
+            </div>
+            <div>
+                <div class="row"><span class="label">UP Saat Ini (Existing)</span><span class="val">${input.existingCoverage}</span></div>
+                <div class="row"><span class="label">Durasi Proteksi</span><span class="val">${input.protectionDuration} Tahun</span></div>
+                <div class="row"><span class="label">Asumsi Inflasi / Return</span><span class="val">${input.inflationRate}% / ${input.returnRate}%</span></div>
+            </div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="section-title">04. Detail Kebutuhan Dana Proteksi</div>
-    
-    <div class="breakdown-grid">
-      <div class="bd-card">
-        <div>
-          <div class="bd-title" style="color: var(--accent);">A. Living Cost Protection</div>
-          <div class="bd-desc">
-            Dana yang dibutuhkan keluarga untuk bertahan hidup (Income Replacement) selama periode proteksi jika pencari nafkah tutup usia.
-          </div>
-          <div class="bd-row">
-            <span class="label">Biaya Hidup / Bulan</span>
-            <span class="bd-val">{{input.monthlyExpense}}</span>
-          </div>
-          <div class="bd-row">
-            <span class="label">Biaya Hidup / Tahun</span>
-            <span class="bd-val">{{result.annualExpense}}</span>
-          </div>
+    <!-- Calculations -->
+    <section>
+      <div class="section-title">04. Detail Kebutuhan Dana Pertanggungan</div>
+      <div class="calc-container">
+        <div class="calc-box">
+          <div class="calc-title">Income Replacement</div>
+          <div class="calc-desc">Dana pengganti biaya hidup keluarga agar standar hidup tetap terjaga selama durasi proteksi.</div>
+          <div class="calc-amount">${result.incomeReplacement}</div>
         </div>
-        <div class="bd-total" style="background: #f0f9ff; color: var(--accent);">
-          <span>TOTAL DANA HIDUP</span>
-          <span>{{result.incomeReplacement}}</span>
-        </div>
-      </div>
 
-      <div class="bd-card">
-        <div>
-          <div class="bd-title" style="color: var(--primary);">B. Debt & Final Clearance</div>
-          <div class="bd-desc">
-            Dana tunai (Cash) yang harus tersedia seketika untuk melunasi seluruh sisa hutang dan biaya akhir hayat (pemakaman).
-          </div>
-          <div class="bd-row">
-            <span class="label">Sisa Hutang Berjalan</span>
-            <span class="bd-val">{{input.existingDebt}}</span>
-          </div>
-          <div class="bd-row">
-            <span class="label">Biaya Pemakaman</span>
-            <span class="bd-val">{{input.finalExpense}}</span>
-          </div>
+        <div class="calc-box">
+          <div class="calc-title">Debt Clearance</div>
+          <div class="calc-desc">Dana tunai untuk melunasi seluruh kewajiban hutang dan biaya akhir hayat seketika.</div>
+          <div class="calc-amount">${result.debtClearance}</div>
         </div>
-        <div class="bd-total" style="background: #fff1f2; color: var(--primary);">
-          <span>TOTAL DANA PELUNASAN</span>
-          <span>{{result.debtClearance}}</span>
+
+        <div class="calc-box total">
+          <div class="calc-title">Total Kebutuhan UP</div>
+          <div class="calc-desc">Total dana ideal yang harus tersedia jika risiko terjadi hari ini (Life Insurance).</div>
+          <div class="calc-amount">${result.totalNeeded}</div>
         </div>
       </div>
-    </div>
+    </section>
 
-    <div class="section-title">05. Analisa Kekurangan (Gap Analysis)</div>
-    <div class="calc-box">
-      <div class="calc-row">
-        <span class="label">Total Kebutuhan Proteksi (A + B)</span>
-        <span class="value">{{result.totalNeeded}}</span>
-      </div>
-      <div class="calc-row">
-        <span class="label">Dikurangi: UP Asuransi Saat Ini</span>
-        <span class="value" style="color: #16a34a;">- {{result.existing}}</span>
-      </div>
-      <div class="calc-row final">
-        <span class="label" style="font-weight: 800; color: var(--primary); text-transform: uppercase;">
-          Kekurangan Uang Pertanggungan (Coverage Gap)
-        </span>
-        <span class="big-num">{{result.gap}}</span>
-      </div>
-    </div>
+    <!-- Gap Analysis -->
+    <section>
+      <div class="section-title">05. Analisa Kekurangan (Gap Analysis)</div>
+      <div class="gap-card">
+        <div class="gap-header">
+          <div>
+            <div class="gap-amount-label">Status Proteksi Anda</div>
+            <div class="status-badge">${statusText} (${coveragePercent}%)</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="gap-amount-label">Kekurangan Dana (Gap)</div>
+            <div class="gap-value">${result.gap}</div>
+          </div>
+        </div>
 
-    <div class="section-title">06. Rekomendasi Strategis</div>
-    <div class="rec-box">
-      <div class="rec-label">Saran Penambahan UP</div>
-      <div class="rec-amount">{{result.gap}}</div>
-      <div class="rec-text">
-        {{result.recommendation}}
+        <div class="progress-wrapper">
+          <div class="bar-container">
+            <div class="bar-fill">${coveragePercent}% Terpenuhi</div>
+          </div>
+          <div class="bar-labels">
+            <span>Rp 0</span>
+            <span>Existing UP: ${input.existingCoverage}</span>
+            <span>Kebutuhan Ideal: ${result.totalNeeded}</span>
+          </div>
+        </div>
       </div>
-    </div>
+    </section>
 
-    <div class="footer">
-      <div>KeuanganKu Agent Platform • {{documentId}}</div>
-      <div>CONFIDENTIAL • Generated on {{generatedAt}}</div>
-    </div>
+    <!-- Strategic Recommendation -->
+    <section>
+      <div class="rec-box">
+        <div class="rec-icon">ⓘ</div>
+        <div class="rec-content">
+          <div class="rec-title">Saran Strategis Konsultan</div>
+          <div class="rec-text">${result.recommendation}</div>
+        </div>
+      </div>
+    </section>
 
   </div>
 </body>
 </html>
-`;
+  `;
+};

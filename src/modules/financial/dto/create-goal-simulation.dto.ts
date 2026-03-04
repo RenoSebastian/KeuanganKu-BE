@@ -7,7 +7,8 @@ import {
     Max,
     IsOptional,
     IsDateString,
-    MinLength
+    MinLength,
+    IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -26,6 +27,17 @@ import { Type } from 'class-transformer';
  * Logic: (Future Value Barang - Future Value Modal Awal) = Kekurangan Dana.
  */
 export class CreateGoalSimulationDto {
+    // =======================================================================
+    // SEGMENT 0: SYSTEM METADATA (Security & Idempotency)
+    // =======================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
 
     // =======================================================================
     // SEGMENT 1: CLIENT IDENTITY (Metadata Laporan)

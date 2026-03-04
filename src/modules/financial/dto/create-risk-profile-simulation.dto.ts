@@ -9,6 +9,7 @@ import {
     IsString,
     Min,
     ValidateNested,
+    IsUUID,
 } from 'class-validator';
 
 /**
@@ -41,7 +42,21 @@ export class RiskProfileAnswerItemDto {
  * 3. Generate Token (.mgc)
  */
 export class CreateRiskProfileSimulationDto {
-    // --- SECTION 1: IDENTITAS KLIEN (KYC SEDERHANA) ---
+    // ===========================================================================
+    // SECTION 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
+
+    // ===========================================================================
+    // SECTION 1: IDENTITAS KLIEN (KYC SEDERHANA)
+    // ===========================================================================
 
     @ApiProperty({
         description: 'Nama lengkap klien untuk ditampilkan di Header Laporan PDF',
@@ -83,7 +98,9 @@ export class CreateRiskProfileSimulationDto {
     @IsString()
     clientCity?: string;
 
-    // --- SECTION 2: JAWABAN KUESIONER ---
+    // ===========================================================================
+    // SECTION 2: JAWABAN KUESIONER
+    // ===========================================================================
 
     @ApiProperty({
         description: 'Array jawaban kuesioner. Total skor akan dihitung dari sini.',

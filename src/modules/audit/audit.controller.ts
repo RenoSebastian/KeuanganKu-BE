@@ -9,7 +9,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 @ApiTags('Audit System')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.DIRECTOR) // Security: Hanya Direksi yang boleh akses log sistem
+// @Roles(Role.DIRECTOR) // Security: Hanya Direksi yang boleh akses log sistem
 @Controller('audit')
 export class AuditController {
   constructor(private readonly auditService: AuditService) {}

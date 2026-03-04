@@ -41,7 +41,7 @@ export class RetentionController {
     // --- ENDPOINT 1: MONITORING (Fase 1) ---
 
     @Get('stats')
-    @Roles(Role.ADMIN, Role.DIRECTOR) // [UPDATE] Allow Director to view stats
+    @Roles(Role.ADMIN) // [UPDATE] Allow Director to view stats
     @ApiOperation({
         summary: 'Get Database Storage Statistics',
         description: 'Mengembalikan statistik ukuran tabel dan estimasi jumlah baris menggunakan metadata PostgreSQL (O(1)).'
@@ -98,7 +98,7 @@ export class RetentionController {
     // --- ENDPOINT 3: EXECUTION (Fase 4 - Production Ready) ---
 
     @Delete('prune')
-    @Roles(Role.ADMIN, Role.DIRECTOR) // [SECURITY FIX] Strict RBAC Layer
+    @Roles(Role.ADMIN) // [SECURITY FIX] Strict RBAC Layer
     @ApiOperation({
         summary: 'Execute Data Pruning (Atomic & Idempotent)',
         description: `

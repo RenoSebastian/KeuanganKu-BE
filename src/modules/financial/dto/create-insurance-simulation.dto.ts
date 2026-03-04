@@ -6,7 +6,8 @@ import {
     Min,
     IsEnum,
     IsDateString,
-    Max
+    Max,
+    IsUUID,
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
@@ -29,6 +30,18 @@ export enum SimulationInsuranceType {
  * diolah di memori untuk menghasilkan PDF report & token .mgc.
  */
 export class CreateInsuranceSimulationDto {
+    // ===========================================================================
+    // GROUP 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
+
     // ===========================================================================
     // SECTION 1: CLIENT IDENTITY (Untuk Header Laporan PDF & Analytics)
     // ===========================================================================
@@ -65,17 +78,19 @@ export class CreateInsuranceSimulationDto {
     @ApiProperty({
         enum: SimulationInsuranceType,
         example: 'LIFE',
-        description: 'Jenis proteksi yang ingin disimulasikan'
+        description: 'Jenis proteksi yang ingin disimulasikan',
     })
     @IsEnum(SimulationInsuranceType)
     @IsNotEmpty()
     type: SimulationInsuranceType;
 
+    // [UPDATED] Menggunakan nama 'dependents' agar sinkron dengan Template PDF
     @ApiProperty({ example: 2, description: 'Jumlah tanggungan (istri/anak)' })
+    @IsOptional()
     @IsNumber()
     @Min(0)
     @Type(() => Number)
-    dependentCount: number;
+    dependents: number = 0;
 
     @ApiProperty({ example: 15000000, description: 'Pengeluaran rutin bulanan keluarga' })
     @IsNumber()
@@ -109,7 +124,7 @@ export class CreateInsuranceSimulationDto {
     @ApiPropertyOptional({
         example: 25000000,
         description: 'Biaya akhir hayat (pemakaman, administrasi, dll). Default 0 jika kosong.',
-        default: 0
+        default: 0,
     })
     @IsOptional()
     @IsNumber()
@@ -120,7 +135,7 @@ export class CreateInsuranceSimulationDto {
     @ApiPropertyOptional({
         example: 5,
         description: 'Asumsi tingkat inflasi tahunan (%). Default 5% di logic service.',
-        default: 5
+        default: 5,
     })
     @IsOptional()
     @IsNumber()
@@ -130,7 +145,7 @@ export class CreateInsuranceSimulationDto {
     @ApiPropertyOptional({
         example: 6,
         description: 'Asumsi return investasi tahunan (%). Default 6-7% di logic service.',
-        default: 6
+        default: 6,
     })
     @IsOptional()
     @IsNumber()

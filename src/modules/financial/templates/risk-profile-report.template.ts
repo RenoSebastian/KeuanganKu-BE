@@ -287,7 +287,7 @@ export const riskProfileReportTemplate = `
       
       <div class="header-grid">
         <div class="h-title-box">
-          <div class="sub-heading">MAXIPRO Financial</div>
+          <div class="sub-heading">Keuanganku Financial Conversation Tools</div>
           <h1 class="main-heading">Risk Profile</h1>
         </div>
         <div class="h-image-right-top"></div>

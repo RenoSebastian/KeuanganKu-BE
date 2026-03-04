@@ -12,6 +12,7 @@ import {
     ValidateNested,
     MinLength,
     MaxLength,
+    IsUUID,
 } from 'class-validator';
 
 // ============================================================================
@@ -146,6 +147,18 @@ export class SimulationClientProfileDto {
  * menyebabkan data hilang saat token digenerate.
  */
 export class CreateCheckupSimulationDto {
+    // ===========================================================================
+    // GROUP 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk membedakan revisi (gratis) vs sesi baru (bayar).',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
+
     // --- SECTION 1: IDENTITAS KLIEN ---
 
     @ApiProperty({ type: SimulationClientProfileDto, description: 'Data diri lengkap klien' })

@@ -201,7 +201,7 @@ export const agentBudgetReportTemplate = `
         <div class="info-card" style="border-left: 4px solid var(--primary);">
           <div class="info-row"><span class="label">Konsultan</span><span class="value">{{agent.name}}</span></div>
           <div class="info-row"><span class="label">Instansi</span><span class="value">{{agent.parentCompany}}</span></div>
-          <div class="info-row"><span class="label">Group</span><span class="value">{{agent.groupAgency}}</span></div>
+          <div class="info-row"><span class="label">Group</span><span class="value">{{agent.companyNameency}}</span></div>
         </div>
       </div>
     </div>

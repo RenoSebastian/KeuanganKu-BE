@@ -6,7 +6,8 @@ import {
     Min,
     Max,
     IsOptional,
-    IsDateString
+    IsDateString,
+    IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -14,17 +15,22 @@ import { Type } from 'class-transformer';
  * DTO: CreatePensionSimulationDto
  * -------------------------------------------------------------------------
  * Data Transfer Object untuk menangani input simulasi Dana Pensiun (Stateless).
- * * Design Pattern:
- * Menggunakan pendekatan Flat-DTO untuk kemudahan parsing dari Frontend,
- * namun secara logis data terbagi menjadi dua segmen:
- * 1. Identity Segment: Metadata untuk header laporan PDF.
- * 2. Financial Segment: Parameter inti untuk kalkulasi TVM (Time Value of Money).
- * * Validasi:
- * - Menggunakan 'class-validator' untuk memastikan integritas tipe data.
- * - Validasi logika bisnis (seperti retirementAge > currentAge) akan
- * diesekusi di Service Layer untuk error handling yang lebih kontekstual.
+ * * Logic Note:
+ * Variabel 'currentSaving' akan diproses di Service menggunakan rate konstan 5.5%
+ * untuk menghasilkan 'fvExistingFund' yang akan ditampilkan di FE & PDF.
  */
 export class CreatePensionSimulationDto {
+    // ===========================================================================
+    // SEGMENT 0: SYSTEM METADATA (Security & Idempotency)
+    // ===========================================================================
+
+    @ApiProperty({
+        description: 'ID Unik Sesi Simulasi (UUID v4). Digunakan untuk tracking kuota dan revisi.',
+        example: '123e4567-e89b-12d3-a456-426614174000',
+    })
+    @IsNotEmpty({ message: 'Session ID wajib disertakan.' })
+    @IsUUID('4', { message: 'Session ID harus berupa UUID v4 yang valid.' })
+    sessionId: string;
 
     // =======================================================================
     // SEGMENT 1: CLIENT IDENTITY (Metadata Laporan)
@@ -39,7 +45,7 @@ export class CreatePensionSimulationDto {
     clientName: string;
 
     @ApiProperty({
-        description: 'Tanggal lahir klien (ISO 8601). Digunakan untuk validasi usia.',
+        description: 'Tanggal lahir klien (ISO 8601).',
         example: '1985-05-20',
     })
     @IsNotEmpty({ message: 'Tanggal lahir wajib diisi' })
@@ -78,20 +84,18 @@ export class CreatePensionSimulationDto {
         description: 'Usia klien saat ini (Tahun)',
         example: 40,
         minimum: 1,
-        maximum: 100,
     })
     @IsNotEmpty({ message: 'Usia saat ini wajib diisi' })
     @Type(() => Number)
     @IsNumber()
     @Min(1)
-    @Max(90, { message: 'Usia saat ini tidak boleh melebihi 90 tahun untuk simulasi ini' })
+    @Max(90)
     currentAge: number;
 
     @ApiProperty({
         description: 'Target usia pensiun yang diinginkan (Tahun)',
         example: 55,
         minimum: 1,
-        maximum: 100,
     })
     @IsNotEmpty({ message: 'Target usia pensiun wajib diisi' })
     @Type(() => Number)
@@ -101,21 +105,20 @@ export class CreatePensionSimulationDto {
     retirementAge: number;
 
     @ApiProperty({
-        description: 'Asumsi usia harapan hidup (Life Expectancy) dalam Tahun. Default: 80',
-        example: 80,
-        default: 80,
+        description: 'Asumsi usia harapan hidup (Life Expectancy). Default: 85',
+        example: 85,
+        default: 85,
     })
     @IsOptional()
     @Type(() => Number)
     @IsNumber()
     @Min(50)
     @Max(120)
-    lifeExpectancy?: number = 80;
+    lifeExpectancy?: number = 85;
 
     @ApiProperty({
-        description: 'Pengeluaran/Biaya hidup bulanan saat ini (Rp). Basis perhitungan gaya hidup.',
+        description: 'Pengeluaran bulanan saat ini (Rp).',
         example: 5000000,
-        minimum: 0,
     })
     @IsNotEmpty({ message: 'Pengeluaran bulanan saat ini wajib diisi' })
     @Type(() => Number)
@@ -124,7 +127,7 @@ export class CreatePensionSimulationDto {
     currentExpense: number;
 
     @ApiPropertyOptional({
-        description: 'Aset/Tabungan pensiun yang sudah terkumpul saat ini (Rp). Default: 0',
+        description: 'Aset pensiun (JHT/DPLK/Tabungan) yang sudah ada saat ini (Rp).',
         example: 100000000,
         default: 0,
     })
@@ -135,30 +138,30 @@ export class CreatePensionSimulationDto {
     currentSaving?: number = 0;
 
     // =======================================================================
-    // SEGMENT 3: ECONOMIC ASSUMPTIONS (Global Parameters)
+    // SEGMENT 3: ECONOMIC ASSUMPTIONS
     // =======================================================================
 
     @ApiPropertyOptional({
         description: 'Asumsi tingkat inflasi tahunan (%). Default: 5%',
-        example: 5.5,
+        example: 5,
         default: 5,
     })
     @IsOptional()
     @Type(() => Number)
     @IsNumber()
     @Min(0)
-    @Max(50, { message: 'Rate inflasi tidak realistis (>50%)' })
+    @Max(50)
     inflationRate?: number = 5;
 
     @ApiPropertyOptional({
-        description: 'Estimasi return investasi tahunan (%). Default: 8%',
-        example: 8,
-        default: 8,
+        description: 'Estimasi return investasi tahunan untuk uang baru (%). Default: 10%',
+        example: 10,
+        default: 10,
     })
     @IsOptional()
     @Type(() => Number)
     @IsNumber()
     @Min(0)
-    @Max(100, { message: 'Return investasi tidak realistis (>100%)' })
-    returnRate?: number = 8;
+    @Max(100)
+    returnRate?: number = 10;
 }
