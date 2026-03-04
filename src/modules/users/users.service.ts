@@ -268,7 +268,7 @@ export class UsersService {
 
   private async processUpdate(userId: string, dto: any) {
     try {
-      const { password, dateOfBirth, dependentCount, agencyId, ...restData } =
+      const { password, dateOfBirth, dependentCount, agencyId, agencyName, ...restData } =
         dto;
 
       const updatePayload: any = { ...restData };

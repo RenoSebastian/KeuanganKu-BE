@@ -42,7 +42,7 @@ const assets = {
 
 /**
  * ------------------------------------------------------------------
- * 2. VIEW LAYER: HTML TEMPLATE (REFINED DESIGN)
+ * 2. VIEW LAYER: HTML TEMPLATE (PREMIUM DESIGN + ANTI-SPLIT)
  * ------------------------------------------------------------------
  */
 export const budgetReportTemplate = `
@@ -86,18 +86,26 @@ export const budgetReportTemplate = `
       width: var(--page-width);
       min-height: var(--page-height);
       background: var(--white);
-      margin: 20px auto;
+      margin: 0 auto;
       padding: 15mm;
       position: relative;
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 10px 25px rgba(0,0,0,0.1);
     }
 
     @media print {
       body { background: none; }
       .page { margin: 0; box-shadow: none; page-break-after: always; }
+    }
+
+    /* --- ANTI-SPLIT LOGIC --- */
+    .section-group {
+      page-break-inside: avoid; /* Mencegah judul terpisah dari konten */
+      break-inside: avoid;
+      display: block;
+      width: 100%;
+      margin-bottom: 30px;
     }
 
     /* --- HEADER DESIGN --- */
@@ -163,7 +171,7 @@ export const budgetReportTemplate = `
       display: flex;
       align-items: center;
       margin-bottom: 15px;
-      margin-top: 10px;
+      page-break-after: avoid; /* Double security */
     }
 
     .section-number {
@@ -193,7 +201,6 @@ export const budgetReportTemplate = `
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
-      margin-bottom: 30px;
     }
 
     .card {
@@ -229,10 +236,6 @@ export const budgetReportTemplate = `
     .income-highlight .value { font-size: 16px; color: var(--accent); }
 
     /* --- ALLOCATION --- */
-    .allocation-container {
-      margin-bottom: 30px;
-    }
-
     .alloc-item {
       display: flex;
       align-items: center;
@@ -241,7 +244,6 @@ export const budgetReportTemplate = `
       background: var(--white);
       border: 1px solid var(--border);
       border-radius: 14px;
-      transition: all 0.2s;
     }
 
     .alloc-bullet {
@@ -265,7 +267,6 @@ export const budgetReportTemplate = `
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 30px;
-      position: relative;
     }
 
     .summary-item { display: flex; flex-direction: column; }
@@ -292,7 +293,6 @@ export const budgetReportTemplate = `
       font-weight: 700;
       color: var(--secondary);
     }
-
   </style>
 </head>
 <body>
@@ -310,112 +310,119 @@ export const budgetReportTemplate = `
       </div>
     </div>
 
-    <div class="grid-2">
-      <!-- Data Diri -->
-      <section>
-        <div class="section-header">
-          <div class="section-number">1</div>
-          <div class="section-title">Informasi Klien</div>
-        </div>
-        <div class="card">
-          <div class="info-row"><span class="label">NAMA LENGKAP</span><span class="value">{{user.name}}</span></div>
-          <div class="info-row"><span class="label">USIA</span><span class="value">{{user.age}} Tahun</span></div>
-          <div class="info-row"><span class="label">PERIODE</span><span class="value">{{period}}</span></div>
-          <div class="info-row"><span class="label">DIHASILKAN PADA</span><span class="value">{{createdAt}}</span></div>
-        </div>
-      </section>
+    <!-- Bagian 1 & 2 (Grid Data) -->
+    <div class="section-group">
+      <div class="grid-2">
+        <!-- Informasi Klien -->
+        <section>
+          <div class="section-header">
+            <div class="section-number">1</div>
+            <div class="section-title">Informasi Klien</div>
+          </div>
+          <div class="card">
+            <div class="info-row"><span class="label">NAMA LENGKAP</span><span class="value">{{user.name}}</span></div>
+            <div class="info-row"><span class="label">USIA</span><span class="value">{{user.age}} Tahun</span></div>
+            <div class="info-row"><span class="label">PERIODE</span><span class="value">{{period}}</span></div>
+            <div class="info-row"><span class="label">DIHASILKAN PADA</span><span class="value">{{createdAt}}</span></div>
+          </div>
+        </section>
 
-      <!-- Pemasukan -->
+        <!-- Arus Kas -->
+        <section>
+          <div class="section-header">
+            <div class="section-number">2</div>
+            <div class="section-title">Arus Kas Masuk</div>
+          </div>
+          <div class="card">
+            <div class="info-row"><span class="label">PENGHASILAN TETAP</span><span class="value">{{income.fixed}}</span></div>
+            <div class="info-row"><span class="label">PENGHASILAN VARIABEL</span><span class="value">{{income.variable}}</span></div>
+            <div class="income-highlight">
+              <div class="info-row" style="border:none">
+                  <span class="label">TOTAL PENGHASILAN</span>
+                  <span class="value">{{income.total}}</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <!-- Bagian 3 (Alokasi) -->
+    <div class="section-group">
       <section>
         <div class="section-header">
-          <div class="section-number">2</div>
-          <div class="section-title">Arus Kas Masuk</div>
+          <div class="section-number">3</div>
+          <div class="section-title">Alokasi Anggaran Ideal (Metode 45/20/15/10/10)</div>
         </div>
-        <div class="card">
-          <div class="info-row"><span class="label">PENGHASILAN TETAP</span><span class="value">{{income.fixed}}</span></div>
-          <div class="info-row"><span class="label">PENGHASILAN VARIABEL</span><span class="value">{{income.variable}}</span></div>
-          <div class="income-highlight">
-            <div class="info-row" style="border:none">
-                <span class="label">TOTAL PENGHASILAN</span>
-                <span class="value">{{income.total}}</span>
+        
+        <div class="card" style="padding: 10px; background: transparent; border:none">
+          <div class="alloc-item">
+            <div class="alloc-bullet" style="background: var(--c-living)"></div>
+            <div class="alloc-info">
+              <div class="alloc-name">Biaya Hidup & Gaya Hidup</div>
+              <div class="alloc-desc">Alokasi maksimal 45% untuk kebutuhan harian & hiburan</div>
             </div>
+            <div class="alloc-value">{{allocations.living.value}}</div>
+          </div>
+
+          <div class="alloc-item">
+            <div class="alloc-bullet" style="background: var(--c-productive)"></div>
+            <div class="alloc-info">
+              <div class="alloc-name">Cicilan Utang Produktif</div>
+              <div class="alloc-desc">Alokasi maksimal 20% untuk aset yang bertumbuh</div>
+            </div>
+            <div class="alloc-value">{{allocations.productive.value}}</div>
+          </div>
+
+          <div class="alloc-item">
+            <div class="alloc-bullet" style="background: var(--c-consumptive)"></div>
+            <div class="alloc-info">
+              <div class="alloc-name">Cicilan Utang Konsumtif</div>
+              <div class="alloc-desc">Batas aman maksimal 15% dari penghasilan tetap</div>
+            </div>
+            <div class="alloc-value">{{allocations.consumptive.value}}</div>
+          </div>
+
+          <div class="alloc-item">
+            <div class="alloc-bullet" style="background: var(--c-saving)"></div>
+            <div class="alloc-info">
+              <div class="alloc-name">Tabungan & Investasi</div>
+              <div class="alloc-desc">Minimal 10% untuk dana darurat & masa depan</div>
+            </div>
+            <div class="alloc-value">{{allocations.saving.value}}</div>
+          </div>
+
+          <div class="alloc-item">
+            <div class="alloc-bullet" style="background: var(--c-insurance)"></div>
+            <div class="alloc-info">
+              <div class="alloc-name">Premi Asuransi & Proteksi</div>
+              <div class="alloc-desc">Minimal 10% untuk perlindungan risiko finansial</div>
+            </div>
+            <div class="alloc-value">{{allocations.insurance.value}}</div>
           </div>
         </div>
       </section>
     </div>
 
-    <!-- Alokasi -->
-    <section class="allocation-container">
-      <div class="section-header">
-        <div class="section-number">3</div>
-        <div class="section-title">Alokasi Anggaran Ideal (Metode 45/20/15/10/10)</div>
-      </div>
-      
-      <div style="margin-bottom: 20px;">
-        <div class="alloc-item">
-          <div class="alloc-bullet" style="background: var(--c-living)"></div>
-          <div class="alloc-info">
-            <div class="alloc-name">Biaya Hidup & Gaya Hidup</div>
-            <div class="alloc-desc">Alokasi maksimal 45% untuk kebutuhan harian & hiburan</div>
+    <!-- Bagian 4 (Kesimpulan) -->
+    <div class="section-group">
+      <section>
+        <div class="section-header">
+          <div class="section-number">4</div>
+          <div class="section-title">Ringkasan Eksekutif</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-item">
+            <div class="summary-label">Total Anggaran Dialokasikan</div>
+            <div class="summary-value">{{summary.totalBudget}}</div>
           </div>
-          <div class="alloc-value">{{allocations.living.value}}</div>
-        </div>
-
-        <div class="alloc-item">
-          <div class="alloc-bullet" style="background: var(--c-productive)"></div>
-          <div class="alloc-info">
-            <div class="alloc-name">Cicilan Utang Produktif</div>
-            <div class="alloc-desc">Alokasi maksimal 20% untuk aset yang bertumbuh</div>
+          <div class="summary-item">
+            <div class="summary-label">Potensi Surplus Investasi</div>
+            <div class="summary-value highlight">{{summary.totalSurplus}}</div>
           </div>
-          <div class="alloc-value">{{allocations.productive.value}}</div>
         </div>
-
-        <div class="alloc-item">
-          <div class="alloc-bullet" style="background: var(--c-consumptive)"></div>
-          <div class="alloc-info">
-            <div class="alloc-name">Cicilan Utang Konsumtif</div>
-            <div class="alloc-desc">Batas aman maksimal 15% dari penghasilan tetap</div>
-          </div>
-          <div class="alloc-value">{{allocations.consumptive.value}}</div>
-        </div>
-
-        <div class="alloc-item">
-          <div class="alloc-bullet" style="background: var(--c-saving)"></div>
-          <div class="alloc-info">
-            <div class="alloc-name">Tabungan & Investasi</div>
-            <div class="alloc-desc">Minimal 10% untuk dana darurat & masa depan</div>
-          </div>
-          <div class="alloc-value">{{allocations.saving.value}}</div>
-        </div>
-
-        <div class="alloc-item">
-          <div class="alloc-bullet" style="background: var(--c-insurance)"></div>
-          <div class="alloc-info">
-            <div class="alloc-name">Premi Asuransi & Proteksi</div>
-            <div class="alloc-desc">Minimal 10% untuk perlindungan risiko finansial</div>
-          </div>
-          <div class="alloc-value">{{allocations.insurance.value}}</div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Kesimpulan -->
-    <section>
-      <div class="section-header">
-        <div class="section-number">4</div>
-        <div class="section-title">Ringkasan Eksekutif</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-item">
-          <div class="summary-label">Total Anggaran Dialokasikan</div>
-          <div class="summary-value">{{summary.totalBudget}}</div>
-        </div>
-        <div class="summary-item">
-          <div class="summary-label">Potensi Surplus Investasi</div>
-          <div class="summary-value highlight">{{summary.totalSurplus}}</div>
-        </div>
-      </div>
-    </section>
+      </section>
+    </div>
 
     <!-- Footer -->
     <footer class="footer">
