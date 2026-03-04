@@ -333,43 +333,45 @@ export const pensionReportTemplate = `
       </div>
     </div>
 
-    <div class="grid-2">
-      <div>
-        <div class="section-title" style="margin-top:10px;">04. Analisa Kekurangan</div>
-        <div class="card" style="background:white;">
-          <table class="gap-table">
-            <tr>
-              <td>Total Dana Dibutuhkan</td>
-              <td class="text-right">{{calc.totalFundNeeded}}</td>
-            </tr>
-            <tr>
-              <td>Aset Pensiun Saat Ini (FV)</td>
-              <td class="text-right text-success">- {{calc.fvExistingFund}}</td>
-            </tr>
-            <tr>
-              <td class="text-danger">KEKURANGAN (SHORTFALL)</td>
-              <td class="text-right text-danger">{{calc.shortfall}}</td>
-            </tr>
-          </table>
-          <p style="font-size:10px; color:var(--text-mute); margin-top:10px; line-height:1.4;">
-            *Angka "Total Dana" adalah jumlah uang tunai yang harus tersedia di hari pertama pensiun untuk mendanai gaya hidup selama {{calc.retirementDuration}} tahun.
-          </p>
-        </div>
-      </div>
+    <div class="section-prevent-split" style="margin-top: 20px;">
+        <div class="grid-2">
+          <div>
+            <div class="section-title" style="margin-top:0;">04. Analisa Kekurangan</div>
+            <div class="card" style="background:white;">
+              <table class="gap-table">
+                <tr>
+                  <td>Total Dana Dibutuhkan</td>
+                  <td class="text-right">{{calc.totalFundNeeded}}</td>
+                </tr>
+                <tr>
+                  <td>Aset Pensiun Saat Ini (FV)</td>
+                  <td class="text-right text-success">- {{calc.fvExistingFund}}</td>
+                </tr>
+                <tr>
+                  <td class="text-danger">KEKURANGAN (SHORTFALL)</td>
+                  <td class="text-right text-danger">{{calc.shortfall}}</td>
+                </tr>
+              </table>
+              <p style="font-size:10px; color:var(--text-mute); margin-top:10px; line-height:1.4;">
+                *Angka "Total Dana" adalah jumlah uang tunai yang harus tersedia di hari pertama pensiun untuk mendanai gaya hidup selama {{calc.retirementDuration}} tahun.
+              </p>
+            </div>
+          </div>
 
-      <div>
-        <div class="section-title" style="margin-top:10px;">05. Solusi Investasi</div>
-        <div class="solution-wrapper">
-          <div style="position:relative; z-index:1;">
-            <div class="sol-label">Rekomendasi Tabungan Bulanan</div>
-            <div class="sol-amount">{{plan.monthlySaving}}</div>
-            <div class="sol-period">Mulai bulan ini hingga usia {{plan.retirementAge}} tahun</div>
-            <div style="margin-top:15px; font-size:10px; background:rgba(255,255,255,0.2); display:inline-block; padding:4px 12px; border-radius:12px;">
-              Investasi di instrumen return {{plan.returnRate}}%
+          <div>
+            <div class="section-title" style="margin-top:0;">05. Solusi Investasi</div>
+            <div class="solution-wrapper">
+              <div style="position:relative; z-index:1;">
+                <div class="sol-label">Rekomendasi Tabungan Bulanan</div>
+                <div class="sol-amount">{{plan.monthlySaving}}</div>
+                <div class="sol-period">Mulai bulan ini hingga usia {{plan.retirementAge}} tahun</div>
+                <div style="margin-top:15px; font-size:10px; background:rgba(255,255,255,0.2); display:inline-block; padding:4px 12px; border-radius:12px;">
+                  Investasi di instrumen return {{plan.returnRate}}%
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
     </div>
 
     <div class="page-footer">
