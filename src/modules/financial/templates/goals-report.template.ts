@@ -89,6 +89,15 @@ export const goalReportTemplate = `
       .page { margin: 0; box-shadow: none; page-break-after: always; } 
     }
 
+    /* --- ANTI-SPLIT LOGIC --- */
+    .section-group {
+      page-break-inside: avoid;
+      break-inside: avoid;
+      display: block;
+      width: 100%;
+      margin-bottom: 25px;
+    }
+
     /* --- HEADER GRID --- */
     .header-grid {
       display: grid;
@@ -135,16 +144,28 @@ export const goalReportTemplate = `
       font-size: 11px; font-weight: 800; color: var(--secondary);
       text-transform: uppercase; letter-spacing: 1.5px;
       border-bottom: 2px solid var(--primary-light);
-      padding-bottom: 6px; margin-bottom: 15px; margin-top: 25px;
+      padding-bottom: 6px; margin-bottom: 12px;
       display: flex; justify-content: space-between; align-items: center;
     }
     .section-title::before {
       content: ''; display: inline-block; width: 4px; height: 14px; background: var(--primary); margin-right: 8px; border-radius: 2px;
     }
     
-    /* --- CARDS & GRIDS --- */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-    .card { background: #f8fafc; border-radius: 16px; padding: 20px; border: 1px solid var(--border); }
+    /* --- CARDS & GRIDS (Equal Height Logic) --- */
+    .grid-2 { 
+      display: grid; 
+      grid-template-columns: 1fr 1fr; 
+      gap: 20px; 
+      align-items: stretch; /* Memaksa kotak sejajar tinggi */
+    }
+
+    .card { 
+      background: #f8fafc; 
+      border-radius: 16px; 
+      padding: 20px; 
+      border: 1px solid var(--border); 
+      height: 100%; /* Memastikan kartu mengisi grid cell */
+    }
     
     .meta-list { list-style: none; padding: 0; margin: 0; }
     .meta-list li { 
@@ -154,7 +175,7 @@ export const goalReportTemplate = `
     .meta-key { color: var(--text-mute); font-size: 11px; }
     .meta-val { font-weight: 700; color: var(--text-dark); font-size: 11px; }
 
-    /* --- INFLATION VISUAL (REALITY CHECK) --- */
+    /* --- INFLATION VISUAL --- */
     .reality-container {
       background: var(--white);
       border: 1.5px solid var(--border);
@@ -163,7 +184,6 @@ export const goalReportTemplate = `
       display: flex;
       align-items: center;
       justify-content: space-around;
-      margin-bottom: 20px;
     }
     .reality-item { text-align: center; flex: 1; }
     .reality-label { font-size: 10px; text-transform: uppercase; font-weight: 700; color: var(--text-mute); margin-bottom: 8px; }
@@ -190,6 +210,10 @@ export const goalReportTemplate = `
       border-radius: 24px; padding: 30px; text-align: center; color: white;
       box-shadow: 0 15px 30px -10px rgba(109, 40, 217, 0.4);
       position: relative; overflow: hidden;
+      height: 100%; /* Menyesuaikan dengan grid sebelah */
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
     .solution-hero::before {
       content: 'SOLUSI'; position: absolute; top: -10px; left: -10px; font-size: 60px; font-weight: 900; opacity: 0.05;
@@ -208,11 +232,8 @@ export const goalReportTemplate = `
       margin-top: auto;
       padding-top: 15px;
       border-top: 1px solid var(--border);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      font-size: 9px;
-      color: var(--text-mute);
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 9px; color: var(--text-mute);
     }
   </style>
 </head>
@@ -233,105 +254,108 @@ export const goalReportTemplate = `
       </div>
     </div>
 
-    <!-- Info Section -->
-    <div class="section-title">
-      <span>01. Profil Rencana & Target</span>
-      <span style="font-weight: 500; font-size: 9px;">Tanggal: {{generatedAt}}</span>
-    </div>
-
-    <div class="grid-2">
-      <div class="card">
-        <div style="font-size:10px; font-weight:800; color:var(--primary); margin-bottom:12px; text-transform:uppercase;">Informasi Klien</div>
-        <ul class="meta-list">
-          <li><span class="meta-key">Nama Klien</span> <span class="meta-val">{{client.name}}</span></li>
-          <li><span class="meta-key">Tujuan</span> <span class="meta-val" style="color:var(--primary);">{{goal.name}}</span></li>
-          <li><span class="meta-key">Domisili</span> <span class="meta-val">{{client.city}}</span></li>
-          <li><span class="meta-key">Target Pencapaian</span> <span class="meta-val">{{goal.targetDate}}</span></li>
-        </ul>
+    <!-- Bagian 01 & 02 (DIBUNGKUS AGAR SEJAJAR & TIDAK TERPOTONG) -->
+    <div class="section-group">
+      <div class="section-title">
+        <span>01. Profil Rencana & Parameter Ekonomi</span>
+        <span style="font-weight: 500; font-size: 9px;">Dibuat: {{generatedAt}}</span>
       </div>
-      <div class="card">
-        <div style="font-size:10px; font-weight:800; color:var(--primary); margin-bottom:12px; text-transform:uppercase;">Parameter Ekonomi</div>
-        <ul class="meta-list">
-          <li><span class="meta-key">Durasi Investasi</span> <span class="meta-val">{{calc.yearsDuration}} Tahun ({{calc.monthsDuration}} Bln)</span></li>
-          <li><span class="meta-key">Estimasi Inflasi</span> <span class="meta-val">{{goal.inflationRate}}% / Tahun</span></li>
-          <li><span class="meta-key">Target Return</span> <span class="meta-val" style="color:var(--success);">{{goal.returnRate}}% / Tahun</span></li>
-          <li><span class="meta-key">Modal Awal</span> <span class="meta-val">{{goal.currentSaving}}</span></li>
-        </ul>
-      </div>
-    </div>
-
-    <!-- Inflation Visual -->
-    <div class="section-title">02. Analisa Nilai Masa Depan (FV)</div>
-    <p style="font-size:10px; color:var(--text-mute); margin-top:-5px; margin-bottom:15px;">
-      Mempertimbangkan kenaikan harga barang/jasa akibat inflasi selama periode target waktu.
-    </p>
-
-    <div class="reality-container">
-      <div class="reality-item">
-        <div class="reality-label">Harga Saat Ini (PV)</div>
-        <div class="reality-val">{{goal.targetAmount}}</div>
-      </div>
-      <div class="reality-arrow">➜</div>
-      <div class="reality-item">
-        <div class="reality-label">Harga Masa Depan (FV)</div>
-        <div class="reality-val future-highlight">{{calc.futureTargetAmount}}</div>
-        <div class="inflation-badge">Kenaikan Akibat Inflasi</div>
-      </div>
-    </div>
-
-    <!-- Gap & Solution -->
-    <div class="grid-2" style="align-items: stretch;">
-      <div>
-        <div class="section-title">03. Analisa Kekurangan Dana</div>
-        <div class="card" style="background:white;">
-          <table class="strategy-table">
-            <tr>
-              <td>
-                <span style="font-weight:600;">Total Dana Dibutuhkan</span>
-                <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:100%; background:var(--danger);"></div></div>
-              </td>
-              <td style="text-align:right; font-weight:700;">{{calc.futureTargetAmount}}</td>
-            </tr>
-            <tr>
-              <td>
-                <span style="font-weight:600;">Proyeksi Modal Awal</span>
-                <div style="font-size:9px; color:var(--text-mute);">(Tumbuh {{goal.returnRate}}% / Thn)</div>
-                <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:{{calc.existingPercentage}}%; background:var(--success);"></div></div>
-              </td>
-              <td style="text-align:right; font-weight:700; color:var(--success);">- {{calc.futureExistingFund}}</td>
-            </tr>
-            <tr>
-              <td style="padding-top:20px; font-weight:800; color:var(--primary); font-size:12px;">KEKURANGAN (NET GAP)</td>
-              <td style="text-align:right; padding-top:20px; font-weight:800; color:var(--primary); font-size:12px;">{{calc.netTarget}}</td>
-            </tr>
-          </table>
+      <div class="grid-2">
+        <div class="card">
+          <div style="font-size:10px; font-weight:800; color:var(--primary); margin-bottom:12px; text-transform:uppercase;">Informasi Klien</div>
+          <ul class="meta-list">
+            <li><span class="meta-key">Nama Klien</span> <span class="meta-val">{{client.name}}</span></li>
+            <li><span class="meta-key">Tujuan</span> <span class="meta-val" style="color:var(--primary);">{{goal.name}}</span></li>
+            <li><span class="meta-key">Domisili</span> <span class="meta-val">{{client.city}}</span></li>
+            <li><span class="meta-key">Target Pencapaian</span> <span class="meta-val">{{goal.targetDate}}</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <div style="font-size:10px; font-weight:800; color:var(--primary); margin-bottom:12px; text-transform:uppercase;">Parameter Investasi</div>
+          <ul class="meta-list">
+            <li><span class="meta-key">Durasi</span> <span class="meta-val">{{calc.yearsDuration}} Tahun ({{calc.monthsDuration}} Bln)</span></li>
+            <li><span class="meta-key">Est. Inflasi</span> <span class="meta-val">{{goal.inflationRate}}% / Tahun</span></li>
+            <li><span class="meta-key">Return</span> <span class="meta-val" style="color:var(--success);">{{goal.returnRate}}% / Tahun</span></li>
+            <li><span class="meta-key">Modal Awal</span> <span class="meta-val">{{goal.currentSaving}}</span></li>
+          </ul>
         </div>
       </div>
+    </div>
 
-      <div>
-        <div class="section-title">04. Strategi Investasi</div>
-        <div class="solution-hero">
-          <div class="sol-label">Tabungan Rutin / Bulan</div>
-          <div class="sol-amount">{{calc.monthlySaving}}</div>
-          <div class="sol-period">
-            Mulai hari ini s/d {{goal.targetDate}}<br>
-            ({{calc.monthsDuration}} Kali Setoran)
+    <!-- Bagian 02 (Inflation Visual) -->
+    <div class="section-group">
+      <div class="section-title">02. Analisa Nilai Masa Depan (FV)</div>
+      <p style="font-size:10px; color:var(--text-mute); margin-top:-5px; margin-bottom:15px;">
+        Visualisasi kenaikan harga barang/jasa akibat inflasi selama periode target waktu.
+      </p>
+      <div class="reality-container">
+        <div class="reality-item">
+          <div class="reality-label">Harga Saat Ini (PV)</div>
+          <div class="reality-val">{{goal.targetAmount}}</div>
+        </div>
+        <div class="reality-arrow">➜</div>
+        <div class="reality-item">
+          <div class="reality-label">Harga Masa Depan (FV)</div>
+          <div class="reality-val future-highlight">{{calc.futureTargetAmount}}</div>
+          <div class="inflation-badge">Kenaikan Akibat Inflasi</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bagian 03 & 04 (Gap & Solution) -->
+    <div class="section-group">
+      <div class="grid-2">
+        <div>
+          <div class="section-title">03. Analisa Kekurangan Dana</div>
+          <div class="card" style="background:white;">
+            <table class="strategy-table">
+              <tr>
+                <td>
+                  <span style="font-weight:600;">Target Dana (FV)</span>
+                  <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:100%; background:var(--danger);"></div></div>
+                </td>
+                <td style="text-align:right; font-weight:700;">{{calc.futureTargetAmount}}</td>
+              </tr>
+              <tr>
+                <td>
+                  <span style="font-weight:600;">Aset Lama Tumbuh</span>
+                  <div class="progress-bar-bg"><div class="progress-bar-fill" style="width:{{calc.existingPercentage}}%; background:var(--success);"></div></div>
+                </td>
+                <td style="text-align:right; font-weight:700; color:var(--success);">- {{calc.futureExistingFund}}</td>
+              </tr>
+              <tr>
+                <td style="padding-top:20px; font-weight:800; color:var(--primary); font-size:12px;">NET GAP (KEKURANGAN)</td>
+                <td style="text-align:right; padding-top:20px; font-weight:800; color:var(--primary); font-size:12px;">{{calc.netTarget}}</td>
+              </tr>
+            </table>
           </div>
-          <div class="sol-badge">Investasi di Instrumen Return {{goal.returnRate}}%</div>
         </div>
-        <p style="font-size:9px; color:var(--text-mute); margin-top:15px; line-height:1.4;">
-          *Ilustrasi menggunakan metode bunga majemuk. Hasil investasi masa depan tidak dijamin. Lakukan evaluasi portofolio secara berkala.
-        </p>
+
+        <div>
+          <div class="section-title">04. Strategi Solusi</div>
+          <div class="solution-hero">
+            <div class="sol-label">Tabungan Rutin / Bulan</div>
+            <div class="sol-amount">{{calc.monthlySaving}}</div>
+            <div class="sol-period">
+              Mulai hari ini s/d {{goal.targetDate}}<br>
+              ({{calc.monthsDuration}} Kali Setoran)
+            </div>
+            <div class="sol-badge">Instrumen Return {{goal.returnRate}}%</div>
+          </div>
+        </div>
       </div>
+      <p style="font-size:9px; color:var(--text-mute); margin-top:15px; line-height:1.4; text-align: justify;">
+        *Ilustrasi menggunakan metode bunga majemuk. Hasil investasi masa depan tidak dijamin. Perhitungan ini bertujuan sebagai alat bantu diskusi finansial.
+      </p>
     </div>
 
     <!-- Footer -->
     <div class="page-footer">
       <div>
-        <strong>KeuanganKu Agent System</strong> &bull; Perencana: {{agent.name}}
+        <strong>KeuanganKu System</strong> &bull; Consultant: {{agent.name}}
       </div>
       <div>
-        CONFIDENTIAL &bull; Halaman 1 dari 1
+        Halaman 1 dari 1
       </div>
     </div>
 
