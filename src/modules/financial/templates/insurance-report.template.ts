@@ -151,16 +151,41 @@ export const generateInsuranceReportHtml = (data: any) => {
       border-bottom: 2px solid var(--bg-soft);
       padding-bottom: 6px; margin-bottom: 15px; margin-top: 25px;
       display: flex; align-items: center;
+      margin-top: 35px; 
+      margin-bottom: 15px;
     }
     .section-title::before {
       content: ''; display: inline-block; width: 4px; height: 14px; background: var(--primary); margin-right: 8px; border-radius: 2px;
     }
 
+    .header-grid + .grid-2 .section-title {
+      margin-top: 0;
+    }
+
     /* --- INFO CARDS --- */
-    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    .section-prevent-split {
+      page-break-inside: avoid;
+      break-inside: avoid;
+      width: 100%;
+    }
+
+    .grid-2 { 
+      display: grid; 
+      grid-template-columns: 1fr 1fr; 
+      gap: 20px; 
+      align-items: stretch;
+      margin-bottom: 30px;
+    }
+
     .info-card {
-      background: var(--bg-soft); border: 1px solid var(--border);
-      border-radius: 16px; padding: 18px;
+      background: var(--bg-soft); 
+      border: 1px solid var(--border);
+      border-radius: 16px; 
+      padding: 18px;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
     }
     .row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 11px; }
     .row.highlight { 
@@ -252,7 +277,7 @@ export const generateInsuranceReportHtml = (data: any) => {
 
     <div class="grid-2">
       <!-- Client Profile -->
-      <section>
+      <div class="section-prevent-split">
         <div class="section-title">01. Profil Klien</div>
         <div class="info-card">
           <div class="row"><span class="label">Nama Lengkap</span><span class="val">${client.name}</span></div>
@@ -264,18 +289,19 @@ export const generateInsuranceReportHtml = (data: any) => {
             <span class="val" style="color: var(--primary);">${input.dependents} Orang</span>
           </div>
         </div>
-      </section>
+      </div>
 
       <!-- Consultant Profile -->
-      <section>
+      <div class="section-prevent-split">
         <div class="section-title">02. Profil Konsultan</div>
         <div class="info-card">
           <div class="row"><span class="label">Nama Agen</span><span class="val">${agent.name}</span></div>
           <div class="row"><span class="label">Perusahaan</span><span class="val">${agent.companyName}</span></div>
           <div class="row"><span class="label">Level</span><span class="val">${agent.level}</span></div>
           <div class="row" style="margin-top: 22px;"><span class="label">Metode Analisa</span><span class="val">Income Replacement</span></div>
+          <div class="row" style="opacity: 0;"><span>Spacer</span><span></span></div>
         </div>
-      </section>
+      </div>
     </div>
 
     <!-- Parameters -->
@@ -322,7 +348,7 @@ export const generateInsuranceReportHtml = (data: any) => {
     </section>
 
     <!-- Gap Analysis -->
-    <section>
+    <div class="section-prevent-split">
       <div class="section-title">05. Analisa Kekurangan (Gap Analysis)</div>
       <div class="gap-card">
         <div class="gap-header">
@@ -347,7 +373,7 @@ export const generateInsuranceReportHtml = (data: any) => {
           </div>
         </div>
       </div>
-    </section>
+    </div>
 
     <!-- Strategic Recommendation -->
     <section>
