@@ -206,8 +206,19 @@ export const pensionReportTemplate = `
        5. TIMELINE VISUALIZATION
        ----------------------------------------------------------- */
     .timeline-container { margin: 20px 0; }
+    .section-prevent-split {
+        page-break-inside: avoid;
+        break-inside: avoid;
+        display: block;
+        width: 100%;
+    }
     .timeline-bar {
-      height: 24px; background: #e2e8f0; border-radius: 12px; overflow: hidden; display: flex;
+        height: 28px; /* Sedikit lebih tebal agar rapi */
+        background: #f1f5f9; 
+        border-radius: 14px; 
+        overflow: hidden; /* Kunci utama agar warna di dalam tidak keluar jalur radius */
+        display: flex;
+        border: 1px solid var(--border); /* Memberi bingkai agar ujung terlihat solid */
     }
     /* width diinject via inline style */
     .time-segment-work { background: var(--success); display: flex; align-items: center; justify-content: center; color: white; font-size: 9px; font-weight: 700; }
@@ -316,23 +327,26 @@ export const pensionReportTemplate = `
       </div>
     </div>
 
-    <div class="section-title">03. Garis Waktu Perencanaan</div>
-    <div class="timeline-container">
-      <div class="timeline-bar">
-        <div class="time-segment-work" style="width: {{calc.workingPercentage}}%;">
-          Masa Menabung ({{calc.yearsToRetire}} Thn)
+    <div class="section-prevent-split">
+      <div class="section-title">03. Garis Waktu Perencanaan</div>
+      <div class="timeline-container">
+        <div class="timeline-bar">
+          <div class="time-segment-work" style="width: {{calc.workingPercentage}}%;">
+            Masa Menabung ({{calc.yearsToRetire}} Thn)
+          </div>
+          <div class="time-segment-retire" style="width: {{calc.retirementPercentage}}%;">
+            Masa Pensiun ({{calc.retirementDuration}} Thn)
+          </div>
         </div>
-        <div class="time-segment-retire" style="width: {{calc.retirementPercentage}}%;">
-          Masa Pensiun ({{calc.retirementDuration}} Thn)
+        <div class="timeline-legend">
+          <span>Start: {{plan.currentAge}} Thn</span>
+          <span style="text-align:center;">Pensiun: {{plan.retirementAge}} Thn</span>
+          <span>Akhir: {{plan.lifeExpectancy}} Thn</span>
         </div>
-      </div>
-      <div class="timeline-legend">
-        <span>Start: {{plan.currentAge}} Thn</span>
-        <span style="text-align:center;">Pensiun: {{plan.retirementAge}} Thn</span>
-        <span>Akhir: {{plan.lifeExpectancy}} Thn</span>
       </div>
     </div>
 
+    <div class="section-prevent-split" style="margin-top: 20px;">
     <div class="grid-2">
       <div>
         <div class="section-title" style="margin-top:10px;">04. Analisa Kekurangan</div>
@@ -370,6 +384,7 @@ export const pensionReportTemplate = `
           </div>
         </div>
       </div>
+    </div>
     </div>
 
     <div class="page-footer">
