@@ -71,4 +71,8 @@ export class SimulateGoalDto {
   @Max(100)
   @Type(() => Number)
   returnRate?: number = 6; // r
+
+  @ApiProperty({ example: '2030-12-31', description: 'Tanggal target tercapai (YYYY-MM-DD)' })
+  @IsDateString({}, { message: 'Format tanggal harus valid (YYYY-MM-DD)' })
+  targetDate: string;
 }

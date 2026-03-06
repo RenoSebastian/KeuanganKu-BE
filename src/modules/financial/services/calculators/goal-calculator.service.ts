@@ -3,6 +3,7 @@ import {
     Logger,
     InternalServerErrorException,
     ForbiddenException,
+    BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../../prisma/prisma.service';
 import { MarketSettingsService } from '../../../master-data/services/market-settings.service';
@@ -30,10 +31,30 @@ export class GoalCalculatorService {
     ) { }
 
     /**
+     * [HELPER] Validasi Tanggal Target
+     * Memastikan targetDate minimal 1 bulan dari waktu saat ini.
+     */
+    private validateTargetDate(targetDateString: string | Date) {
+        const targetDate = new Date(targetDateString);
+        const today = new Date();
+
+        const monthsDifference =
+            (targetDate.getFullYear() - today.getFullYear()) * 12 +
+            (targetDate.getMonth() - today.getMonth());
+
+        if (monthsDifference < 1) {
+            throw new BadRequestException(
+                'Target waktu terlalu dekat. Minimal target tujuan keuangan adalah 1 bulan dari sekarang.',
+            );
+        }
+    }
+
+    /**
      * [PUBLIC/STATELESS] Simulasi Cepat (Calculator Only)
      */
     simulateGoal(dto: SimulateGoalDto) {
-        // Bisa tambahkan logic ambil default rate jika dto.inflationRate kosong
+        this.validateTargetDate(dto.targetDate);
+
         const result = calculateGoalSimulation(dto);
         return { status: 'success', data: result };
     }
@@ -42,19 +63,22 @@ export class GoalCalculatorService {
      * [USER] Hitung & Simpan Goal ke Database
      */
     async calculateAndSaveGoal(userId: string, dto: CreateGoalDto) {
-        // 1. Ambil Market Rates
+        // 1. Validasi Target Tanggal
+        this.validateTargetDate(dto.targetDate);
+
+        // 2. Ambil Market Rates
         const marketRates = await this.marketSettingsService.getCurrentSettings();
         const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
         const returnRate = dto.returnRate ?? 6; // Default moderat
 
-        // 2. Kalkulasi Core
+        // 3. Kalkulasi Core
         const result = calculateGoalPlan({
             ...dto,
             inflationRate,
             returnRate,
         });
 
-        // 3. Simpan DB
+        // 4. Simpan DB
         const plan = await this.prisma.goalPlan.create({
             data: {
                 userId,
@@ -79,12 +103,15 @@ export class GoalCalculatorService {
         await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
 
         try {
-            // 2. Ambil Dynamic Rates
+            // 2. Validasi Target Tanggal (Cegah error math)
+            this.validateTargetDate(dto.targetDate);
+
+            // 3. Ambil Dynamic Rates
             const marketRates = await this.marketSettingsService.getCurrentSettings();
             const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
             const returnRate = dto.returnRate ?? 6;
 
-            // 3. Kalkulasi Core
+            // 4. Kalkulasi Core
             const calculationResult = calculateGoalPlan({
                 goalName: dto.goalName,
                 targetAmount: dto.targetAmount,
@@ -93,8 +120,7 @@ export class GoalCalculatorService {
                 returnRate,
             });
 
-            // 4. Kalkulasi Tambahan (Existing Fund Growth)
-            // Logic ini spesifik untuk simulasi agen yang memasukkan "Tabungan Saat Ini"
+            // 5. Kalkulasi Tambahan (Existing Fund Growth)
             const yearsDuration = calculationResult.monthsDuration / 12;
             const rRate = returnRate / 100;
 
@@ -114,7 +140,6 @@ export class GoalCalculatorService {
                 if (monthlyRate === 0) {
                     realMonthlySaving = netTarget / months;
                 } else {
-                    // Rumus PMT Future Value
                     realMonthlySaving =
                         (netTarget * monthlyRate) /
                         (Math.pow(1 + monthlyRate, months) - 1);
@@ -131,7 +156,7 @@ export class GoalCalculatorService {
 
             const clientAge = this.calculateAge(dto.clientDob);
 
-            // 5. Log Aktivitas
+            // 6. Log Aktivitas
             await this.prisma.simulationLog.create({
                 data: {
                     agentId: user.id,
@@ -139,8 +164,8 @@ export class GoalCalculatorService {
                     clientAge: clientAge,
                     clientCity: dto.clientCity,
                     clientJob: dto.clientJob || '-',
-                    totalIncome: dto.targetAmount, // Target Goal
-                    calculatedSurplus: finalResult.monthlySaving, // Monthly Saving Needed
+                    totalIncome: dto.targetAmount,
+                    calculatedSurplus: finalResult.monthlySaving,
                     healthScore: 100,
                     status: HealthStatus.SEHAT,
                     financialRatios: JSON.parse(
@@ -155,14 +180,14 @@ export class GoalCalculatorService {
                 },
             });
 
-            // 6. Generate PDF
+            // 7. Generate PDF
             const pdfBuffer = await this.pdfService.generateGoalSimulationPdfBuffer(
                 dto,
                 finalResult,
                 user,
             );
 
-            // 7. Generate Token
+            // 8. Generate Token
             const mgcToken = this.tokenService.generateMgcToken({
                 meta: {
                     version: '1.0',
@@ -190,11 +215,15 @@ export class GoalCalculatorService {
                 )}_${Date.now()}.pdf`,
             };
         } catch (error: any) {
+            // [FIX] Tangkap dan throw ulang jika itu error dari validasi bisnis
+            if (error instanceof BadRequestException || error instanceof ForbiddenException) {
+                throw error;
+            }
+
             this.logger.error(
                 `Goal Simulation Error: ${error.message}`,
                 error.stack,
             );
-            if (error instanceof ForbiddenException) throw error;
             throw new InternalServerErrorException(
                 'Gagal memproses simulasi tujuan keuangan.',
             );
