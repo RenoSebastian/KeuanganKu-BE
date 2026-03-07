@@ -19,7 +19,7 @@ export class AuthController {
   constructor(private authService: AuthService) { }
 
   // ====================================================================
-  // [PHASE 4] REGISTER ENDPOINT (Redis-First Entry Point)
+  // [PHASE 1] REGISTER ENDPOINT (Redis-First Entry Point)
   // ====================================================================
   /**
    * Pendaftaran Agen Asuransi (Tahap 1)
@@ -34,7 +34,7 @@ export class AuthController {
   }
 
   // ====================================================================
-  // [PHASE 4] VERIFY OTP ENDPOINT (Database Commit & Auto-Login)
+  // [PHASE 1] VERIFY OTP ENDPOINT (Database Commit & Auto-Login)
   // ====================================================================
   /**
    * Verifikasi OTP (Tahap 2)
@@ -56,27 +56,17 @@ export class AuthController {
     @Headers('user-agent') userAgent: string,
     @Ip() ipAddress: string,
   ) {
-    // [LOGIC] Mekanisme Fallback Deterministik:
     const finalDeviceId = headerDeviceId || dto.deviceId;
-
     if (!finalDeviceId) {
-      throw new BadRequestException('Identitas perangkat (X-Device-ID) tidak ditemukan. Keamanan sesi tidak dapat dijamin.');
+      throw new BadRequestException('Identitas perangkat (X-Device-ID) tidak ditemukan.');
     }
-
     dto.deviceId = finalDeviceId;
-
-    // Delegasi ke Service untuk validasi, insert ke DB, dan pembuatan JWT
     return this.authService.verifyOtp(dto, { ipAddress, userAgent });
   }
 
   // ====================================================================
-  // [PHASE 4] RESEND OTP ENDPOINT
+  // [PHASE 1] RESEND OTP ENDPOINT
   // ====================================================================
-  /**
-   * Permintaan ulang OTP
-   * Meskipun di Service sudah ada Cooldown 60 detik, kita tetap memasang Throttle
-   * di level Controller untuk mencegah spam memori pada NestJS.
-   */
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('resend-otp')
   @HttpCode(HttpStatus.OK)
@@ -86,49 +76,78 @@ export class AuthController {
   }
 
   // ====================================================================
-  // LOGIN ENDPOINT (Single Concurrent Session & Anti-Fraud Layer)
+  // [PHASE 2] LOGIN INITIATION ENDPOINT (2FA)
   // ====================================================================
   /**
-   * * [STRATEGY] Menggunakan Rate Limiting yang lebih ketat dibandingkan rute global.
-   * - limit: 5 percobaan
-   * - ttl: 300.000ms (5 Menit)
-   * Ini akan menangani skenario "Millisecond Collision" dan mencegah spam login 
-   * yang mencoba memicu mekanisme kick-out secara berulang (DoS pada sesi user).
+   * * [STRATEGY] Tidak lagi mencetak JWT langsung.
+   * Hanya memvalidasi DB, membuat OTP, menyimpannya di Redis, dan menembak SMTP.
+   * Limit 5 percobaan per 5 menit untuk mencegah eksploitasi fitur Lupa Sandi gaya baru.
    */
   @Throttle({ default: { limit: 5, ttl: 300000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Masuk dan dapatkan Hybrid JWT Token (AT & RT)' })
+  @ApiOperation({ summary: 'Inisiasi masuk (Validasi kredensial & Kirim OTP)' })
   @ApiHeader({
     name: 'x-device-id',
-    description: 'Device Fingerprint / AppMySite Client ID untuk Single Session',
+    description: 'Device Fingerprint untuk keperluan pencetakan sesi nanti',
     required: true,
   })
   login(
     @Body() dto: LoginDto,
     @Headers('x-device-id') headerDeviceId: string,
+  ) {
+    const finalDeviceId = headerDeviceId || dto.deviceId;
+    if (!finalDeviceId) {
+      throw new BadRequestException('Identitas perangkat (X-Device-ID) tidak ditemukan.');
+    }
+    dto.deviceId = finalDeviceId;
+    return this.authService.login(dto);
+  }
+
+  // ====================================================================
+  // [PHASE 3] VERIFY LOGIN OTP ENDPOINT
+  // ====================================================================
+  /**
+   * Limitasi ketat 5x per menit agar hacker yang berhasil mencuri password
+   * tidak bisa melakukan brute-force kode OTP yang masuk ke email asli.
+   */
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('login/verify')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Verifikasi OTP Login dan dapatkan Hybrid JWT Token (AT & RT)' })
+  @ApiHeader({
+    name: 'x-device-id',
+    description: 'Device Fingerprint untuk Single Session',
+    required: true,
+  })
+  verifyLogin(
+    @Body() dto: VerifyOtpDto,
+    @Headers('x-device-id') headerDeviceId: string,
     @Headers('user-agent') userAgent: string,
     @Ip() ipAddress: string,
   ) {
-    // [LOGIC] Mekanisme Fallback Deterministik:
     const finalDeviceId = headerDeviceId || dto.deviceId;
-
     if (!finalDeviceId) {
-      throw new BadRequestException('Identitas perangkat (X-Device-ID) tidak ditemukan. Keamanan sesi tidak dapat dijamin.');
+      throw new BadRequestException('Identitas perangkat (X-Device-ID) tidak ditemukan.');
     }
-
-    // Standardisasi nilai DTO agar seragam saat diproses di Business Logic (Service)
     dto.deviceId = finalDeviceId;
+    return this.authService.verifyLoginOtp(dto, { ipAddress, userAgent });
+  }
 
-    return this.authService.login(dto, { ipAddress, userAgent });
+  // ====================================================================
+  // [PHASE 3] RESEND LOGIN OTP ENDPOINT
+  // ====================================================================
+  @Throttle({ default: { limit: 3, ttl: 60000 } })
+  @Post('login/resend')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Kirim ulang OTP keamanan login ke email agen' })
+  resendLoginOtp(@Body() dto: ResendOtpDto) {
+    return this.authService.resendLoginOtp(dto);
   }
 
   // ====================================================================
   // ENDPOINT UNTUK SILENT RE-AUTHENTICATION
   // ====================================================================
-  /**
-   * Refresh Token juga dilindungi limitasi untuk mencegah eksploitasi rotasi token.
-   */
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
@@ -142,15 +161,11 @@ export class AuthController {
     @Body() dto: RefreshTokenDto,
     @Headers('x-device-id') headerDeviceId: string,
   ) {
-    // [LOGIC] Validasi ketat untuk menghindari Session Hijacking
     const finalDeviceId = headerDeviceId || dto.deviceId;
-
     if (!finalDeviceId) {
       throw new BadRequestException('Header X-Device-ID wajib disertakan untuk melakukan rotasi token.');
     }
-
     dto.deviceId = finalDeviceId;
-
     return this.authService.refreshTokens(dto);
   }
 }
