@@ -14,7 +14,7 @@
      * Karena file ada di src/assets/images/logokeuanganku.png, pastikan saat deploy
      * file tersebut bisa diakses secara publik, contoh: https://api.keuanganku.id/static/logokeuanganku.png
      */
-    const logoUrl = 'https://keuanganku.id/images/logokeuanganku.png';
+    const logoUrl = 'https://keuanganku.geocitra.com/images/logokeuanganku.png';
     const brandColor = '#2563eb'; // Blue-600 (Selaras dengan UI Dashboard)
     const bgColor = '#f8fafc';   // Slate-50 (Latar belakang yang bersih)
 
