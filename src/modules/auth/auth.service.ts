@@ -17,7 +17,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { RedisService } from '../redis/redis.service';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { EmailService } from '../email/email.service';
-import { generateBaseEmailTemplate } from '../email/templates/base-email.template';
+// [UPDATE] Kita hanya membutuhkan template OTP khusus, base template sudah dibungkus di dalamnya
+import { generateOtpEmailTemplate } from '../email/templates/otp-email.template';
 
 @Injectable()
 export class AuthService {
@@ -52,8 +53,7 @@ export class AuthService {
     // 3. Generate OTP: Buat 6 digit angka acak (100000 - 999999)
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 4. State Creation: Bungkus data sesuai kontrak RedisOtpData (Fase 2)
-    // [FIX] Menghapus nip dan unitKerjaId agar murni profil Agen
+    // 4. State Creation: Bungkus data sesuai kontrak RedisOtpData
     const otpData = {
       email: dto.email,
       fullName: dto.fullName,
@@ -67,17 +67,8 @@ export class AuthService {
     await this.redisService.setOtp(dto.email, otpData, 300);
 
     // 6. Asynchronous Delegation: Kirim Email Fire-and-Forget
-    const emailContent = `
-      <h2 style="color: #0d9488;">Verifikasi Registrasi KeuanganKu</h2>
-      <p>Halo, ${dto.fullName}!</p>
-      <p>Berikut adalah kode verifikasi OTP Anda. Kode ini akan hangus dalam waktu <strong>5 menit</strong>.</p>
-      <div style="background-color: #f3f4f6; padding: 15px; margin: 20px 0; text-align: center; border-radius: 8px;">
-        <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #1f2937;">${otpCode}</span>
-      </div>
-      <p>Jika Anda tidak merasa melakukan pendaftaran, abaikan email ini.</p>
-    `;
-
-    const htmlTemplate = generateBaseEmailTemplate('OTP Registrasi - KeuanganKu', emailContent);
+    // [CLEANUP] Penggunaan Factory Template untuk Registrasi Awal (isResend = false)
+    const htmlTemplate = generateOtpEmailTemplate(dto.fullName, otpCode, false);
 
     this.emailService.sendEmail(dto.email, 'Kode Verifikasi KeuanganKu', htmlTemplate)
       .catch(err => this.logger.error(`[SILENT FAIL] Gagal mengirim OTP ke ${dto.email}`, err));
@@ -105,7 +96,6 @@ export class AuthService {
     }
 
     // 3. System of Record Insertion: Pindahkan ke PostgreSQL
-    // [FIX] Payload Prisma dibersihkan dari field yang tidak relevan
     try {
       const user = await this.prisma.user.create({
         data: {
@@ -201,17 +191,8 @@ export class AuthService {
     await this.redisService.setOtp(dto.email, otpData, 300);
 
     // 5. Delegasikan ulang pengiriman dengan OTP yang SAMA
-    const emailContent = `
-      <h2 style="color: #0d9488;">Kirim Ulang: Verifikasi Registrasi KeuanganKu</h2>
-      <p>Halo, ${otpData.fullName}!</p>
-      <p>Sesuai permintaan Anda, ini adalah pengingat untuk kode verifikasi OTP Anda.</p>
-      <div style="background-color: #f3f4f6; padding: 15px; margin: 20px 0; text-align: center; border-radius: 8px;">
-        <span style="font-size: 32px; font-weight: bold; letter-spacing: 5px; color: #1f2937;">${otpData.otpCode}</span>
-      </div>
-      <p>Jika Anda tidak merasa meminta pengiriman ulang ini, mohon abaikan email ini.</p>
-    `;
-
-    const htmlTemplate = generateBaseEmailTemplate('Kirim Ulang OTP Registrasi - KeuanganKu', emailContent);
+    // [CLEANUP] Penggunaan Factory Template untuk Kirim Ulang (isResend = true)
+    const htmlTemplate = generateOtpEmailTemplate(otpData.fullName, otpData.otpCode, true);
 
     this.emailService.sendEmail(dto.email, 'Kirim Ulang: Kode Verifikasi KeuanganKu', htmlTemplate)
       .catch(err => this.logger.error(`[SILENT FAIL] Gagal resend OTP ke ${dto.email}`, err));
