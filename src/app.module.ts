@@ -7,6 +7,7 @@ import { ServeStaticModule } from '@nestjs/serve-static';
 import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler'; // [NEW] Import Throttler
 import * as path from 'path';
+import { join } from 'path';
 
 // --- Logging & Config ---
 import { winstonConfig } from './common/configs/winston.config';
@@ -83,7 +84,12 @@ import { EmailModule } from './modules/email/email.module'; // [NEW] Import Modu
       rootPath: path.join(process.cwd(), 'uploads'),
       serveRoot: '/uploads',
     }),
-
+    // folder public baru
+    ServeStaticModule.forRoot({
+      rootPath: path.join(process.cwd(), 'public'),
+      serveRoot: '/',
+    }),
+    
     // 3. Database Layer (PostgreSQL & Redis)
     PrismaModule,
     RedisModule, // [NEW] Integrasi Redis sebagai state-manager sesi utama
