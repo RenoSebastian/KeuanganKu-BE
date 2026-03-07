@@ -17,7 +17,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { RedisService } from '../redis/redis.service';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { EmailService } from '../email/email.service';
-// [UPDATE] Kita hanya membutuhkan template OTP khusus, base template sudah dibungkus di dalamnya
 import { generateOtpEmailTemplate } from '../email/templates/otp-email.template';
 
 @Injectable()
@@ -34,10 +33,9 @@ export class AuthService {
   ) { }
 
   // =================================================================
-  // [PHASE 3] REGISTER: REDIS-FIRST DEFERRED INSERTION
+  // [PHASE 1] REGISTER: REDIS-FIRST DEFERRED INSERTION
   // =================================================================
   async register(dto: RegisterDto) {
-    // 1. Gatekeeper: Cek PostgreSQL agar email yang sudah aktif tidak ditimpa
     const existingUser = await this.prisma.user.findUnique({
       where: { email: dto.email }
     });
@@ -46,14 +44,10 @@ export class AuthService {
       throw new ForbiddenException('Email sudah terdaftar. Silakan langsung login.');
     }
 
-    // 2. Kriptografi: Hash password di memori (tidak di DB)
     const salt = await bcrypt.genSalt();
     const hash = await bcrypt.hash(dto.password, salt);
-
-    // 3. Generate OTP: Buat 6 digit angka acak (100000 - 999999)
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // 4. State Creation: Bungkus data sesuai kontrak RedisOtpData
     const otpData = {
       email: dto.email,
       fullName: dto.fullName,
@@ -63,14 +57,12 @@ export class AuthService {
       lastSentAt: Date.now(),
     };
 
-    // 5. In-Memory Storage: Simpan ke Redis dengan TTL 5 Menit (300 detik)
+    // Pendaftaran biasa menggunakan format standar
     await this.redisService.setOtp(dto.email, otpData, 300);
 
-    // 6. Asynchronous Delegation: Kirim Email Fire-and-Forget
-    // [CLEANUP] Penggunaan Factory Template untuk Registrasi Awal (isResend = false)
-    const htmlTemplate = generateOtpEmailTemplate(dto.fullName, otpCode, false);
+    const htmlTemplate = generateOtpEmailTemplate(dto.fullName, otpCode, false, 'REGISTER');
 
-    this.emailService.sendEmail(dto.email, 'Kode Verifikasi KeuanganKu', htmlTemplate)
+    this.emailService.sendEmail(dto.email, 'Kode Verifikasi Registrasi Agen', htmlTemplate)
       .catch(err => this.logger.error(`[SILENT FAIL] Gagal mengirim OTP ke ${dto.email}`, err));
 
     return {
@@ -80,77 +72,37 @@ export class AuthService {
   }
 
   // =================================================================
-  // [PHASE 3] VERIFY OTP: SYSTEM OF RECORD COMMIT & AUTO-LOGIN
+  // [PHASE 1] VERIFY OTP: SYSTEM OF RECORD COMMIT
   // =================================================================
   async verifyOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
-    // 1. State Lookup
     const otpData = await this.redisService.getOtp(dto.email);
 
     if (!otpData) {
       throw new BadRequestException('Sesi registrasi telah kedaluwarsa atau email tidak valid. Silakan daftar ulang.');
     }
 
-    // 2. Exact Match Validation
     if (otpData.otpCode !== dto.otpCode) {
       throw new BadRequestException('Kode OTP yang Anda masukkan salah.');
     }
 
-    // 3. System of Record Insertion: Pindahkan ke PostgreSQL
     try {
       const user = await this.prisma.user.create({
         data: {
           email: otpData.email,
           fullName: otpData.fullName,
           passwordHash: otpData.passwordHash,
-          role: 'USER', // Role standar untuk Agen SaaS
+          role: 'USER',
           usage: {
-            create: {
-              simulationQuota: 10, // Kuota awal
-              totalUsed: 0,
-            },
+            create: { simulationQuota: 10, totalUsed: 0 },
           },
         },
       });
 
-      // 4. Garbage Collection / Idempotency
       await this.redisService.deleteOtp(dto.email);
 
-      // 5. Seamless Auto-Login (Identik dengan logic Login normal)
-      const sessionId = uuidv4();
-      const tokens = await this.generateTokens(user.id, user.email, user.role, sessionId);
-
-      const salt = await bcrypt.genSalt();
-      const rtHash = await bcrypt.hash(tokens.refresh_token, salt);
-
-      await this.redisService.setSession(user.id, {
-        sessionId,
-        deviceId: dto.deviceId,
-        socketId: null,
-        refreshTokenHash: rtHash,
-      });
-
-      await this.prisma.activeSession.create({
-        data: {
-          sessionId,
-          deviceId: dto.deviceId,
-          userId: user.id,
-          ipAddress: meta.ipAddress,
-          deviceInfo: meta.userAgent,
-          refreshTokenHash: rtHash,
-        }
-      });
-
-      const { passwordHash, ...userData } = user;
-
-      return {
-        message: 'Registrasi dan verifikasi berhasil. Anda telah otomatis login.',
-        access_token: tokens.access_token,
-        refresh_token: tokens.refresh_token,
-        user: userData,
-      };
+      return this.finalizeLoginSession(user, dto.deviceId, meta);
 
     } catch (error) {
-      // Menangkap potensi race condition jika di tengah 5 menit admin mendaftarkan email yang sama
       if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
         throw new ForbiddenException('Terjadi konflik data. Email ini baru saja didaftarkan di sistem utama.');
       }
@@ -158,43 +110,30 @@ export class AuthService {
     }
   }
 
-  // =================================================================
-  // [PHASE 3] RESEND OTP: RATE LIMITING & COOLDOWN LOGIC
-  // =================================================================
   async resendOtp(dto: ResendOtpDto) {
-    // 1. State Lookup
     const otpData = await this.redisService.getOtp(dto.email);
 
-    if (!otpData) {
-      throw new BadRequestException('Sesi registrasi tidak ditemukan atau telah kedaluwarsa. Silakan daftar ulang.');
-    }
+    if (!otpData) throw new BadRequestException('Sesi registrasi tidak ditemukan atau telah kedaluwarsa.');
 
     const now = Date.now();
     const timeSinceLastSent = now - otpData.lastSentAt;
 
-    // 2. Defense Layer 1: Cooldown (60 Detik)
     if (timeSinceLastSent < 60000) {
       const waitTime = Math.ceil((60000 - timeSinceLastSent) / 1000);
       throw new BadRequestException(`Harap tunggu ${waitTime} detik sebelum meminta OTP baru.`);
     }
 
-    // 3. Defense Layer 2: Hard Limit (Max 2 Resend)
     if (otpData.resendCount >= 2) {
-      throw new BadRequestException('Batas pengiriman ulang tercapai. Silakan periksa folder Spam Anda atau coba daftar ulang setelah sesi ini berakhir (5 Menit).');
+      throw new BadRequestException('Batas pengiriman ulang tercapai. Silakan coba daftar ulang setelah sesi ini berakhir (5 Menit).');
     }
 
-    // 4. Update State Variables
     otpData.resendCount += 1;
     otpData.lastSentAt = now;
-
-    // Simpan kembali ke Redis. (Mengembalikan TTL ke 300s agar user punya cukup waktu membaca email baru)
     await this.redisService.setOtp(dto.email, otpData, 300);
 
-    // 5. Delegasikan ulang pengiriman dengan OTP yang SAMA
-    // [CLEANUP] Penggunaan Factory Template untuk Kirim Ulang (isResend = true)
-    const htmlTemplate = generateOtpEmailTemplate(otpData.fullName, otpData.otpCode, true);
+    const htmlTemplate = generateOtpEmailTemplate(otpData.fullName, otpData.otpCode, true, 'REGISTER');
 
-    this.emailService.sendEmail(dto.email, 'Kirim Ulang: Kode Verifikasi KeuanganKu', htmlTemplate)
+    this.emailService.sendEmail(dto.email, 'Kirim Ulang: Kode Verifikasi Registrasi', htmlTemplate)
       .catch(err => this.logger.error(`[SILENT FAIL] Gagal resend OTP ke ${dto.email}`, err));
 
     return {
@@ -205,76 +144,134 @@ export class AuthService {
   }
 
   // =================================================================
-  // LOGIN (Single Concurrent Session & Hybrid JWT)
+  // [PHASE 2] LOGIN: 2FA INITIATION (REQUEST OTP)
   // =================================================================
-  async login(dto: LoginDto, meta: { ipAddress: string; userAgent: string }) {
-    // 1. Validasi Kredensial Database
+  async login(dto: LoginDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email }
+    });
+
+    if (!user) throw new UnauthorizedException('Kredensial tidak valid (Email tidak ditemukan)');
+
+    const pwMatches = await bcrypt.compare(dto.password, user.passwordHash);
+    if (!pwMatches) throw new UnauthorizedException('Kredensial tidak valid (Password salah)');
+
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // [FIX] Kita meminjam struktur data RedisOtpData (memiliki passwordHash), tapi kita isi kosong (karena login tidak butuh hash baru)
+    const loginData = {
+      email: user.email,
+      fullName: user.fullName,
+      otpCode: otpCode,
+      passwordHash: '', // Dikosongkan, tidak digunakan saat verifikasi login
+      resendCount: 0,
+      lastSentAt: Date.now(),
+    };
+
+    const loginIdentifier = `login:${user.email}`;
+
+    // [FIX] Memanfaatkan setter yang sudah ada secara elegan
+    await this.redisService.setOtp(loginIdentifier, loginData, 300);
+
+    // Simpan DeviceID sementara di session biasa (bukan active session), 
+    // karena RedisOtpData Anda mungkin tidak memiliki properti deviceId.
+    // Alternatif ini sangat aman dan menghindari perubahan interface DTO di RedisService
+    await this.redisService.setSession(`pending_device:${user.email}`, {
+      sessionId: 'pending',
+      deviceId: dto.deviceId,
+      socketId: null,
+      refreshTokenHash: ''
+    });
+
+    const htmlTemplate = generateOtpEmailTemplate(user.fullName, otpCode, false, 'LOGIN');
+
+    this.emailService.sendEmail(user.email, 'Kode Keamanan Akses Portal KeuanganKu', htmlTemplate)
+      .catch(err => this.logger.error(`[SILENT FAIL] Gagal mengirim OTP Login ke ${user.email}`, err));
+
+    return {
+      message: 'LOGIN_OTP_SENT',
+      email: user.email,
+      expiresIn: '5 Menit'
+    };
+  }
+
+  // =================================================================
+  // [PHASE 3] VERIFY LOGIN OTP (2FA RESOLUTION)
+  // =================================================================
+  async verifyLoginOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
+    const loginIdentifier = `login:${dto.email}`;
+
+    // [FIX] Memanfaatkan getter yang sudah ada
+    const loginData = await this.redisService.getOtp(loginIdentifier);
+
+    if (!loginData) {
+      throw new BadRequestException('Sesi login telah kedaluwarsa. Silakan masukkan password kembali.');
+    }
+
+    if (loginData.otpCode !== dto.otpCode) {
+      throw new BadRequestException('Kode keamanan salah.');
+    }
+
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email },
       include: {
         usage: true,
-        subscription: {
-          include: { plan: true },
-        },
+        subscription: { include: { plan: true } },
       },
     });
 
-    if (!user) throw new ForbiddenException('Kredensial tidak valid (Email tidak ditemukan)');
+    if (!user) throw new UnauthorizedException('Pengguna tidak ditemukan di sistem.');
 
-    const pwMatches = await bcrypt.compare(dto.password, user.passwordHash);
-    if (!pwMatches) throw new ForbiddenException('Kredensial tidak valid (Password salah)');
+    // [FIX] Memanfaatkan deleter yang sudah ada
+    await this.redisService.deleteOtp(loginIdentifier);
 
-    // 2. Otoritas Opsi B (Last-In Wins): Periksa Sesi Lama di Redis
-    const oldSession = await this.redisService.getSession(user.id);
+    // Ambil device ID asli yang disimpan saat inisiasi
+    const pendingSession = await this.redisService.getSession(`pending_device:${dto.email}`);
+    const originalDeviceId = pendingSession ? pendingSession.deviceId : dto.deviceId;
 
-    if (oldSession) {
-      this.logger.warn(`[Session Kicked] User ${user.email} login dari perangkat baru. Menendang sesi lama.`);
+    // Bersihkan pending device
+    await this.redisService.deleteSession(`pending_device:${dto.email}`);
 
-      // Putus koneksi WebSocket lama jika terhubung
-      if (oldSession.socketId) {
-        this.notificationGateway.forceDisconnectClient(oldSession.socketId, 'concurrent_login');
-      }
+    return this.finalizeLoginSession(user, originalDeviceId, meta);
+  }
+
+  // =================================================================
+  // [PHASE 3] RESEND LOGIN OTP
+  // =================================================================
+  async resendLoginOtp(dto: ResendOtpDto) {
+    const loginIdentifier = `login:${dto.email}`;
+
+    // [FIX] Memanfaatkan getter yang sudah ada
+    const loginData = await this.redisService.getOtp(loginIdentifier);
+
+    if (!loginData) throw new BadRequestException('Sesi login tidak ditemukan. Silakan ulangi proses login.');
+
+    const now = Date.now();
+    const timeSinceLastSent = now - loginData.lastSentAt;
+
+    if (timeSinceLastSent < 60000) {
+      const waitTime = Math.ceil((60000 - timeSinceLastSent) / 1000);
+      throw new BadRequestException(`Harap tunggu ${waitTime} detik sebelum meminta kode baru.`);
     }
 
-    // 3. Bangun Sesi Baru
-    const sessionId = uuidv4();
-    const tokens = await this.generateTokens(user.id, user.email, user.role, sessionId);
+    if (loginData.resendCount >= 2) {
+      throw new BadRequestException('Batas pengiriman ulang tercapai. Silakan coba login kembali setelah 5 menit.');
+    }
 
-    // Hash Refresh Token sebelum masuk Redis & Database (Mencegah eksploitasi jika DB bocor)
-    const salt = await bcrypt.genSalt();
-    const rtHash = await bcrypt.hash(tokens.refresh_token, salt);
+    loginData.resendCount += 1;
+    loginData.lastSentAt = now;
 
-    // 4. Overwrite Redis (Atomik O(1))
-    await this.redisService.setSession(user.id, {
-      sessionId,
-      deviceId: dto.deviceId,
-      socketId: null, // Socket akan diisi saat FE melakukan inisialisasi WSS pasca-login
-      refreshTokenHash: rtHash,
-    });
+    // [FIX] Memanfaatkan setter yang sudah ada
+    await this.redisService.setOtp(loginIdentifier, loginData, 300);
 
-    // 5. Sinkronisasi System of Record (PostgreSQL)
-    // Gunakan Transaction untuk memastikan konsistensi penghapusan dan pembuatan sesi
-    await this.prisma.$transaction([
-      this.prisma.activeSession.deleteMany({ where: { userId: user.id } }),
-      this.prisma.activeSession.create({
-        data: {
-          sessionId,
-          deviceId: dto.deviceId,
-          userId: user.id,
-          ipAddress: meta.ipAddress,
-          deviceInfo: meta.userAgent,
-          refreshTokenHash: rtHash,
-        }
-      })
-    ]);
+    const htmlTemplate = generateOtpEmailTemplate(loginData.fullName, loginData.otpCode, true, 'LOGIN');
+    this.emailService.sendEmail(loginData.email, 'Pengingat Kode Keamanan Login', htmlTemplate)
+      .catch(err => this.logger.error(`[SILENT FAIL] Gagal resend OTP Login ke ${loginData.email}`, err));
 
-    const { passwordHash, ...userData } = user;
-
-    // 6. Return Payload ke Frontend
     return {
-      access_token: tokens.access_token,
-      refresh_token: tokens.refresh_token,
-      user: userData,
+      message: 'OTP berhasil dikirim ulang.',
+      resendCount: loginData.resendCount,
+      maxResend: 2
     };
   }
 
@@ -283,7 +280,6 @@ export class AuthService {
   // =================================================================
   async refreshTokens(dto: RefreshTokenDto) {
     try {
-      // 1. Ekstrak data dari Refresh Token (yang berbentuk JWT)
       const secret = this.config.get<string>('JWT_SECRET');
       const payload = await this.jwt.verifyAsync(dto.refreshToken, { secret });
 
@@ -293,43 +289,33 @@ export class AuthService {
 
       const userId = payload.sub;
 
-      // 2. Validasi terhadap In-Memory State (Redis)
       const activeSession = await this.redisService.getSession(userId);
 
       if (!activeSession) {
         throw new UnauthorizedException('Sesi telah berakhir atau Anda telah dikeluarkan.');
       }
 
-      // 3. Validasi Device Fingerprint (Mencegah Session Hijacking)
       if (activeSession.deviceId !== dto.deviceId) {
-        // [SECURITY BREACH DETECTED]
-        // Jika Refresh Token valid tapi dimainkan di Device ID berbeda, 
-        // kita musnahkan sesi karena indikasi pencurian token.
         await this.redisService.deleteSession(userId);
         throw new UnauthorizedException('Aktivitas mencurigakan terdeteksi. Sesi dihentikan demi keamanan.');
       }
 
-      // 4. Validasi Kriptografis RT dengan Hash di Redis
       const rtMatches = await bcrypt.compare(dto.refreshToken, activeSession.refreshTokenHash);
       if (!rtMatches) {
         throw new UnauthorizedException('Kredensial Refresh Token tidak cocok.');
       }
 
-      // 5. Terbitkan Pasangan Token Baru (Rotation)
       const user = await this.prisma.user.findUnique({ where: { id: userId } });
       if (!user) throw new UnauthorizedException('Pengguna tidak ditemukan.');
 
-      // Gunakan sessionId yang sama untuk mempertahankan kontiunitas sesi
       const tokens = await this.generateTokens(user.id, user.email, user.role, activeSession.sessionId);
 
       const salt = await bcrypt.genSalt();
       const newRtHash = await bcrypt.hash(tokens.refresh_token, salt);
 
-      // 6. Update Redis dengan Hash Baru
       activeSession.refreshTokenHash = newRtHash;
       await this.redisService.setSession(userId, activeSession);
 
-      // (Opsional) Update PostgreSQL secara asinkron (Fire and Forget) untuk performa
       this.prisma.activeSession.update({
         where: { sessionId: activeSession.sessionId },
         data: { refreshTokenHash: newRtHash, lastActivityAt: new Date() }
@@ -347,13 +333,67 @@ export class AuthService {
   }
 
   // =================================================================
-  // HELPER: HYBRID TOKEN GENERATOR
+  // PRIVATE HELPER: STANDARDIZASI PEMBUATAN SESI
   // =================================================================
+  private async finalizeLoginSession(user: any, deviceId: string, meta: { ipAddress: string; userAgent: string }) {
+    // 1. Otoritas Opsi B (Last-In Wins): Periksa Sesi Lama di Redis
+    const oldSession = await this.redisService.getSession(user.id);
+
+    if (oldSession) {
+      this.logger.warn(`[Session Kicked] User ${user.email} login dari perangkat baru. Menendang sesi lama.`);
+
+      // Putus koneksi WebSocket lama jika terhubung
+      if (oldSession.socketId) {
+        this.notificationGateway.forceDisconnectClient(oldSession.socketId, 'concurrent_login');
+      }
+    }
+
+    // 2. Bangun Sesi Baru
+    const sessionId = uuidv4();
+    const tokens = await this.generateTokens(user.id, user.email, user.role, sessionId);
+
+    // Hash Refresh Token sebelum masuk Redis & Database
+    const salt = await bcrypt.genSalt();
+    const rtHash = await bcrypt.hash(tokens.refresh_token, salt);
+
+    // 3. Overwrite Redis (Atomik O(1))
+    await this.redisService.setSession(user.id, {
+      sessionId,
+      deviceId,
+      socketId: null,
+      refreshTokenHash: rtHash,
+    });
+
+    // 4. Sinkronisasi System of Record (PostgreSQL)
+    await this.prisma.$transaction([
+      this.prisma.activeSession.deleteMany({ where: { userId: user.id } }),
+      this.prisma.activeSession.create({
+        data: {
+          sessionId,
+          deviceId,
+          userId: user.id,
+          ipAddress: meta.ipAddress,
+          deviceInfo: meta.userAgent,
+          refreshTokenHash: rtHash,
+        }
+      })
+    ]);
+
+    const { passwordHash, ...userData } = user;
+
+    // 5. Return Payload JWT & Profil ke Frontend
+    return {
+      message: 'Verifikasi berhasil. Anda telah otomatis masuk.',
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+      user: userData,
+    };
+  }
+
   private async generateTokens(userId: string, email: string, role: string, sessionId: string) {
     const secret = this.config.get<string>('JWT_SECRET');
 
     // Access Token (Usia Pendek - Contoh: 15 Menit)
-    // Menyimpan sessionId untuk divalidasi oleh Guard di setiap request API
     const atPayload = { sub: userId, email, role, sessionId, type: 'ACCESS' };
     const accessToken = await this.jwt.signAsync(atPayload, {
       secret,

@@ -1,59 +1,88 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, Length } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MinLength, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
+// ====================================================================
+// 1. REGISTER DTO (Agent Profile)
+// ====================================================================
 export class RegisterDto {
-  @ApiProperty({ example: 'budi@pamjaya.co.id' })
-  @IsEmail()
-  @IsNotEmpty()
+  @ApiProperty({ example: 'budi.agent@gmail.com' })
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  @IsNotEmpty({ message: 'Email wajib diisi' })
   email: string;
 
-  @ApiProperty({ example: 'RahasiaNegara123' })
+  @ApiProperty({ example: 'RahasiaAgen123' })
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Password tidak boleh kosong' })
   @MinLength(6, { message: 'Password minimal 6 karakter' })
   password: string;
 
-  @ApiProperty({ example: 'Budi Santoso' })
+  @ApiProperty({ example: 'Budi Santoso, RFP' })
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Nama lengkap wajib diisi' })
   fullName: string;
 }
 
+// ====================================================================
+// 2. LOGIN DTO (Initiation Phase)
+// ====================================================================
 export class LoginDto {
-  @ApiProperty({ example: 'budi@pamjaya.co.id' })
-  @IsEmail()
-  @IsNotEmpty()
+  @ApiProperty({ example: 'budi.agent@gmail.com' })
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  @IsNotEmpty({ message: 'Email wajib diisi' })
   email: string;
 
-  @ApiProperty({ example: 'RahasiaNegara123' })
+  @ApiProperty({ example: 'RahasiaAgen123' })
   @IsString()
-  @IsNotEmpty()
+  @IsNotEmpty({ message: 'Password tidak boleh kosong' })
   password: string;
 
-  // [UPDATE] Jadikan Optional.
-  // Jika dikirim, FE bisa kirim kode "IT-01", "FIN-01".
-  // Jika tidak dikirim, Backend akan set ke default "IT-01".
-  @ApiProperty({ example: 'IT-01', required: false })
-  @IsString()
-  @IsOptional()
-  unitKerjaId?: string;
-
-  // ====================================================================
-  // [NEW] SINGLE CONCURRENT SESSION IDENTIFIER
-  // ====================================================================
-  // Atribut ini wajib. Di Controller, kita akan menangkapnya dari
-  // HTTP Header 'x-device-id' dan memasukkannya ke payload ini.
+  // [CLEANUP]: Menghapus unitKerjaId karena aplikasi sudah pivot ke SaaS Agen mandiri.
+  // Device ID tetap wajib untuk mendukung Single Concurrent Session paska-login.
   @ApiProperty({
     example: 'c2f7b8a1-3d9a-4f81-9b62-1b8a5d4c3f91',
-    description: 'Device Fingerprint / AppMySite Client ID'
+    description: 'Device Fingerprint untuk pelacakan sesi'
   })
   @IsString()
-  @IsNotEmpty({ message: 'Device ID tidak boleh kosong untuk pelacakan sesi' })
+  @IsNotEmpty({ message: 'Device ID wajib disertakan untuk keamanan sesi' })
   deviceId: string;
 }
 
 // ====================================================================
-// [NEW] DTO UNTUK REFRESH TOKEN ROTATION
+// 3. VERIFY OTP DTO (Digunakan untuk Registrasi & Login 2FA)
+// ====================================================================
+export class VerifyOtpDto {
+  @ApiProperty({ example: 'budi.agent@gmail.com' })
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  @IsNotEmpty({ message: 'Email wajib diisi' })
+  email: string;
+
+  @ApiProperty({ example: '123456', description: '6 digit kode OTP dari email' })
+  @IsString()
+  @IsNotEmpty({ message: 'Kode OTP tidak boleh kosong' })
+  @Length(6, 6, { message: 'Kode OTP wajib 6 digit' })
+  otpCode: string;
+
+  @ApiProperty({
+    example: 'c2f7b8a1-3d9a-4f81-9b62-1b8a5d4c3f91',
+    description: 'Device ID diperlukan untuk otorisasi sesi otomatis'
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Device ID diperlukan untuk keamanan sesi' })
+  deviceId: string;
+}
+
+// ====================================================================
+// 4. RESEND OTP DTO (Digunakan untuk Registrasi & Login 2FA)
+// ====================================================================
+export class ResendOtpDto {
+  @ApiProperty({ example: 'budi.agent@gmail.com' })
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  @IsNotEmpty({ message: 'Email wajib diisi' })
+  email: string;
+}
+
+// ====================================================================
+// 5. REFRESH TOKEN DTO
 // ====================================================================
 export class RefreshTokenDto {
   @ApiProperty({
@@ -69,42 +98,6 @@ export class RefreshTokenDto {
     description: 'Harus cocok dengan perangkat saat login awal'
   })
   @IsString()
-  @IsNotEmpty({ message: 'Device ID wajib disertakan untuk validasi rotasi token' })
+  @IsNotEmpty({ message: 'Device ID wajib disertakan' })
   deviceId: string;
-}
-
-// ====================================================================
-// [NEW] DTO UNTUK VERIFIKASI OTP REGISTRASI (FASE 1)
-// ====================================================================
-export class VerifyOtpDto {
-  @ApiProperty({ example: 'budi@pamjaya.co.id' })
-  @IsEmail({}, { message: 'Format email tidak valid' })
-  @IsNotEmpty({ message: 'Email wajib diisi' })
-  email: string;
-
-  // Menggunakan @Length(6, 6) memastikan validasi strict yang tidak membiarkan 
-  // angka kurang atau lebih dari 6 digit masuk ke proses verifikasi memori Redis.
-  @ApiProperty({ example: '123456', description: '6 digit kode OTP dari email' })
-  @IsString()
-  @IsNotEmpty({ message: 'Kode OTP tidak boleh kosong' })
-  @Length(6, 6, { message: 'Kode OTP wajib terdiri dari 6 digit karakter' })
-  otpCode: string;
-
-  @ApiProperty({
-    example: 'c2f7b8a1-3d9a-4f81-9b62-1b8a5d4c3f91',
-    description: 'Device ID diperlukan untuk inisiasi Auto-Login pasca verifikasi'
-  })
-  @IsString()
-  @IsNotEmpty({ message: 'Device ID diperlukan untuk otorisasi sesi' })
-  deviceId: string;
-}
-
-// ====================================================================
-// [NEW] DTO UNTUK PERMINTAAN ULANG OTP (RESEND)
-// ====================================================================
-export class ResendOtpDto {
-  @ApiProperty({ example: 'budi@pamjaya.co.id', description: 'Email akun yang belum terverifikasi' })
-  @IsEmail({}, { message: 'Format email tidak valid' })
-  @IsNotEmpty({ message: 'Email wajib diisi' })
-  email: string;
 }
