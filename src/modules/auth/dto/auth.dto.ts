@@ -1,12 +1,7 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional } from 'class-validator';
+import { IsEmail, IsNotEmpty, IsString, MinLength, IsOptional, Length } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class RegisterDto {
-  @ApiProperty({ example: '10203040' })
-  @IsString()
-  @IsOptional()
-  nip: string;
-
   @ApiProperty({ example: 'budi@pamjaya.co.id' })
   @IsEmail()
   @IsNotEmpty()
@@ -22,11 +17,6 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   fullName: string;
-
-  @ApiProperty({ example: 'IT-001' })
-  @IsString()
-  @IsOptional()
-  unitKerjaId: string; // Nanti kita seed Unit Kerja dulu
 }
 
 export class LoginDto {
@@ -81,4 +71,40 @@ export class RefreshTokenDto {
   @IsString()
   @IsNotEmpty({ message: 'Device ID wajib disertakan untuk validasi rotasi token' })
   deviceId: string;
+}
+
+// ====================================================================
+// [NEW] DTO UNTUK VERIFIKASI OTP REGISTRASI (FASE 1)
+// ====================================================================
+export class VerifyOtpDto {
+  @ApiProperty({ example: 'budi@pamjaya.co.id' })
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  @IsNotEmpty({ message: 'Email wajib diisi' })
+  email: string;
+
+  // Menggunakan @Length(6, 6) memastikan validasi strict yang tidak membiarkan 
+  // angka kurang atau lebih dari 6 digit masuk ke proses verifikasi memori Redis.
+  @ApiProperty({ example: '123456', description: '6 digit kode OTP dari email' })
+  @IsString()
+  @IsNotEmpty({ message: 'Kode OTP tidak boleh kosong' })
+  @Length(6, 6, { message: 'Kode OTP wajib terdiri dari 6 digit karakter' })
+  otpCode: string;
+
+  @ApiProperty({
+    example: 'c2f7b8a1-3d9a-4f81-9b62-1b8a5d4c3f91',
+    description: 'Device ID diperlukan untuk inisiasi Auto-Login pasca verifikasi'
+  })
+  @IsString()
+  @IsNotEmpty({ message: 'Device ID diperlukan untuk otorisasi sesi' })
+  deviceId: string;
+}
+
+// ====================================================================
+// [NEW] DTO UNTUK PERMINTAAN ULANG OTP (RESEND)
+// ====================================================================
+export class ResendOtpDto {
+  @ApiProperty({ example: 'budi@pamjaya.co.id', description: 'Email akun yang belum terverifikasi' })
+  @IsEmail({}, { message: 'Format email tidak valid' })
+  @IsNotEmpty({ message: 'Email wajib diisi' })
+  email: string;
 }

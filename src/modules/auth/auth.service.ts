@@ -3,19 +3,22 @@ import {
   Injectable,
   UnauthorizedException,
   InternalServerErrorException,
+  BadRequestException,
   Logger
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { RegisterDto, LoginDto, RefreshTokenDto } from './dto/auth.dto';
+import { RegisterDto, LoginDto, RefreshTokenDto, VerifyOtpDto, ResendOtpDto } from './dto/auth.dto';
 import * as bcrypt from 'bcrypt';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { v4 as uuidv4 } from 'uuid';
 
-// Injeksi Layer Memori & Event
 import { RedisService } from '../redis/redis.service';
 import { NotificationGateway } from '../notification/notification.gateway';
+import { EmailService } from '../email/email.service';
+// [UPDATE] Kita hanya membutuhkan template OTP khusus, base template sudah dibungkus di dalamnya
+import { generateOtpEmailTemplate } from '../email/templates/otp-email.template';
 
 @Injectable()
 export class AuthService {
@@ -27,52 +30,178 @@ export class AuthService {
     private config: ConfigService,
     private redisService: RedisService,
     private notificationGateway: NotificationGateway,
+    private emailService: EmailService,
   ) { }
 
   // =================================================================
-  // REGISTER (User Onboarding + Quota Initialization)
+  // [PHASE 3] REGISTER: REDIS-FIRST DEFERRED INSERTION
   // =================================================================
   async register(dto: RegisterDto) {
+    // 1. Gatekeeper: Cek PostgreSQL agar email yang sudah aktif tidak ditimpa
+    const existingUser = await this.prisma.user.findUnique({
+      where: { email: dto.email }
+    });
+
+    if (existingUser) {
+      throw new ForbiddenException('Email sudah terdaftar. Silakan langsung login.');
+    }
+
+    // 2. Kriptografi: Hash password di memori (tidak di DB)
     const salt = await bcrypt.genSalt();
     const hash = await bcrypt.hash(dto.password, salt);
 
+    // 3. Generate OTP: Buat 6 digit angka acak (100000 - 999999)
+    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 4. State Creation: Bungkus data sesuai kontrak RedisOtpData
+    const otpData = {
+      email: dto.email,
+      fullName: dto.fullName,
+      passwordHash: hash,
+      otpCode: otpCode,
+      resendCount: 0,
+      lastSentAt: Date.now(),
+    };
+
+    // 5. In-Memory Storage: Simpan ke Redis dengan TTL 5 Menit (300 detik)
+    await this.redisService.setOtp(dto.email, otpData, 300);
+
+    // 6. Asynchronous Delegation: Kirim Email Fire-and-Forget
+    // [CLEANUP] Penggunaan Factory Template untuk Registrasi Awal (isResend = false)
+    const htmlTemplate = generateOtpEmailTemplate(dto.fullName, otpCode, false);
+
+    this.emailService.sendEmail(dto.email, 'Kode Verifikasi KeuanganKu', htmlTemplate)
+      .catch(err => this.logger.error(`[SILENT FAIL] Gagal mengirim OTP ke ${dto.email}`, err));
+
+    return {
+      message: 'OTP berhasil dikirim. Silakan periksa kotak masuk email Anda.',
+      expiresIn: '5 Menit',
+    };
+  }
+
+  // =================================================================
+  // [PHASE 3] VERIFY OTP: SYSTEM OF RECORD COMMIT & AUTO-LOGIN
+  // =================================================================
+  async verifyOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
+    // 1. State Lookup
+    const otpData = await this.redisService.getOtp(dto.email);
+
+    if (!otpData) {
+      throw new BadRequestException('Sesi registrasi telah kedaluwarsa atau email tidak valid. Silakan daftar ulang.');
+    }
+
+    // 2. Exact Match Validation
+    if (otpData.otpCode !== dto.otpCode) {
+      throw new BadRequestException('Kode OTP yang Anda masukkan salah.');
+    }
+
+    // 3. System of Record Insertion: Pindahkan ke PostgreSQL
     try {
       const user = await this.prisma.user.create({
         data: {
-          email: dto.email,
-          fullName: dto.fullName,
-          passwordHash: hash,
-          role: 'USER',
+          email: otpData.email,
+          fullName: otpData.fullName,
+          passwordHash: otpData.passwordHash,
+          role: 'USER', // Role standar untuk Agen SaaS
           usage: {
             create: {
-              simulationQuota: 10,
+              simulationQuota: 10, // Kuota awal
               totalUsed: 0,
             },
           },
         },
-        include: {
-          usage: true,
-          subscription: true,
-        },
       });
 
-      // Secara arsitektural untuk keamanan SaaS, pasca-register user sebaiknya 
-      // diarahkan untuk login ulang agar proses penangkapan Device-ID lebih akurat.
-      // Namun untuk menjaga backward compatibility dengan FE, kita berikan sesi default.
+      // 4. Garbage Collection / Idempotency
+      await this.redisService.deleteOtp(dto.email);
+
+      // 5. Seamless Auto-Login (Identik dengan logic Login normal)
+      const sessionId = uuidv4();
+      const tokens = await this.generateTokens(user.id, user.email, user.role, sessionId);
+
+      const salt = await bcrypt.genSalt();
+      const rtHash = await bcrypt.hash(tokens.refresh_token, salt);
+
+      await this.redisService.setSession(user.id, {
+        sessionId,
+        deviceId: dto.deviceId,
+        socketId: null,
+        refreshTokenHash: rtHash,
+      });
+
+      await this.prisma.activeSession.create({
+        data: {
+          sessionId,
+          deviceId: dto.deviceId,
+          userId: user.id,
+          ipAddress: meta.ipAddress,
+          deviceInfo: meta.userAgent,
+          refreshTokenHash: rtHash,
+        }
+      });
+
       const { passwordHash, ...userData } = user;
+
       return {
-        message: 'Registrasi berhasil. Silakan login untuk memulai sesi yang aman.',
+        message: 'Registrasi dan verifikasi berhasil. Anda telah otomatis login.',
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
         user: userData,
       };
 
     } catch (error) {
-      if (error instanceof PrismaClientKnownRequestError) {
-        if (error.code === 'P2002') {
-          throw new ForbiddenException('Email sudah terdaftar, silakan login.');
-        }
+      // Menangkap potensi race condition jika di tengah 5 menit admin mendaftarkan email yang sama
+      if (error instanceof PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ForbiddenException('Terjadi konflik data. Email ini baru saja didaftarkan di sistem utama.');
       }
-      throw error;
+      throw new InternalServerErrorException('Gagal menyelesaikan registrasi ke basis data. Hubungi administrator.');
     }
+  }
+
+  // =================================================================
+  // [PHASE 3] RESEND OTP: RATE LIMITING & COOLDOWN LOGIC
+  // =================================================================
+  async resendOtp(dto: ResendOtpDto) {
+    // 1. State Lookup
+    const otpData = await this.redisService.getOtp(dto.email);
+
+    if (!otpData) {
+      throw new BadRequestException('Sesi registrasi tidak ditemukan atau telah kedaluwarsa. Silakan daftar ulang.');
+    }
+
+    const now = Date.now();
+    const timeSinceLastSent = now - otpData.lastSentAt;
+
+    // 2. Defense Layer 1: Cooldown (60 Detik)
+    if (timeSinceLastSent < 60000) {
+      const waitTime = Math.ceil((60000 - timeSinceLastSent) / 1000);
+      throw new BadRequestException(`Harap tunggu ${waitTime} detik sebelum meminta OTP baru.`);
+    }
+
+    // 3. Defense Layer 2: Hard Limit (Max 2 Resend)
+    if (otpData.resendCount >= 2) {
+      throw new BadRequestException('Batas pengiriman ulang tercapai. Silakan periksa folder Spam Anda atau coba daftar ulang setelah sesi ini berakhir (5 Menit).');
+    }
+
+    // 4. Update State Variables
+    otpData.resendCount += 1;
+    otpData.lastSentAt = now;
+
+    // Simpan kembali ke Redis. (Mengembalikan TTL ke 300s agar user punya cukup waktu membaca email baru)
+    await this.redisService.setOtp(dto.email, otpData, 300);
+
+    // 5. Delegasikan ulang pengiriman dengan OTP yang SAMA
+    // [CLEANUP] Penggunaan Factory Template untuk Kirim Ulang (isResend = true)
+    const htmlTemplate = generateOtpEmailTemplate(otpData.fullName, otpData.otpCode, true);
+
+    this.emailService.sendEmail(dto.email, 'Kirim Ulang: Kode Verifikasi KeuanganKu', htmlTemplate)
+      .catch(err => this.logger.error(`[SILENT FAIL] Gagal resend OTP ke ${dto.email}`, err));
+
+    return {
+      message: 'OTP berhasil dikirim ulang. Silakan periksa kotak masuk email Anda.',
+      resendCount: otpData.resendCount,
+      maxResend: 2
+    };
   }
 
   // =================================================================

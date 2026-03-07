@@ -39,6 +39,7 @@ import { EducationModule } from './modules/education/education.module';
 import { MediaModule } from './modules/media/media.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { NotificationModule } from './modules/notification/notification.module';
+import { EmailModule } from './modules/email/email.module'; // [NEW] Import Modul Email Independen
 // import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomment jika AdminModule sudah dibuat di Fase 4
 
 @Module({
@@ -101,6 +102,7 @@ import { NotificationModule } from './modules/notification/notification.module';
     MediaModule,
     SubscriptionModule,
     NotificationModule,
+    EmailModule, // [NEW] Register Modul SMTP ke dalam root node aplikasi
     // AdminModule, // Uncomment jika sudah ready
   ],
   controllers: [],
