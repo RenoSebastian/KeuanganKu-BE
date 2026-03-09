@@ -163,6 +163,7 @@ export class EducationCalculatorService {
                 totalFutureCost: grandTotalFutureCost,
                 totalMonthlySaving: grandTotalMonthlySaving,
                 childrenPlans: dto.childrenPlans,
+                clientName: dto.clientName,
             };
 
             const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
