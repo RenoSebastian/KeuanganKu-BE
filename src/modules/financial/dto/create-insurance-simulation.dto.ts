@@ -53,7 +53,7 @@ export class CreateInsuranceSimulationDto {
 
     @ApiProperty({ example: '1985-08-17', description: 'Tanggal lahir klien (ISO 8601)' })
     @IsDateString()
-    @IsNotEmpty()
+    @IsOptional()
     clientDob: string;
 
     @ApiProperty({ example: 'Jakarta Selatan', description: 'Kota domisili klien' })
