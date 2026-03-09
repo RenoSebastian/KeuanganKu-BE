@@ -1356,23 +1356,35 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         agent: User
     ): Promise<Buffer> {
 
-        // 1. Prepare Context Data for Handlebars
+        // 1. Prepare Context Data for Handlebars (Mapping strictly matched with View Template)
         const context = {
+            // --- ROOT DATA: Wajib Sama Persis dengan Template HTML ---
+            clientName: clientData.clientName,
             generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
-            documentId: `RISK-${Math.random().toString(36).substring(7).toUpperCase()}`,
+            score: result.totalScore,
+            profile: result.riskProfile, // Konservatif / Moderat / Agresif
+            description: result.riskDescription,
 
-            // Profil Agen (Professional Header)
+            // Logika pewarnaan tema (Root Level)
+            themeColor: result.riskProfile === 'Konservatif' ? '#10b981' // Emerald
+                : result.riskProfile === 'Moderat' ? '#f59e0b' // Amber
+                    : '#ef4444', // Red
+
+            allocation: {
+                low: result.allocation.lowRisk,
+                medium: result.allocation.mediumRisk,
+                high: result.allocation.highRisk
+            },
+
+            // --- EXTRA METADATA: Tidak dipanggil di template saat ini, tapi aman disimpan ---
+            documentId: `RISK-${Math.random().toString(36).substring(7).toUpperCase()}`,
             agent: {
                 name: agent.fullName,
                 level: agent.agentLevel || 'Financial Advisor',
                 company: agent.companyName || 'KeuanganKu Pratama',
                 agency: agent.companyName || 'MaxiPro Group',
             },
-
-            // Profil Klien
             client: {
-                name: clientData.clientName,
-                // Hitung umur dari DOB
                 age: clientData.clientDob
                     ? new Date().getFullYear() - new Date(clientData.clientDob).getFullYear()
                     : '-',
@@ -1380,31 +1392,11 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 job: clientData.clientJob || '-',
                 city: clientData.clientCity || '-',
                 phone: clientData.clientPhone || '-'
-            },
-
-            // Hasil Analisa
-            result: {
-                totalScore: result.totalScore,
-                profileType: result.riskProfile, // Konservatif / Moderat / Agresif
-                description: result.riskDescription,
-
-                // Warna tema visual berdasarkan profil
-                themeColor: result.riskProfile === 'Konservatif' ? '#10b981' // Emerald
-                    : result.riskProfile === 'Moderat' ? '#f59e0b' // Amber
-                        : '#ef4444', // Red
-
-                // Alokasi Aset (untuk Tabel/Chart di PDF)
-                allocation: {
-                    low: result.allocation.lowRisk,
-                    medium: result.allocation.mediumRisk,
-                    high: result.allocation.highRisk
-                }
             }
         };
 
         try {
             // 2. Compile Template
-            // Pastikan Anda sudah punya 'risk-profile-report.template.ts' yang sesuai
             const template = handlebars.compile(riskProfileReportTemplate);
             const html = template(context);
 

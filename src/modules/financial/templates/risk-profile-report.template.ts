@@ -3,47 +3,69 @@ import * as path from 'path';
 
 /**
  * ------------------------------------------------------------------
- * 1. LOGIC LAYER: ASSET HANDLING
+ * 1. CONTRACT LAYER: EXPECTED PAYLOAD (DATA BINDING CONTRACT)
+ * ------------------------------------------------------------------
+ * Interface ini mendefinisikan secara ketat struktur Plain Object
+ * yang WAJIB di-passing dari Service ke Template Engine.
+ * Jika struktur dari DB/Service berbeda, harus di-mapping menjadi ini.
+ */
+export interface RiskProfileTemplatePayload {
+  clientName: string;
+  generatedAt: string;
+  score: number | string;
+  profile: string;
+  themeColor: string;
+  description: string;
+  allocation: {
+    low: number | string;
+    medium: number | string;
+    high: number | string;
+  };
+}
+
+/**
+ * ------------------------------------------------------------------
+ * 2. LOGIC LAYER: ASSET HANDLING (CACHED AT STARTUP)
  * ------------------------------------------------------------------
  */
 function getImageBase64(filePath: string): string {
-    try {
-        if (!fs.existsSync(filePath)) {
-            console.error(`[PDF] File not found: ${filePath}`);
-            return '';
-        }
-        const bitmap = fs.readFileSync(filePath);
-        const extension = path.extname(filePath).toLowerCase().replace('.', '');
-
-        let mimeType = '';
-        switch (extension) {
-            case 'webp': mimeType = 'image/webp'; break;
-            case 'png': mimeType = 'image/png'; break;
-            case 'jpg':
-            case 'jpeg': mimeType = 'image/jpeg'; break;
-            case 'svg': mimeType = 'image/svg+xml'; break;
-            default: mimeType = 'image/png';
-        }
-
-        return `data:${mimeType};base64,${bitmap.toString('base64')}`;
-    } catch (error: any) {
-        console.error(`[PDF] Error base64: ${error.message}`);
-        return '';
+  try {
+    if (!fs.existsSync(filePath)) {
+      console.error(`[PDF Template] File not found: ${filePath}`);
+      return '';
     }
+    const bitmap = fs.readFileSync(filePath);
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+
+    let mimeType = '';
+    switch (extension) {
+      case 'webp': mimeType = 'image/webp'; break;
+      case 'png': mimeType = 'image/png'; break;
+      case 'jpg':
+      case 'jpeg': mimeType = 'image/jpeg'; break;
+      case 'svg': mimeType = 'image/svg+xml'; break;
+      default: mimeType = 'image/png';
+    }
+
+    return `data:${mimeType};base64,${bitmap.toString('base64')}`;
+  } catch (error: any) {
+    console.error(`[PDF Template] Error converting base64: ${error.message}`);
+    return '';
+  }
 }
 
-// Gunakan path absolut yang aman untuk environment Docker/Local
+// Menggunakan path absolut yang aman untuk environment Docker/Local
 const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
 
 const assets = {
-    logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'logokeuanganku.png')),
-    headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')),
-    headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))
+  logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'logokeuanganku.png')),
+  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup1.webp')),
+  headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'financialcheckup2.webp'))
 };
 
 /**
  * ------------------------------------------------------------------
- * 2. VIEW LAYER: HTML TEMPLATE
+ * 3. VIEW LAYER: HTML TEMPLATE
  * ------------------------------------------------------------------
  */
 export const riskProfileReportTemplate = `
@@ -258,7 +280,7 @@ export const riskProfileReportTemplate = `
     .bar-fill { height: 100%; border-radius: 5px; }
 
     /* Color Classes */
-    .bg-low { background-color: #22c55e; }     /* Green */
+    .bg-low { background-color: #22c55e; }    /* Green */
     .bg-medium { background-color: #eab308; } /* Yellow/Orange */
     .bg-high { background-color: #ef4444; }   /* Red */
 
