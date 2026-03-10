@@ -56,6 +56,7 @@ export class AdminSubscriptionService {
     /**
      * [CORE] VALIDASI PEMBAYARAN (Enhanced)
      * Menyimpan alasan reject ke tabel Audit & Update Kuota via Ledger
+     * Termasuk implementasi Compensating Transaction jika di-reject.
      */
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
         const order = await this.prisma.subscriptionOrder.findUnique({
@@ -148,6 +149,40 @@ export class AdminSubscriptionService {
                     },
                 });
             }
+            // 3.5. Logic Rejection: Rollback Optimistic Update (Compensating Transaction)
+            else if (dto.status === VerificationStatus.INVALID) {
+                // a. Revoke Subscription (Kembalikan ke status awal/cabut akses)
+                await tx.userSubscription.updateMany({
+                    where: {
+                        userId: order.userId,
+                        status: SubscriptionStatus.ACTIVE // Hanya revoke jika masih aktif
+                    },
+                    data: {
+                        status: SubscriptionStatus.REVOKED,
+                        updatedAt: new Date(),
+                    },
+                });
+
+                // b. Dapatkan Source of Truth Kuota dari Ledger Cache
+                // Nilai pada tabel User.quota TIDAK terpengaruh oleh Optimistic Update 9999
+                // Sehingga nilai ini menyimpan saldo absolut user yang sebenarnya
+                const userSourceOfTruth = await tx.user.findUnique({
+                    where: { id: order.userId },
+                    select: { quota: true }
+                });
+
+                // Fallback ke 0 jika data anomali, mencegah exploit kuota gratis
+                const originalValidQuota = userSourceOfTruth?.quota || 0;
+
+                // c. Reset Usage Quota (Buang limit 9999, kembalikan ke saldo Ledger asli)
+                await tx.userUsage.updateMany({
+                    where: { userId: order.userId },
+                    data: {
+                        simulationQuota: originalValidQuota, // <-- BUG FIXED: Bukan lagi hardcode 3
+                        updatedAt: new Date(),
+                    },
+                });
+            }
 
             return updatedOrder;
         });
@@ -182,7 +217,7 @@ export class AdminSubscriptionService {
             await this.notificationService.createAndSend({
                 userId: order.userId,
                 title: 'Pembayaran Ditolak',
-                message: `Verifikasi gagal: ${dto.adminNotes || 'Bukti tidak valid'}`,
+                message: `Verifikasi gagal: ${dto.adminNotes || 'Bukti tidak valid'}. Akses Pro Anda telah dicabut.`,
                 type: NotificationType.ERROR,
                 category: NotificationCategory.PAYMENT,
                 metadata: { orderId: order.id },
