@@ -149,9 +149,11 @@ export class AdminSubscriptionService {
                     },
                 });
             }
-            // 3.5. Logic Rejection: Rollback Optimistic Update (Compensating Transaction)
+            // 3.5. Logic Rejection: Rollback Optimistic Update
             else if (dto.status === VerificationStatus.INVALID) {
-                // a. Revoke Subscription (Kembalikan ke status awal/cabut akses)
+                // a. Revoke Subscription (Hanya cabut akses Pro)
+                // Kita tidak perlu menyentuh tabel kuota sama sekali karena angka kuota
+                // aslinya tidak pernah kita modifikasi di awal (Immutable State).
                 await tx.userSubscription.updateMany({
                     where: {
                         userId: order.userId,
@@ -159,26 +161,6 @@ export class AdminSubscriptionService {
                     },
                     data: {
                         status: SubscriptionStatus.REVOKED,
-                        updatedAt: new Date(),
-                    },
-                });
-
-                // b. Dapatkan Source of Truth Kuota dari Ledger Cache
-                // Nilai pada tabel User.quota TIDAK terpengaruh oleh Optimistic Update 9999
-                // Sehingga nilai ini menyimpan saldo absolut user yang sebenarnya
-                const userSourceOfTruth = await tx.user.findUnique({
-                    where: { id: order.userId },
-                    select: { quota: true }
-                });
-
-                // Fallback ke 0 jika data anomali, mencegah exploit kuota gratis
-                const originalValidQuota = userSourceOfTruth?.quota || 0;
-
-                // c. Reset Usage Quota (Buang limit 9999, kembalikan ke saldo Ledger asli)
-                await tx.userUsage.updateMany({
-                    where: { userId: order.userId },
-                    data: {
-                        simulationQuota: originalValidQuota, // <-- BUG FIXED: Bukan lagi hardcode 3
                         updatedAt: new Date(),
                     },
                 });
