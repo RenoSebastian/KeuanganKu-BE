@@ -57,7 +57,8 @@ export class SubscriptionService {
 
     /**
      * Core Logic: Optimistic Activation
-     * User upload bukti -> Order dibuat -> User langsung ACTIVE & Unlimited Quota
+     * User upload bukti -> Order dibuat -> User langsung ACTIVE
+     * (Unlimited Quota di-handle via bypass status ACTIVE, bukan hardcode DB)
      */
     async subscribe(
         userId: string,
@@ -132,17 +133,9 @@ export class SubscriptionService {
                 },
             });
 
-            // D. [CRITICAL] Update Kuota User Menjadi UNLIMITED (9999)
-            // Ini bagian penting dari "Optimistic Update" agar user langsung bisa pakai fitur
-            await tx.userUsage.upsert({
-                where: { userId },
-                update: { simulationQuota: 9999 }, // Angka "magic" untuk unlimited
-                create: {
-                    userId,
-                    simulationQuota: 9999,
-                    totalUsed: 0
-                }
-            });
+            // [PERBAIKAN ARSITEKTUR]: Blok update simulationQuota menjadi 9999 (Destructive Update)
+            // TELAH DIHAPUS. Akses unlimited ditangani murni dari validasi status ACTIVE 
+            // di layer service pengecekan kuota. Immutable Quota State tercapai.
 
             return {
                 message: 'Paket berhasil diaktifkan. Menunggu verifikasi admin.',

@@ -56,6 +56,7 @@ export class AdminSubscriptionService {
     /**
      * [CORE] VALIDASI PEMBAYARAN (Enhanced)
      * Menyimpan alasan reject ke tabel Audit & Update Kuota via Ledger
+     * Termasuk implementasi Compensating Transaction jika di-reject.
      */
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
         const order = await this.prisma.subscriptionOrder.findUnique({
@@ -148,6 +149,22 @@ export class AdminSubscriptionService {
                     },
                 });
             }
+            // 3.5. Logic Rejection: Rollback Optimistic Update
+            else if (dto.status === VerificationStatus.INVALID) {
+                // a. Revoke Subscription (Hanya cabut akses Pro)
+                // Kita tidak perlu menyentuh tabel kuota sama sekali karena angka kuota
+                // aslinya tidak pernah kita modifikasi di awal (Immutable State).
+                await tx.userSubscription.updateMany({
+                    where: {
+                        userId: order.userId,
+                        status: SubscriptionStatus.ACTIVE // Hanya revoke jika masih aktif
+                    },
+                    data: {
+                        status: SubscriptionStatus.REVOKED,
+                        updatedAt: new Date(),
+                    },
+                });
+            }
 
             return updatedOrder;
         });
@@ -182,7 +199,7 @@ export class AdminSubscriptionService {
             await this.notificationService.createAndSend({
                 userId: order.userId,
                 title: 'Pembayaran Ditolak',
-                message: `Verifikasi gagal: ${dto.adminNotes || 'Bukti tidak valid'}`,
+                message: `Verifikasi gagal: ${dto.adminNotes || 'Bukti tidak valid'}. Akses Pro Anda telah dicabut.`,
                 type: NotificationType.ERROR,
                 category: NotificationCategory.PAYMENT,
                 metadata: { orderId: order.id },

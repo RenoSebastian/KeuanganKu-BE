@@ -9,7 +9,7 @@ import {
     QuotaTransactionType
 } from '@prisma/client';
 
-const FREE_TIER_QUOTA_RESET = 3; // Jatah default user gratis
+const FREE_TIER_QUOTA_RESET = 3; // Bantalan/Subsidi default user gratis
 const GRACE_PERIOD_DAYS = 2; // Tenggang waktu 2 hari
 
 @Injectable()
@@ -45,7 +45,6 @@ export class SubscriptionCronService {
         const threeDaysFromNow = new Date();
         threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
 
-        // Cari rentang waktu besoknya agar presisi harian
         const startOfDay = new Date(threeDaysFromNow.setHours(0, 0, 0, 0));
         const endOfDay = new Date(threeDaysFromNow.setHours(23, 59, 59, 999));
 
@@ -75,13 +74,10 @@ export class SubscriptionCronService {
 
     /**
      * TASK 2: Handle Grace Period (Masa Tenggang)
-     * Jika endDate lewat tapi belum Expired/Grace Period, beri waktu tambahan.
      */
     private async handleGracePeriodEntry() {
         const now = new Date();
 
-        // Cari user yang sudah lewat tanggal tapi status masih ACTIVE
-        // dan belum punya gracePeriodEndDate
         const graceCandidates = await this.prisma.userSubscription.findMany({
             where: {
                 status: SubscriptionStatus.ACTIVE,
@@ -100,7 +96,7 @@ export class SubscriptionCronService {
             await this.prisma.userSubscription.update({
                 where: { id: sub.id },
                 data: {
-                    status: SubscriptionStatus.GRACE_PERIOD, // Pastikan Enum ini ada di schema
+                    status: SubscriptionStatus.GRACE_PERIOD,
                     gracePeriodEndDate: graceEnd,
                 },
             });
@@ -109,27 +105,25 @@ export class SubscriptionCronService {
                 userId: sub.userId,
                 title: 'Masa Tenggang Dimulai ⚠️',
                 message: `Langganan Anda telah berakhir. Kami memberikan waktu tambahan 48 jam sebelum akses dikunci. Segera lakukan pembayaran.`,
-                type: NotificationType.ERROR, // Merah agar urgency tinggi
+                type: NotificationType.ERROR,
                 category: NotificationCategory.PAYMENT,
             });
         }
     }
 
     /**
-     * TASK 3: Final Expiration & Downgrade Strategy
-     * Jika Grace Period lewat, matikan status dan reset kuota ke Free Tier.
+     * TASK 3: Final Expiration & Soft-Landing Downgrade Strategy
      */
     private async handleFinalExpiration() {
         const now = new Date();
 
-        // Cari user yang Grace Period-nya sudah lewat
         const toExpire = await this.prisma.userSubscription.findMany({
             where: {
                 OR: [
                     { status: SubscriptionStatus.GRACE_PERIOD },
-                    { status: SubscriptionStatus.ACTIVE } // Jaga-jaga yg lolos grace period
+                    { status: SubscriptionStatus.ACTIVE }
                 ],
-                gracePeriodEndDate: { lt: now }, // Buffer time over
+                gracePeriodEndDate: { lt: now },
             },
             include: { user: true, plan: true },
         });
@@ -147,13 +141,14 @@ export class SubscriptionCronService {
                     },
                 });
 
-                // 2. [CORE LOGIC] Downgrade Strategy: Reset Quota
-                // Kita tidak mau user punya 0 kuota selamanya. Kita reset ke 3 (Free Tier).
+                // 2. [CORE LOGIC] Parachute / Soft-Landing Strategy
+                // Jangan merusak kuota yang sudah dikumpulkan user.
+                // Hanya berikan subsidi ke angka 3 JIKA sisa kuota mereka di bawah 3.
                 const currentQuota = sub.user.quota;
-                const resetAmount = FREE_TIER_QUOTA_RESET - currentQuota;
 
-                // Hanya catat di ledger jika ada perubahan nilai
-                if (resetAmount !== 0) {
+                if (currentQuota < FREE_TIER_QUOTA_RESET) {
+                    const topUpAmount = FREE_TIER_QUOTA_RESET - currentQuota;
+
                     await tx.user.update({
                         where: { id: sub.userId },
                         data: { quota: FREE_TIER_QUOTA_RESET },
@@ -162,10 +157,10 @@ export class SubscriptionCronService {
                     await tx.userQuotaLedger.create({
                         data: {
                             userId: sub.userId,
-                            amount: resetAmount, // Bisa minus (jika sisa banyak), bisa plus (jika 0)
+                            amount: topUpAmount,
                             type: QuotaTransactionType.SYSTEM_DOWNGRADE,
                             balanceAfter: FREE_TIER_QUOTA_RESET,
-                            description: `Masa aktif habis. Kuota di-reset ke paket Free (${FREE_TIER_QUOTA_RESET}).`,
+                            description: `Masa aktif habis. Subsidi kuota diberikan sebesar ${topUpAmount} token untuk kembali ke Free Tier.`,
                         },
                     });
                 }
