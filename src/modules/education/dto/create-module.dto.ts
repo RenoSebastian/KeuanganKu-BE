@@ -11,6 +11,7 @@ import {
     MaxLength,
     Matches,
     IsEnum,
+    ArrayMaxSize, // [NEW] Import untuk membatasi jumlah item dalam array
 } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { EducationLevel } from '@prisma/client';
@@ -36,13 +37,21 @@ export class CreateSectionDto {
     @IsNotEmpty()
     contentMarkdown: string;
 
-    @ApiPropertyOptional({ description: 'Path gambar ilustrasi (Relative Path)', example: 'uploads/f47ac10b-58cc.jpg' })
-    @IsString()
-    @IsOptional()
-    @Matches(/^(?:\/)?uploads\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
-        message: 'Illustration URL must be a valid relative path starting with "uploads/" and supported image extension'
+    // [MODIFIED] Mengganti single string menjadi array of strings untuk carousel
+    @ApiPropertyOptional({
+        description: 'Daftar path gambar materi (Maksimal 4 gambar untuk carousel)',
+        example: ['uploads/img1.jpg', 'uploads/img2.png'],
+        type: [String]
     })
-    illustrationUrl?: string;
+    @IsArray()
+    @IsOptional()
+    @ArrayMaxSize(4, { message: 'Maksimal 4 gambar yang diperbolehkan dalam 1 halaman materi' })
+    @IsString({ each: true, message: 'Setiap URL gambar harus berupa teks string' })
+    @Matches(/^(?:\/)?uploads\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
+        each: true, // [CRITICAL] Memastikan regex memvalidasi SETIAP string di dalam array, bukan memvalidasi array-nya
+        message: 'Setiap URL harus berupa path valid yang diawali dengan "uploads/" dan memiliki ekstensi gambar yang didukung'
+    })
+    mediaUrls?: string[];
 }
 
 /**

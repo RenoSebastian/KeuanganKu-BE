@@ -10,6 +10,7 @@ import {
     Min,
     ValidateNested,
     ArrayMinSize,
+    ArrayMaxSize,
     Max,
     Matches,
 } from 'class-validator';
@@ -44,6 +45,7 @@ export class UpsertQuizOptionDto {
         example: true
     })
     @IsBoolean()
+    @IsNotEmpty()
     isCorrect: boolean;
 
     @ApiPropertyOptional({
@@ -119,10 +121,11 @@ export class UpsertQuizQuestionDto {
 
     @ApiProperty({
         type: [UpsertQuizOptionDto],
-        description: 'Daftar pilihan jawaban (Minimal 2).'
+        description: 'Daftar pilihan jawaban (Minimal 2, Maksimal 5).'
     })
     @IsArray()
-    @ArrayMinSize(2, { message: 'A question must have at least 2 options.' })
+    @ArrayMinSize(2, { message: 'Sebuah pertanyaan minimal harus memiliki 2 opsi (misal: Benar/Salah).' })
+    @ArrayMaxSize(5, { message: 'Sebuah pertanyaan maksimal hanya diperbolehkan memiliki 5 opsi.' })
     @ValidateNested({ each: true })
     @Type(() => UpsertQuizOptionDto)
     options: UpsertQuizOptionDto[];
@@ -170,10 +173,12 @@ export class UpsertQuizDto {
 
     @ApiProperty({
         type: [UpsertQuizQuestionDto],
-        description: 'Array berisi seluruh pertanyaan dan jawaban untuk kuis ini.'
+        description: 'Array berisi seluruh pertanyaan dan jawaban untuk kuis ini (Minimal 5, Maksimal 10).'
     })
     @IsArray()
     @ValidateNested({ each: true })
     @Type(() => UpsertQuizQuestionDto)
+    @ArrayMinSize(5, { message: 'Kuis tidak valid: Minimal harus memuat 5 soal.' })
+    @ArrayMaxSize(10, { message: 'Kuis tidak valid: Maksimal hanya diperbolehkan 10 soal.' })
     questions: UpsertQuizQuestionDto[];
 }

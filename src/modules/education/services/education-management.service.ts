@@ -70,7 +70,9 @@ export class EducationManagementService {
                         sectionOrder: s.sectionOrder,
                         title: s.title,
                         contentMarkdown: s.contentMarkdown,
-                        illustrationUrl: s.illustrationUrl, // Menyimpan path relatif
+                        // Catatan Analis: Jika di DTO sudah diubah ke imageUrls (array), 
+                        // pastikan schema Prisma juga disesuaikan saat implementasi.
+                        illustrationUrl: s.illustrationUrl,
                     }));
                     await tx.moduleSection.createMany({ data: sectionPayload });
                 }
@@ -152,7 +154,7 @@ export class EducationManagementService {
 
         if (!module) throw new NotFoundException('Module not found');
 
-        // --- LOGIC GUARDRAILS: PUBLISH SAFETY CHECK ---
+        // --- LOGIC GUARDRAILS: PUBLISH SAFETY CHECK (DEFENSE IN DEPTH) ---
         if (dto.status === EducationModuleStatus.PUBLISHED) {
             if (!module.sections || module.sections.length === 0) {
                 throw new BadRequestException(
@@ -160,10 +162,12 @@ export class EducationManagementService {
                 );
             }
 
+            // Pengecekan Integritas Kuis
             if (module.quiz) {
-                if (!module.quiz.questions || module.quiz.questions.length === 0) {
+                const questionCount = module.quiz.questions?.length || 0;
+                if (questionCount < 5) {
                     throw new BadRequestException(
-                        'Cannot PUBLISH. This module has a Quiz enabled but contains NO questions.',
+                        `Cannot PUBLISH. This module has a Quiz enabled but currently only contains ${questionCount} question(s). A minimum of 5 questions is required before publishing.`,
                     );
                 }
             }
@@ -240,7 +244,7 @@ export class EducationManagementService {
         );
     }
 
-    // --- QUIZ MANAGEMENT LOGIC (Phase 1 & 3 Integration) ---
+    // --- QUIZ MANAGEMENT LOGIC ---
 
     /**
      * Menangani Update/Insert Quiz beserta Pertanyaan dan Opsi-nya.
@@ -331,7 +335,6 @@ export class EducationManagementService {
                 });
 
                 // B. Wipe Clean Questions (Cascade delete will remove options)
-                // Note: File fisik tidak terhapus otomatis oleh DB, makanya kita butuh logic orphanFiles di atas.
                 await tx.quizQuestion.deleteMany({
                     where: { quizId: quiz.id },
                 });
@@ -401,7 +404,7 @@ export class EducationManagementService {
             filePaths.map(path => this.mediaService.deleteFile(path))
         );
 
-        const successCount = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+        const successCount = results.filter(r => r.status === 'fulfilled' && (r as any).value === true).length;
         const failCount = results.length - successCount;
 
         this.logger.log(`Cleanup Complete. Success: ${successCount}, Failed/Skipped: ${failCount}`);
@@ -436,7 +439,6 @@ export class EducationManagementService {
         return slug;
     }
 
-    // education-management.service.ts
     async findAllModules() {
         return this.prisma.educationModule.findMany({
             orderBy: { createdAt: 'desc' },
