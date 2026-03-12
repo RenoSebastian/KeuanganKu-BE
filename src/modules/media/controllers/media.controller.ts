@@ -64,9 +64,9 @@ export class MediaController {
                         maxSize: 2 * 1024 * 1024, // 2MB Limit
                         message: 'File terlalu besar. Maksimal ukuran yang diizinkan adalah 2MB.'
                     }),
-                    // [FIXED] Menggunakan RegExp native tanpa string quotes untuk FileTypeValidator
+
                     new FileTypeValidator({
-                        fileType: /(jpg|jpeg|png|webp)$/i,
+                        fileType: '.(png|jpeg|jpg|webp)',
                     }),
                 ],
                 // Custom Exception Factory agar error regex yang berantakan tidak muncul di client
