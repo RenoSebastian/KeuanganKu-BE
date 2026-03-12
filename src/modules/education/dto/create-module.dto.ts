@@ -37,20 +37,21 @@ export class CreateSectionDto {
     @IsNotEmpty()
     contentMarkdown: string;
 
+    // [MODIFIED] Mengganti single string menjadi array of strings untuk carousel
     @ApiPropertyOptional({
-        description: 'Daftar path gambar ilustrasi (Relative Path). Maksimal 4 gambar.',
+        description: 'Daftar path gambar materi (Maksimal 4 gambar untuk carousel)',
         example: ['uploads/img1.jpg', 'uploads/img2.png'],
         type: [String]
     })
     @IsArray()
     @IsOptional()
-    @ArrayMaxSize(4, { message: 'Maksimal 4 gambar per section diperbolehkan' })
-    @IsString({ each: true })
+    @ArrayMaxSize(4, { message: 'Maksimal 4 gambar yang diperbolehkan dalam 1 halaman materi' })
+    @IsString({ each: true, message: 'Setiap URL gambar harus berupa teks string' })
     @Matches(/^(?:\/)?uploads\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
         each: true,
-        message: 'Setiap URL gambar harus valid relative path (dimulai dengan "uploads/") dan berekstensi yang didukung'
+        message: 'Setiap URL harus berupa path valid yang diawali dengan "uploads/" dan memiliki ekstensi gambar yang didukung'
     })
-    imageUrls?: string[];
+    imageUrls?: string[]; // <-- UBAH DARI mediaUrls MENJADI imageUrls
 }
 
 /**

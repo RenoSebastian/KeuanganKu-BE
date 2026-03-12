@@ -61,13 +61,18 @@ export class MediaController {
             new ParseFilePipe({
                 validators: [
                     new MaxFileSizeValidator({
-                        maxSize: 2 * 1024 * 1024,
+                        maxSize: 2 * 1024 * 1024, // 2MB Limit
                         message: 'File terlalu besar. Maksimal ukuran yang diizinkan adalah 2MB.'
                     }),
+                    // [FIXED] Menggunakan RegExp native tanpa string quotes untuk FileTypeValidator
                     new FileTypeValidator({
-                        fileType: /image\/(jpeg|jpg|png|webp)/,
+                        fileType: /(jpg|jpeg|png|webp)$/i,
                     }),
                 ],
+                // Custom Exception Factory agar error regex yang berantakan tidak muncul di client
+                exceptionFactory: (error) => {
+                    return new BadRequestException('Format file tidak didukung atau file terlalu besar. Pastikan format adalah JPG/PNG/WEBP dan maksimal 2MB.');
+                },
                 errorHttpStatusCode: HttpStatus.BAD_REQUEST,
             }),
         )
