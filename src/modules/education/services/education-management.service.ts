@@ -70,9 +70,8 @@ export class EducationManagementService {
                         sectionOrder: s.sectionOrder,
                         title: s.title,
                         contentMarkdown: s.contentMarkdown,
-                        // Catatan Analis: Jika di DTO sudah diubah ke imageUrls (array), 
-                        // pastikan schema Prisma juga disesuaikan saat implementasi.
-                        illustrationUrl: s.illustrationUrl,
+                        // [FIXED]: Menyesuaikan dengan tipe data schema Prisma yang baru (array of string)
+                        imageUrls: s.imageUrls || [],
                     }));
                     await tx.moduleSection.createMany({ data: sectionPayload });
                 }
@@ -215,10 +214,12 @@ export class EducationManagementService {
             filesToDelete.push(moduleToDelete.thumbnailUrl);
         }
 
-        // Kumpulkan Ilustrasi setiap section
+        // [FIXED] Kumpulkan Ilustrasi dari setiap section dengan membaca tipe data array (imageUrls)
         if (moduleToDelete.sections) {
             moduleToDelete.sections.forEach((sec) => {
-                if (sec.illustrationUrl) filesToDelete.push(sec.illustrationUrl);
+                if (sec.imageUrls && sec.imageUrls.length > 0) {
+                    filesToDelete.push(...sec.imageUrls);
+                }
             });
         }
 
