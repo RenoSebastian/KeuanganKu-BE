@@ -17,6 +17,11 @@ import {
     FileTypeValidator,
     StreamableFile,
     NotFoundException,
+    Injectable,
+    NestInterceptor,
+    ExecutionContext,
+    CallHandler,
+    Logger,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiBearerAuth, ApiBody, ApiConsumes, ApiOperation, ApiTags, ApiResponse, ApiParam } from '@nestjs/swagger';
@@ -28,6 +33,35 @@ import { MediaStorageService } from '../services/media-storage.service';
 import express from 'express';
 import { join } from 'path';
 import { createReadStream, existsSync } from 'fs';
+import { Observable } from 'rxjs';
+
+/**
+ * DEBUG INTERCEPTOR
+ * Digunakan untuk mengintip data file mentah dari Multer 
+ * sebelum dievaluasi oleh ParseFilePipe.
+ */
+@Injectable()
+class FileDebugInterceptor implements NestInterceptor {
+    private readonly logger = new Logger('FileDebug');
+
+    intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
+        const request = context.switchToHttp().getRequest();
+        const file = request.file;
+
+        if (file) {
+            this.logger.debug('=== [RAW FILE DATA FROM FE] ===');
+            this.logger.debug(`Field: ${file.fieldname}`);
+            this.logger.debug(`Name: ${file.originalname}`);
+            this.logger.debug(`MIME: ${file.mimetype}`);
+            this.logger.debug(`Size: ${file.size} bytes`);
+            this.logger.debug('==============================');
+        } else {
+            this.logger.warn('Warning: No file detected in request object!');
+        }
+
+        return next.handle();
+    }
+}
 
 @ApiTags('Media Management')
 @Controller('media')
@@ -36,7 +70,7 @@ export class MediaController {
 
     // --- 1. UPLOAD ENDPOINT ---
     @Post('upload')
-    @UseGuards(JwtAuthGuard) // Siapapun yang login boleh upload bukti bayar
+    @UseGuards(JwtAuthGuard)
     @ApiBearerAuth()
     @HttpCode(HttpStatus.CREATED)
     @ApiOperation({ summary: 'Upload single image asset (Max 2MB, JPG/PNG/WEBP)' })
@@ -55,34 +89,39 @@ export class MediaController {
     })
     @ApiResponse({ status: 201, description: 'File berhasil diunggah.' })
     @ApiResponse({ status: 400, description: 'Validasi file gagal (Ukuran/Tipe).' })
-    @UseInterceptors(FileInterceptor('file'))
+    @UseInterceptors(FileInterceptor('file'), FileDebugInterceptor) // Debugger sniffer
     async uploadFile(
         @UploadedFile(
             new ParseFilePipe({
                 validators: [
                     new MaxFileSizeValidator({
-                        maxSize: 2 * 1024 * 1024, // 2MB Limit
+                        maxSize: 2 * 1024 * 1024,
                         message: 'File terlalu besar. Maksimal ukuran yang diizinkan adalah 2MB.'
                     }),
 
                     new FileTypeValidator({
-                        fileType: '.(png|jpeg|jpg|webp)',
+                        fileType: /(jpg|jpeg|png|webp)$/i,
                     }),
                 ],
-                // Custom Exception Factory agar error regex yang berantakan tidak muncul di client
                 exceptionFactory: (error) => {
-                    return new BadRequestException('Format file tidak didukung atau file terlalu besar. Pastikan format adalah JPG/PNG/WEBP dan maksimal 2MB.');
+                    // Log error validation asli dari NestJS
+                    Logger.error(`Validation Failure Logic: ${error}`, 'MediaController');
+
+                    const isSizeError = error.toLowerCase().includes('size');
+                    if (isSizeError) {
+                        return new BadRequestException('Ukuran file terlalu besar. Maksimal 2MB.');
+                    }
+
+                    return new BadRequestException('Format file tidak didukung. Pastikan format adalah JPG, PNG, atau WEBP.');
                 },
                 errorHttpStatusCode: HttpStatus.BAD_REQUEST,
             }),
         )
         file: Express.Multer.File,
     ) {
-        if (!file) {
-            throw new BadRequestException('File tidak ditemukan dalam request.');
-        }
+        // Blok ini hanya jalan jika lolos Pipe
+        console.log(`>>> PASSED VALIDATION: ${file.originalname}`);
 
-        // Delegasi ke Service
         const result = await this.mediaService.uploadFile(file, 'media');
 
         return {
@@ -92,20 +131,18 @@ export class MediaController {
         };
     }
 
-    // --- 2. SERVE STATIC FILE (Private / Protected) ---
+    // --- 2. SERVE STATIC FILE ---
     @Get(':filename')
-    @UseGuards(JwtAuthGuard) // Hanya user login yang bisa lihat
+    @UseGuards(JwtAuthGuard)
     @ApiBearerAuth()
     @ApiOperation({ summary: 'Get/Download file by filename' })
     @ApiParam({ name: 'filename', type: 'string', description: 'Nama file yang tersimpan di server' })
     async getFile(@Param('filename') filename: string, @Res({ passthrough: true }) res: express.Response): Promise<StreamableFile> {
 
-        // Sanitasi Path (Security)
         if (filename.includes('..') || filename.includes('/') || filename.includes('\\')) {
             throw new BadRequestException('Filename tidak valid.');
         }
 
-        // Lokasi file (sesuaikan dengan logic service Anda, misal di root/uploads/media)
         const filePath = join(process.cwd(), 'uploads', 'media', filename);
 
         if (!existsSync(filePath)) {
@@ -114,17 +151,15 @@ export class MediaController {
 
         const fileStream = createReadStream(filePath);
 
-        // Set Header Content-Type otomatis berdasarkan ekstensi
-        // (NestJS StreamableFile handle basic, tapi express res lebih fleksibel)
         res.set({
-            'Content-Type': 'image/jpeg', // Bisa dibuat dinamis pakai mime-types lib jika perlu
+            'Content-Type': 'image/jpeg',
             'Content-Disposition': `inline; filename="${filename}"`,
         });
 
         return new StreamableFile(fileStream);
     }
 
-    // --- 3. DELETE ENDPOINT (Admin Only) ---
+    // --- 3. DELETE ENDPOINT ---
     @Delete()
     @UseGuards(JwtAuthGuard, RolesGuard)
     @Roles(Role.ADMIN)
