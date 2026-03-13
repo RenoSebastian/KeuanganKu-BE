@@ -14,7 +14,7 @@ import {
     BadRequestException,
     ParseFilePipe,
     MaxFileSizeValidator,
-    FileTypeValidator,
+    FileValidator, // [TAMBAHAN] Import FileValidator dasar
     StreamableFile,
     NotFoundException,
     Injectable,
@@ -63,6 +63,27 @@ class FileDebugInterceptor implements NestInterceptor {
     }
 }
 
+/**
+ * [IMPLEMENTASI BARU] SAFE MIME TYPE VALIDATOR
+ * Custom validator kelas rendah (low-level) untuk mem-Bypass proses ekstraksi 
+ * Magic Numbers dari pustaka 'file-type' NestJS yang mengalami crash akibat ESM conflict.
+ */
+export class SafeMimeTypeValidator extends FileValidator<Record<string, any>> {
+    buildErrorMessage(): string {
+        return 'Format file tidak didukung. Pastikan format adalah JPG, PNG, atau WEBP.';
+    }
+
+    isValid(file?: Express.Multer.File): boolean {
+        if (!file || !file.mimetype) {
+            return false;
+        }
+        // Mengeksekusi pengecekan murni menggunakan pola komputasi Regex
+        // tanpa memicu engine file-type NestJS.
+        const mimeRegex = /image\/(jpeg|jpg|png|webp)/i;
+        return mimeRegex.test(file.mimetype);
+    }
+}
+
 @ApiTags('Media Management')
 @Controller('media')
 export class MediaController {
@@ -89,7 +110,7 @@ export class MediaController {
     })
     @ApiResponse({ status: 201, description: 'File berhasil diunggah.' })
     @ApiResponse({ status: 400, description: 'Validasi file gagal (Ukuran/Tipe).' })
-    @UseInterceptors(FileInterceptor('file'), FileDebugInterceptor) // Debugger sniffer
+    @UseInterceptors(FileInterceptor('file'), FileDebugInterceptor)
     async uploadFile(
         @UploadedFile(
             new ParseFilePipe({
@@ -98,16 +119,13 @@ export class MediaController {
                         maxSize: 2 * 1024 * 1024,
                         message: 'File terlalu besar. Maksimal ukuran yang diizinkan adalah 2MB.'
                     }),
-
-                    new FileTypeValidator({
-                        fileType: /(jpg|jpeg|png|webp)$/i,
-                    }),
+                    // [UBAH] Implementasikan custom validator terisolasi kita
+                    new SafeMimeTypeValidator({}),
                 ],
                 exceptionFactory: (error) => {
-                    // Log error validation asli dari NestJS
                     Logger.error(`Validation Failure Logic: ${error}`, 'MediaController');
 
-                    const isSizeError = error.toLowerCase().includes('size');
+                    const isSizeError = error.toLowerCase().includes('size') || error.toLowerCase().includes('besar');
                     if (isSizeError) {
                         return new BadRequestException('Ukuran file terlalu besar. Maksimal 2MB.');
                     }
@@ -119,7 +137,6 @@ export class MediaController {
         )
         file: Express.Multer.File,
     ) {
-        // Blok ini hanya jalan jika lolos Pipe
         console.log(`>>> PASSED VALIDATION: ${file.originalname}`);
 
         const result = await this.mediaService.uploadFile(file, 'media');
@@ -133,8 +150,8 @@ export class MediaController {
 
     // --- 2. SERVE STATIC FILE ---
     @Get(':filename')
-    @UseGuards(JwtAuthGuard)
-    @ApiBearerAuth()
+    // @UseGuards(JwtAuthGuard)  <-- Hapus atau beri komentar baris ini
+    // @ApiBearerAuth()          <-- Hapus atau beri komentar baris ini
     @ApiOperation({ summary: 'Get/Download file by filename' })
     @ApiParam({ name: 'filename', type: 'string', description: 'Nama file yang tersimpan di server' })
     async getFile(@Param('filename') filename: string, @Res({ passthrough: true }) res: express.Response): Promise<StreamableFile> {

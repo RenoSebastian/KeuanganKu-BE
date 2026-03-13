@@ -28,12 +28,14 @@ export class CreateCategoryDto {
 
     @ApiProperty({
         description: 'URL/Path icon kategori (dari Media Upload).',
-        example: 'uploads/icon-saham.png',
+        example: '/media/icon-saham.png',
     })
     @IsString({ message: 'Icon URL harus berupa string path.' })
     @IsNotEmpty({ message: 'Icon URL wajib diisi.' })
-    @Matches(/^(?:\/)?uploads\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
-        message: 'Icon URL harus valid (e.g. uploads/file.png) dan berupa file gambar yang didukung.',
+    // [FIX] Mengubah boundary validasi awalan dari 'uploads/' menjadi 'media/' 
+    // agar sinkron dengan output frontend yang baru.
+    @Matches(/^(?:\/)?media\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
+        message: 'Icon URL harus valid (e.g. /media/file.png) dan berupa file gambar yang didukung.',
     })
     iconUrl: string;
 }
