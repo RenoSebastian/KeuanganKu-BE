@@ -2,7 +2,7 @@
 
 import { Injectable, Logger } from '@nestjs/common';
 import { CashflowLedgerItemDto, CashflowStatus } from '../dto/cashflow-ledger.dto';
-const PdfPrinter = require('pdfmake');
+const PdfPrinter = require('pdfmake/js/Printer').default;
 import { TDocumentDefinitions, StyleDictionary } from 'pdfmake/interfaces';
 
 @Injectable()
