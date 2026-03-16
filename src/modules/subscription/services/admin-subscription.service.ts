@@ -17,15 +17,22 @@ import { NotificationService } from '../../notification/notification.service';
 import { UserQuotaService } from '../../users/services/user-quota.service';
 import { AuditService } from '../../audit/audit.service';
 
+// Import Redis Service untuk keperluan Cache Invalidation (Fase 3)
+import { RedisService } from '../../redis/redis.service';
+
 @Injectable()
 export class AdminSubscriptionService {
     private readonly logger = new Logger(AdminSubscriptionService.name);
+
+    // Key yang sama persis dengan yang ada di AdminDashboardService
+    private readonly METRICS_CACHE_KEY = 'admin:dashboard:metrics';
 
     constructor(
         private readonly prisma: PrismaService,
         private readonly notificationService: NotificationService,
         private readonly userQuotaService: UserQuotaService, // Ledger System
         private readonly auditService: AuditService, // Audit Trail
+        private readonly redisService: RedisService, // Injeksi Redis untuk Cache Invalidation
     ) { }
 
     /**
@@ -169,8 +176,13 @@ export class AdminSubscriptionService {
             return updatedOrder;
         });
 
-        // 4. Post-Process (Audit Umum & Notifikasi)
-        // Dilakukan di luar transaksi DB agar tidak memperlambat locking row
+        // =========================================================================
+        // EVENT TRIGGER & POST-PROCESS (Di luar blok transaksi database)
+        // =========================================================================
+
+        // [Fase 3] Hapus Cache Dashboard Metrics agar pendapatan (Gross & Pending) ter-update
+        this.invalidateDashboardCache();
+
         await this.auditService.logAdminAction({
             adminId,
             action:
@@ -262,6 +274,9 @@ export class AdminSubscriptionService {
             },
         });
 
+        // [Fase 3] Invalidate cache karena ada user yang masuk kategori "Pro" (Memengaruhi Total User Premium/MRR)
+        this.invalidateDashboardCache();
+
         // 3. Log Audit
         await this.auditService.logAdminAction({
             adminId,
@@ -319,5 +334,14 @@ export class AdminSubscriptionService {
         });
 
         return result;
+    }
+
+    /**
+     * Helper method internal untuk menghapus cache metrik dashboard secara asinkron (Fire and Forget)
+     */
+    private invalidateDashboardCache() {
+        this.redisService.del(this.METRICS_CACHE_KEY)
+            .then(() => this.logger.debug(`Cache invalidated: ${this.METRICS_CACHE_KEY}`))
+            .catch((err) => this.logger.warn(`Gagal menghapus cache metrics dashboard: ${err.message}`));
     }
 }

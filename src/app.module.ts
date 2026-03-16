@@ -41,7 +41,7 @@ import { MediaModule } from './modules/media/media.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { NotificationModule } from './modules/notification/notification.module';
 import { EmailModule } from './modules/email/email.module'; // [NEW] Import Modul Email Independen
-// import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomment jika AdminModule sudah dibuat di Fase 4
+import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomment jika AdminModule sudah dibuat di Fase 4
 
 @Module({
   imports: [
@@ -89,7 +89,7 @@ import { EmailModule } from './modules/email/email.module'; // [NEW] Import Modu
       rootPath: path.join(process.cwd(), 'public'),
       serveRoot: '/',
     }),
-    
+
     // 3. Database Layer (PostgreSQL & Redis)
     PrismaModule,
     RedisModule, // [NEW] Integrasi Redis sebagai state-manager sesi utama
@@ -109,7 +109,8 @@ import { EmailModule } from './modules/email/email.module'; // [NEW] Import Modu
     SubscriptionModule,
     NotificationModule,
     EmailModule, // [NEW] Register Modul SMTP ke dalam root node aplikasi
-    // AdminModule, // Uncomment jika sudah ready
+    AdminModule, // Uncomment jika sudah ready
+    
   ],
   controllers: [],
   providers: [

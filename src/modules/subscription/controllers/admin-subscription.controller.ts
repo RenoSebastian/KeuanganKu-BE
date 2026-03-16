@@ -69,7 +69,7 @@ export class AdminSubscriptionController {
      * Endpoint: GET /admin/subscription/orders
      * Digunakan oleh Admin untuk melihat antrean bukti transfer yang perlu diaudit.
      */
-    @Get('orders')
+    @Get('pending')
     @ApiOperation({ summary: 'Get pending subscription orders' })
     async getPendingOrders() {
         return this.adminSubscriptionService.getPendingOrders();

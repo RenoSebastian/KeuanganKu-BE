@@ -40,14 +40,14 @@ export class CreateSectionDto {
     // [MODIFIED] Mengganti single string menjadi array of strings untuk carousel
     @ApiPropertyOptional({
         description: 'Daftar path gambar materi (Maksimal 4 gambar untuk carousel)',
-        example: ['uploads/img1.jpg', 'uploads/img2.png'],
+        example: ['uploads/media/img1.jpg', 'uploads/img2.png'],
         type: [String]
     })
     @IsArray()
     @IsOptional()
     @ArrayMaxSize(4, { message: 'Maksimal 4 gambar yang diperbolehkan dalam 1 halaman materi' })
     @IsString({ each: true, message: 'Setiap URL gambar harus berupa teks string' })
-    @Matches(/^(?:\/)?uploads\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
+    @Matches(/^(?:\/)?uploads\/[\w\/-]+\.(jpg|jpeg|png|svg|webp)$/i, {
         each: true,
         message: 'Setiap URL harus berupa path valid yang diawali dengan "uploads/" dan memiliki ekstensi gambar yang didukung'
     })
@@ -69,10 +69,10 @@ export class CreateModuleDto {
     @IsNotEmpty()
     categoryId: string;
 
-    @ApiProperty({ description: 'Cover Image Path (Relative)', example: 'uploads/cover-image.jpg' })
+    @ApiProperty({ description: 'Cover Image Path (Relative)', example: 'uploads/media/cover-image.jpg' })
     @IsString()
     @IsNotEmpty()
-    @Matches(/^(?:\/)?uploads\/[\w-]+\.(jpg|jpeg|png|svg|webp)$/i, {
+    @Matches(/^(?:\/)?uploads\/[\w\/-]+\.(jpg|jpeg|png|svg|webp)$/i, {
         message: 'Thumbnail URL must be a valid relative path starting with "uploads/" and supported image extension'
     })
     thumbnailUrl: string;
