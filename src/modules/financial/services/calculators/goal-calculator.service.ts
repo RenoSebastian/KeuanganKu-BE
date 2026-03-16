@@ -67,7 +67,7 @@ export class GoalCalculatorService {
         this.validateTargetDate(dto.targetDate);
 
         // 2. Ambil Market Rates
-        const marketRates = await this.marketSettingsService.getCurrentSettings();
+        const marketRates = await this.marketSettingsService.getSettings();
         const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
         const returnRate = dto.returnRate ?? 6; // Default moderat
 
@@ -107,7 +107,7 @@ export class GoalCalculatorService {
             this.validateTargetDate(dto.targetDate);
 
             // 3. Ambil Dynamic Rates
-            const marketRates = await this.marketSettingsService.getCurrentSettings();
+            const marketRates = await this.marketSettingsService.getSettings();
             const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
             const returnRate = dto.returnRate ?? 6;
 

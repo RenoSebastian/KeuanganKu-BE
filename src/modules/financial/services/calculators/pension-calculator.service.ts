@@ -31,7 +31,7 @@ export class PensionCalculatorService {
      */
     async calculateAndSavePension(userId: string, dto: CreatePensionDto) {
         // 1. Ambil Data Pasar (Central Bank)
-        const marketRates = await this.marketSettingsService.getCurrentSettings();
+        const marketRates = await this.marketSettingsService.getSettings();
 
         // 2. Tentukan Rate (Prioritas: Input User > Default Market)
         const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
@@ -74,7 +74,7 @@ export class PensionCalculatorService {
 
         try {
             // 2. Ambil Dynamic Rates
-            const marketRates = await this.marketSettingsService.getCurrentSettings();
+            const marketRates = await this.marketSettingsService.getSettings();
             const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
             const returnRate = dto.returnRate ?? 8;
 

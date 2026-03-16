@@ -22,17 +22,16 @@ export class MarketSettingsController {
     constructor(private readonly marketSettingsService: MarketSettingsService) { }
 
     /**
-     * [GET] /admin/market-settings
-     * Mengambil konfigurasi pasar saat ini (Inflasi, Bunga, Emas).
-     */
+      * [GET] /admin/market-settings
+      */
     @Get()
     async getCurrentSettings() {
-        const settings = await this.marketSettingsService.getCurrentSettings();
+        // PERBAIKAN: Ubah getCurrentSettings() menjadi getSettings()
+        const settings = await this.marketSettingsService.getSettings();
         return {
             message: 'Berhasil mengambil data konfigurasi pasar',
             data: {
                 ...settings,
-                // Konversi Decimal ke Number untuk kemudahan di Frontend
                 inflationRate: Number(settings.inflationRate),
                 interestRate: Number(settings.interestRate),
                 riskFreeRate: Number(settings.riskFreeRate),
@@ -40,7 +39,7 @@ export class MarketSettingsController {
             },
         };
     }
-
+    // 
     /**
      * [PUT] /admin/market-settings
      * Mengubah konfigurasi pasar.

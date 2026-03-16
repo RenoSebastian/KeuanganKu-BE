@@ -32,7 +32,7 @@ export class EducationCalculatorService {
      */
     async calculateAndSaveEducation(userId: string, dto: CreateEducationPlanDto) {
         // 1. Ambil Dynamic Market Rates
-        const marketRates = await this.marketSettingsService.getCurrentSettings();
+        const marketRates = await this.marketSettingsService.getSettings();
         const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
         const returnRate = dto.returnRate ?? 12; // Asumsi return agresif (Equity) untuk pendidikan jangka panjang
 

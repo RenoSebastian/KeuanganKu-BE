@@ -48,10 +48,10 @@ export class AdminAnalyticsService {
                 // Ini mencegah Node.js Crash karena kehabisan RAM jika ada jutaan data langganan aktif.
                 this.prisma.$queryRaw<Array<{ mrr: number | null }>>`
                     SELECT SUM(p.price / p."durationMonths") as mrr
-                    FROM "UserSubscription" us
-                    INNER JOIN "SubscriptionPlan" p ON us."planId" = p.id
+                    FROM "user_subscriptions" us
+                    INNER JOIN "subscription_plans" p ON us."plan_id" = p.id
                     WHERE us.status = 'ACTIVE' 
-                    AND us."endDate" > ${now} 
+                    AND us."end_date" > ${now} 
                     AND p."durationMonths" > 0
                 `
             ]);
