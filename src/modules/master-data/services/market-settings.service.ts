@@ -9,7 +9,9 @@ import { PrismaService } from '../../../../prisma/prisma.service';
 import { AuditService } from '../../audit/audit.service';
 import { Prisma } from '@prisma/client';
 
-// Interface sederhana untuk Update Payload (bisa dipindah ke DTO terpisah)
+// Interface sederhana untuk Update Payload
+// (Jika Anda sudah membuat file terpisah di ./dto/update-market-settings.dto.ts, 
+// Anda bisa menghapus interface ini dan meng-import dari sana)
 export interface UpdateMarketSettingsDto {
     inflationRate?: number;
     interestRate?: number;
@@ -41,10 +43,10 @@ export class MarketSettingsService implements OnModuleInit {
 
     /**
      * [PUBLIC] Get Current Market Rates
-     * Digunakan oleh FinancialService untuk kalkulasi.
-     * Menggunakan strategi Caching (Stale-While-Revalidate pattern sederhana).
+     * Digunakan oleh FinancialService untuk kalkulasi dan MasterDataController.
+     * [FIX] Nama fungsi diubah menjadi getSettings agar sesuai dengan Controller.
      */
-    async getCurrentSettings() {
+    async getSettings() {
         const now = Date.now();
 
         // Jika cache masih valid, return cache
@@ -75,7 +77,8 @@ export class MarketSettingsService implements OnModuleInit {
     async updateSettings(adminId: string, payload: UpdateMarketSettingsDto) {
         try {
             // 1. Ambil data lama untuk Snapshot Audit
-            const currentSettings = await this.getCurrentSettings();
+            // [FIX] Menggunakan pemanggilan fungsi yang sudah di-rename
+            const currentSettings = await this.getSettings();
 
             // 2. Validasi Angka (Simple Sanity Check)
             this.validateRates(payload);
@@ -108,13 +111,17 @@ export class MarketSettingsService implements OnModuleInit {
                     after: payload,
                     reason: 'Adjustment by Central Admin',
                 },
-            });
+            }).catch(e => this.logger.warn(`Audit log failed: ${e.message}`)); // Safety catch
 
             this.logger.log(`Market settings updated by Admin ${adminId}`);
             return updatedSettings;
 
-        } catch (error) {
+        } catch (error: any) {
             this.logger.error(`Failed to update market settings: ${error.message}`);
+            // Forward BadRequestException jika itu dari validateRates
+            if (error instanceof BadRequestException) {
+                throw error;
+            }
             throw new InternalServerErrorException('Gagal menyimpan konfigurasi pasar.');
         }
     }

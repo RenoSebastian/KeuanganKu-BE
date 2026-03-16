@@ -43,12 +43,12 @@ export class AdminUsersController {
 
     /**
      * Endpoint: GET /admin/users
-     * Mengambil daftar user dengan fitur Pagination, Search, dan Filter Role.
+     * Mengambil daftar user dengan fitur Pagination, Fuzzy Search (pg_trgm), dan Filter Role.
      */
     @Get()
-    @ApiOperation({ summary: 'List All Agents/Users (Pagination & Search)' })
+    @ApiOperation({ summary: 'List All Agents/Users (Pagination & Fuzzy Search)' })
     @ApiResponse({ status: 200, description: 'Return list of users with pagination meta.' })
-    @ApiQuery({ name: 'search', required: false, description: 'Search by Name, Email, NIP, or Agency' })
+    @ApiQuery({ name: 'search', required: false, description: 'Fuzzy search by Name, Email, NIP, or Agency' })
     @ApiQuery({ name: 'role', enum: Role, required: false, description: 'Filter by Role' })
     @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
     @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 10)' })
@@ -64,7 +64,6 @@ export class AdminUsersController {
     /**
      * Endpoint: POST /admin/users
      * Membuat user baru (Agent) secara manual oleh Admin.
-     * Berguna untuk mendaftarkan agen yang tidak mendaftar mandiri.
      */
     @Post()
     @ApiOperation({ summary: 'Create New Agent/User Manually' })
@@ -79,11 +78,7 @@ export class AdminUsersController {
 
     /**
      * Endpoint: GET /admin/users/:id
-     * Melihat detail lengkap user termasuk:
-     * - Data Agency
-     * - Status Subscription (Paket Aktif)
-     * - Sisa Kuota (Usage)
-     * - History Aktivitas
+     * Melihat detail lengkap user (Agency, Subscription, Quota, Analytics).
      */
     @Get(':id')
     @ApiOperation({ summary: 'Get Agent Detail with Subscription & Quota Info' })
@@ -95,8 +90,7 @@ export class AdminUsersController {
 
     /**
      * Endpoint: PATCH /admin/users/:id
-     * Mengupdate data profil user.
-     * Admin memiliki kuasa penuh untuk mengubah data sensitif jika diperlukan.
+     * Mengupdate data profil user (Override penuh oleh Admin).
      */
     @Patch(':id')
     @ApiOperation({ summary: 'Update Agent Profile (Admin Override)' })
@@ -111,8 +105,7 @@ export class AdminUsersController {
 
     /**
      * Endpoint: DELETE /admin/users/:id
-     * Menghapus user dari sistem (Soft Delete / Hard Delete tergantung implementasi Service).
-     * Juga menghapus index pencarian.
+     * Menghapus user secara permanen dan menyingkirkannya dari indeks Meilisearch.
      */
     @Delete(':id')
     @ApiOperation({ summary: 'Delete Agent (and remove from Search Index)' })
@@ -123,4 +116,4 @@ export class AdminUsersController {
     ) {
         return this.usersService.deleteUser(adminId, id);
     }
-}
+}   

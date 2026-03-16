@@ -7,9 +7,9 @@ import {
     Param,
     UseGuards,
 } from '@nestjs/common';
-import { Role } from '@prisma/client';
+import { Role, VerificationStatus } from '@prisma/client';
 import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody, ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, IsArray, IsEnum } from 'class-validator';
 
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
@@ -55,6 +55,37 @@ export class InjectQuotaDto {
     reason: string;
 }
 
+// [PHASE 1: ENHANCEMENT] DTO untuk operasi pemrosesan massal
+export class BulkVerifyDto {
+    @ApiProperty({ description: 'Array of Order IDs yang akan dieksekusi' })
+    @IsArray()
+    @IsUUID('all', { each: true })
+    orderIds: string[];
+
+    @ApiProperty({ description: 'Target Status Eksekusi (VALID / INVALID)' })
+    @IsNotEmpty()
+    @IsEnum(VerificationStatus)
+    status: VerificationStatus;
+
+    @ApiProperty({ description: 'Catatan admin untuk semua transaksi yang dipilih', required: false })
+    @IsOptional()
+    @IsString()
+    adminNotes?: string;
+}
+
+// [PHASE 1: ENHANCEMENT] DTO untuk operasi Reversal (Cabut akses)
+export class RevokeOrderDto {
+    @ApiProperty({ description: 'ID Order yang sudah berstatus VALID' })
+    @IsNotEmpty()
+    @IsUUID()
+    orderId: string;
+
+    @ApiProperty({ description: 'Alasan pencabutan (Wajib)', example: 'Bukti transfer terindikasi palsu setelah audit bank' })
+    @IsNotEmpty()
+    @IsString()
+    reason: string;
+}
+
 @ApiTags('Admin Subscription & Quota')
 @Controller('admin/subscription')
 @UseGuards(JwtAuthGuard, RolesGuard)
@@ -65,35 +96,50 @@ export class AdminSubscriptionController {
         private readonly adminSubscriptionService: AdminSubscriptionService,
     ) { }
 
-    /**
-     * Endpoint: GET /admin/subscription/orders
-     * Digunakan oleh Admin untuk melihat antrean bukti transfer yang perlu diaudit.
-     */
     @Get('pending')
     @ApiOperation({ summary: 'Get pending subscription orders' })
     async getPendingOrders() {
         return this.adminSubscriptionService.getPendingOrders();
     }
 
-    /**
-     * Endpoint: PATCH /admin/subscription/verify
-     * Eksekusi validasi bukti bayar.
-     * Mencatat Audit Log siapa admin yang memverifikasi.
-     */
     @Patch('verify')
     @ApiOperation({ summary: 'Approve or Reject subscription order' })
     async verifyOrder(
-        @GetUser('id') adminId: string, // [NEW] Track Admin ID
+        @GetUser('id') adminId: string,
         @Body() dto: VerifyOrderDto,
     ) {
         return this.adminSubscriptionService.verifyOrder(adminId, dto);
     }
 
     /**
-     * Endpoint: POST /admin/subscription/override
-     * Digunakan untuk memberikan status PRO kepada user tanpa perlu proses upload bukti bayar.
-     * Cocok untuk pemberian hadiah atau VIP access.
+     * [PHASE 1: ENHANCEMENT]
+     * Endpoint: POST /admin/subscription/bulk-verify
+     * Memproses puluhan/ratusan bukti transfer secara bersamaan.
      */
+    @Post('bulk-verify')
+    @ApiOperation({ summary: 'Bulk Approve or Reject multiple orders simultaneously' })
+    async bulkVerifyOrders(
+        @GetUser('id') adminId: string,
+        @Body() dto: BulkVerifyDto,
+    ) {
+        return this.adminSubscriptionService.bulkVerifyOrders(adminId, dto);
+    }
+
+    /**
+     * [PHASE 1: ENHANCEMENT]
+     * Endpoint: POST /admin/subscription/revoke
+     * Compensating Transaction: Membatalkan order yang terlanjur disetujui, 
+     * mencabut akses PRO, dan menarik mundur kuota (reversal).
+     */
+    @Post('revoke')
+    @ApiOperation({ summary: 'Revoke an already approved order (Compensating Transaction)' })
+    async revokeOrder(
+        @GetUser('id') adminId: string,
+        @Body() dto: RevokeOrderDto,
+    ) {
+        return this.adminSubscriptionService.revokeOrder(adminId, dto);
+    }
+
     @Post('override')
     @ApiOperation({ summary: 'Manual override to give PRO access (Super Admin)' })
     async manualOverride(
@@ -109,14 +155,7 @@ export class AdminSubscriptionController {
         );
     }
 
-    /**
-     * [PHASE 5 UPDATE]
-     * Endpoint: PATCH /admin/subscription/users/:userId/quota
-     * Implementasi 'The Safety Net'.
-     * Memberikan tambahan Token Kuota secara manual kepada user tertentu.
-     * Menggunakan Ledger System di backend.
-     */
-    @Patch('users/:userId/quota') // URL diperbaiki agar RESTful
+    @Patch('users/:userId/quota')
     @ApiOperation({
         summary: 'Inject/Top-up Simulation Quota manually',
         description: 'Menambah token kuota user. Wajib menyertakan alasan untuk audit.',
