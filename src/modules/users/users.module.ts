@@ -3,10 +3,12 @@ import { UsersController } from './users.controller';
 import { UsersService } from './users.service';
 import { SearchModule } from '../search/search.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
-// [FIX] Import UserQuotaService
 import { UserQuotaService } from './services/user-quota.service';
 import { RedisModule } from '../redis/redis.module';
 import { AuditModule } from '../audit/audit.module';
+
+// [PHASE 1 FIX] Import AdminUsersController
+import { AdminUsersController } from './controllers/admin-users.controller';
 
 @Module({
   imports: [
@@ -15,14 +17,17 @@ import { AuditModule } from '../audit/audit.module';
     RedisModule,
     AuditModule,
   ],
-  controllers: [UsersController],
+  controllers: [
+    UsersController,
+    AdminUsersController // [PHASE 1 FIX] Daftarkan controller Admin agar dikenali oleh Router
+  ],
   providers: [
     UsersService,
-    UserQuotaService, // [FIX] Daftarkan sebagai Provider
+    UserQuotaService,
   ],
   exports: [
     UsersService,
-    UserQuotaService, // [FIX] Export agar bisa dipakai di SubscriptionModule
+    UserQuotaService,
   ],
 })
 export class UsersModule { }

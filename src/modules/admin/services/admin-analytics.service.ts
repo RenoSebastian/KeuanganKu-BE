@@ -27,7 +27,7 @@ export class AdminAnalyticsService {
         const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
         try {
-            const [grossAgg, pendingAgg, activeSubscriptions] = await Promise.all([
+            const [grossAgg, pendingAgg, mrrRaw] = await Promise.all([
                 // 1. Hitung Gross Volume (Pendapatan Kotor bulan ini) dari Order yang VALID
                 this.prisma.subscriptionOrder.aggregate({
                     _sum: { snapshotPrice: true },
@@ -36,35 +36,32 @@ export class AdminAnalyticsService {
                         createdAt: { gte: startOfMonth },
                     },
                 }),
+
                 // 2. Hitung Nominal Pending dari Order yang belum di-ACC
                 this.prisma.subscriptionOrder.aggregate({
                     _sum: { snapshotPrice: true },
                     where: { verificationStatus: 'PENDING' },
                 }),
-                // 3. Ambil langganan aktif (UserSubscription) beserta relasi plan untuk hitung MRR
-                this.prisma.userSubscription.findMany({
-                    where: {
-                        status: 'ACTIVE',
-                        endDate: { gt: now }, // Yang masa aktifnya belum habis
-                    },
-                    include: { plan: true },
-                }),
+
+                // 3. [PHASE 4 HARDENING: OOM PREVENTION] 
+                // Kalkulasi MRR menggunakan Database-level Aggregation via $queryRaw.
+                // Ini mencegah Node.js Crash karena kehabisan RAM jika ada jutaan data langganan aktif.
+                this.prisma.$queryRaw<Array<{ mrr: number | null }>>`
+                    SELECT SUM(p.price / p."durationMonths") as mrr
+                    FROM "UserSubscription" us
+                    INNER JOIN "SubscriptionPlan" p ON us."planId" = p.id
+                    WHERE us.status = 'ACTIVE' 
+                    AND us."endDate" > ${now} 
+                    AND p."durationMonths" > 0
+                `
             ]);
 
-            // Kalkulasi MRR (Monthly Recurring Revenue)
-            // Dibagi berdasarkan durationMonths dari SubscriptionPlan
-            let mrrCalculation = 0;
-            for (const sub of activeSubscriptions) {
-                if (sub.plan && sub.plan.durationMonths > 0) {
-                    const price = Number(sub.plan.price);
-                    mrrCalculation += (price / sub.plan.durationMonths);
-                }
-            }
+            // Ekstrak hasil raw query yang dikerjakan langsung oleh PostgreSQL
+            const mrrValue = mrrRaw[0]?.mrr ? Number(mrrRaw[0].mrr) : 0;
 
             return {
-                // Konversi Decimal Prisma ke Number JS
                 grossVolume: Number(grossAgg._sum.snapshotPrice || 0),
-                mrr: Math.round(mrrCalculation),
+                mrr: Math.round(mrrValue),
                 pendingValue: Number(pendingAgg._sum.snapshotPrice || 0),
             };
         } catch (error) {
@@ -96,7 +93,7 @@ export class AdminAnalyticsService {
                     where: { lastActivityAt: { gte: startOfMonth } },
                 }),
 
-                // 4. Pengguna dengan langganan aktif (Relasi One-to-One / Zero)
+                // 4. Pengguna dengan langganan aktif (Menggunakan relasi database level)
                 this.prisma.user.count({
                     where: {
                         deletedAt: null,
@@ -128,12 +125,13 @@ export class AdminAnalyticsService {
     async calculateFeatureUtilization(): Promise<SystemUsageMetricsDto> {
         try {
             const [logsGrouped, quotaUsageAgg] = await Promise.all([
-                // 1. Grouping berdasarkan moduleType (BUDGETING, PENSION, dll)
+                // 1. Grouping berdasarkan moduleType (BUDGETING, PENSION, dll) - Native Postgres GroupBy
                 this.prisma.simulationLog.groupBy({
                     by: ['moduleType'],
                     _count: { _all: true },
                     orderBy: { _count: { moduleType: 'desc' } },
                 }),
+
                 // 2. Rata-rata total penggunaan kuota oleh pengguna gratis (USER biasa)
                 this.prisma.userUsage.aggregate({
                     _avg: { totalUsed: true },
@@ -184,7 +182,6 @@ export class AdminAnalyticsService {
             ]);
 
             const mappedData: CashflowLedgerItemDto[] = transactions.map(trx => {
-                // Konversi tipe status dari Prisma ke DTO Enum
                 let ledgerStatus: CashflowStatus = CashflowStatus.PENDING;
                 if (trx.verificationStatus === 'VALID') ledgerStatus = CashflowStatus.VERIFIED;
                 else if (trx.verificationStatus === 'INVALID') ledgerStatus = CashflowStatus.REJECTED;

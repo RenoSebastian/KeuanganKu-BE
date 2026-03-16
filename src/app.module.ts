@@ -1,17 +1,16 @@
 import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
-import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core'; // [UPDATE] Import APP_GUARD
+import { APP_FILTER, APP_INTERCEPTOR, APP_GUARD } from '@nestjs/core';
 import { WinstonModule } from 'nest-winston';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { JwtModule } from '@nestjs/jwt';
-import { ThrottlerModule } from '@nestjs/throttler'; // [NEW] Import Throttler
+import { ThrottlerModule } from '@nestjs/throttler';
 import * as path from 'path';
-import { join } from 'path';
 
 // --- Logging & Config ---
 import { winstonConfig } from './common/configs/winston.config';
-import redisConfig from './common/configs/redis.config'; // [NEW] Import Redis Configuration Namespace
+import redisConfig from './common/configs/redis.config';
 
 // --- Global Filters & Interceptors ---
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
@@ -19,14 +18,14 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
 
 // --- Guards ---
-import { ThrottlerBehindProxyGuard } from './common/guards/throttler-behind-proxy.guard'; // [NEW] Custom Guard
+import { ThrottlerBehindProxyGuard } from './common/guards/throttler-behind-proxy.guard';
 
 // --- Middlewares ---
 import { ActiveSessionMiddleware } from './common/middleware/active-session.middleware';
 
 // --- Feature Modules ---
 import { PrismaModule } from '../prisma/prisma.module';
-import { RedisModule } from './modules/redis/redis.module'; // [NEW] Import In-Memory Session Layer
+import { RedisModule } from './modules/redis/redis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { FinancialModule } from './modules/financial/financial.module';
@@ -40,27 +39,28 @@ import { EducationModule } from './modules/education/education.module';
 import { MediaModule } from './modules/media/media.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { NotificationModule } from './modules/notification/notification.module';
-import { EmailModule } from './modules/email/email.module'; // [NEW] Import Modul Email Independen
-import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomment jika AdminModule sudah dibuat di Fase 4
+import { EmailModule } from './modules/email/email.module';
+
+// [PHASE 1 FIX] Mengaktifkan AdminModule secara permanen
+import { AdminModule } from './modules/admin/admin.module';
 
 @Module({
   imports: [
     // 1. Global Configurations
     ConfigModule.forRoot({
       isGlobal: true,
-      load: [redisConfig], // [NEW] Load registrasi konfigurasi namespace 'redis'
+      load: [redisConfig],
     }),
     WinstonModule.forRoot(winstonConfig),
 
     // Scheduler
     ScheduleModule.forRoot(),
 
-    // [NEW] Security: Rate Limiting (Global Configuration)
-    // Limit: 100 request per 60 detik per IP
+    // Security: Rate Limiting
     ThrottlerModule.forRoot([
       {
-        ttl: 60000, // 60 detik (dalam milidetik)
-        limit: 100, // Maksimal 100 request
+        ttl: 60000,
+        limit: 100,
       },
     ]),
 
@@ -69,12 +69,10 @@ import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomm
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('JWT_SECRET'),
-        // Perhatian: Ini akan direfaktor di Fase 4 (Auth Service Refactoring) 
-        // saat kita memecah masa berlaku antara Access Token dan Refresh Token
         signOptions: { expiresIn: '1d' },
       }),
       inject: [ConfigService],
-      global: true, // Make it available everywhere including middleware
+      global: true,
     }),
 
     /**
@@ -84,7 +82,6 @@ import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomm
       rootPath: path.join(process.cwd(), 'uploads'),
       serveRoot: '/uploads',
     }),
-    // folder public baru
     ServeStaticModule.forRoot({
       rootPath: path.join(process.cwd(), 'public'),
       serveRoot: '/',
@@ -92,7 +89,7 @@ import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomm
 
     // 3. Database Layer (PostgreSQL & Redis)
     PrismaModule,
-    RedisModule, // [NEW] Integrasi Redis sebagai state-manager sesi utama
+    RedisModule,
 
     // 4. Application Features
     AuthModule,
@@ -108,9 +105,10 @@ import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomm
     MediaModule,
     SubscriptionModule,
     NotificationModule,
-    EmailModule, // [NEW] Register Modul SMTP ke dalam root node aplikasi
-    AdminModule, // Uncomment jika sudah ready
-    
+    EmailModule,
+
+    // [PHASE 1 FIX] Mendaftarkan AdminModule ke Dependency Injection Tree
+    AdminModule,
   ],
   controllers: [],
   providers: [
@@ -126,8 +124,6 @@ import { AdminModule } from './modules/admin/admin.module'; // [OPTIONAL] Uncomm
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
     },
-    // [NEW] Global Rate Limiting Guard
-    // Mengaktifkan Throttler untuk seluruh endpoint secara default
     {
       provide: APP_GUARD,
       useClass: ThrottlerBehindProxyGuard,

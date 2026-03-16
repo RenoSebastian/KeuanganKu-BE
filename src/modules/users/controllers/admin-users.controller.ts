@@ -12,6 +12,7 @@ import {
     HttpStatus,
     DefaultValuePipe,
     ParseIntPipe,
+    ParseEnumPipe, // [PHASE 4 IMPORT]
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import {
@@ -54,7 +55,9 @@ export class AdminUsersController {
     @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (default: 10)' })
     async findAll(
         @Query('search') search?: string,
-        @Query('role') role?: Role,
+        // [PHASE 4 HARDENING] Menggunakan ParseEnumPipe untuk menjamin nilai yang masuk adalah Enum Prisma yang valid
+        @Query('role', new ParseEnumPipe(Role, { optional: true })) role?: Role,
+        // [PHASE 4 HARDENING] ParseIntPipe mencegah injeksi string yang dapat merusak "Skip" & "Take" Database
         @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
         @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
     ) {
@@ -116,4 +119,4 @@ export class AdminUsersController {
     ) {
         return this.usersService.deleteUser(adminId, id);
     }
-}   
+}

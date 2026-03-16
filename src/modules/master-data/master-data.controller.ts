@@ -17,7 +17,6 @@ import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
 import { MasterDataService } from './master-data.service';
 
-// Import DTO dan Service Market Settings (Central Bank Config)
 import { MarketSettingsService } from './services/market-settings.service';
 import { UpdateMarketSettingsDto } from './dto/update-market-settings.dto';
 import { GetUser } from '../../common/decorators/get-user.decorator';
@@ -25,7 +24,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 @ApiTags('Admin Master Data & Config')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
-// [PHASE 3 ENHANCEMENT] Standarisasi Prefix Admin
+// [PHASE 1 ENHANCEMENT] Standarisasi Prefix Admin (Sesuai dengan kontrak FE)
 @Controller('admin/master-data')
 export class MasterDataController {
     constructor(
@@ -39,13 +38,12 @@ export class MasterDataController {
 
     @Get('settings')
     @ApiOperation({ summary: 'Mendapatkan pengaturan ekonomi (Inflasi, Bunga, dll) saat ini' })
-    // Bisa diakses oleh semua (User/Admin) karena kalkulator butuh angka inflasi
     getMarketSettings() {
         return this.marketSettingsService.getSettings();
     }
 
     @Patch('settings')
-    @Roles(Role.ADMIN) // STRICT RBAC: Hanya Admin yang boleh merubah inflasi
+    @Roles(Role.ADMIN)
     @ApiOperation({ summary: 'Update pengaturan ekonomi global (Hanya Admin)' })
     updateMarketSettings(
         @GetUser('id') adminId: string,

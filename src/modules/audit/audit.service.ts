@@ -43,7 +43,6 @@ export class AuditService {
   /**
    * [PUBLIC ADAPTER] ADMIN CORE ACTIONS
    * Mencatat tindakan administratif sensitif ke tabel AdminActivityLog.
-   * Mendukung penyimpanan struktur 'changes' (Before vs After) untuk audit trail.
    */
   async logAdminAction(data: {
     adminId: string;
@@ -53,7 +52,6 @@ export class AuditService {
     ip?: string;
   }) {
     try {
-      // Tentukan Entity Name berdasarkan target
       let entityName = 'USER';
       if (data.targetUserId === 'SYSTEM') entityName = 'SYSTEM';
       if (data.details.entityName) entityName = data.details.entityName;
@@ -78,7 +76,6 @@ export class AuditService {
 
   /**
    * [CORE LOGIC] DB WRITER (Access Logs)
-   * Menyimpan log aktivitas umum.
    */
   async logAccess(dto: CreateAuditLogDto): Promise<void> {
     try {
@@ -87,12 +84,10 @@ export class AuditService {
           actorId: dto.actorId,
           targetUserId: dto.targetUserId ?? null,
           action: dto.action,
-          // Menggunakan tipe Prisma.InputJsonValue untuk keamanan tipe data JSON
           metadata: (dto.metadata as Prisma.InputJsonValue) ?? {},
         },
       });
     } catch (error) {
-      // Fail-safe: Error logging tidak boleh mematikan flow aplikasi utama
       this.logger.error(
         `[AUDIT FAILURE] Failed to log action '${dto.action}' by ${dto.actorId}`,
         error instanceof Error ? error.stack : String(error),
@@ -101,48 +96,75 @@ export class AuditService {
   }
 
   /**
-   * [READ] DASHBOARD ANALYTICS (User Logs)
-   * Mengambil log aktivitas user biasa.
+   * [PHASE 3 ENHANCEMENT: HIGH-PERFORMANCE LOG VIEWER]
+   * Menggunakan Cursor-Based Pagination. O(1) jump time.
    */
-  async getAllLogs(limit = 100) {
-    return this.prisma.accessLog.findMany({
-      include: {
-        actor: {
-          select: {
-            fullName: true,
-            email: true,
-            role: true,
-          },
-        },
-        targetUser: {
-          select: {
-            fullName: true,
-            email: true,
-          },
-        },
-      },
-      orderBy: {
-        accessedAt: 'desc',
-      },
-      take: limit,
-    });
-  }
+  async getAdminSystemLogs(params: {
+    cursor?: string;
+    take: number;
+    action?: string;
+  }) {
+    const { cursor, take, action } = params;
 
-  /**
-   * [READ] ADMIN SPECIFIC LOGS
-   * Mengambil log aktivitas khusus Admin dari tabel AdminActivityLog.
-   */
-  async getAdminLogs(limit = 50) {
-    return this.prisma.adminActivityLog.findMany({
+    const where: Prisma.AdminActivityLogWhereInput = {};
+
+    if (action) {
+      where.actionType = action;
+    }
+
+    // Mengambil (take + 1) baris. Baris ekstra ini hanya digunakan 
+    // untuk memeriksa apakah data selanjutnya (nextCursor) tersedia.
+    const logs = await this.prisma.adminActivityLog.findMany({
+      take: take + 1,
+      // Jika ada cursor, lewati record cursor itu sendiri (skip: 1)
+      skip: cursor ? 1 : 0,
+      cursor: cursor ? { id: cursor } : undefined,
+      where,
       include: {
         admin: {
           select: {
+            id: true,
             fullName: true,
             email: true,
           },
         },
       },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: 'desc' }, // Terbaru selalu di atas
+    });
+
+    let nextCursor: string | undefined = undefined;
+
+    // Jika jumlah data yang kembali lebih besar dari "take" yang diminta, 
+    // berarti ada data di halaman berikutnya.
+    if (logs.length > take) {
+      const nextItem = logs.pop(); // Buang item ekstra dari array return
+      nextCursor = nextItem!.id;   // Jadikan ID item ekstra sebagai cursor selanjutnya
+    }
+
+    return {
+      data: logs,
+      meta: {
+        nextCursor,
+        hasMore: nextCursor !== undefined,
+        limit: take,
+      },
+    };
+  }
+
+  /**
+   * [READ] GENERAL LOGS (Fallback)
+   */
+  async getAllLogs(limit: number) {
+    return this.prisma.accessLog.findMany({
+      include: {
+        actor: {
+          select: { fullName: true, email: true, role: true },
+        },
+        targetUser: {
+          select: { fullName: true, email: true },
+        },
+      },
+      orderBy: { accessedAt: 'desc' },
       take: limit,
     });
   }
