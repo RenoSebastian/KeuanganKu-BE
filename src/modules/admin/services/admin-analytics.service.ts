@@ -190,7 +190,7 @@ export class AdminAnalyticsService {
                     transactionId: trx.id,
                     transactionDate: trx.updatedAt,
                     planName: trx.plan?.name || 'Unknown Plan',
-                    amount: Number(trx.snapshotPrice || 0),
+                    amount: Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0),
                     status: ledgerStatus,
                     verifiedBy: trx.paymentAudit?.adminId ? `Admin ID: ${trx.paymentAudit.adminId}` : undefined,
                     userName: trx.user?.fullName || 'Unknown User',

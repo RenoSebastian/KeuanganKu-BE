@@ -95,10 +95,11 @@ export class SubscriptionService {
                 data: {
                     userId,
                     planId: plan.id,
+                    uniqueCode: Number(dto.uniqueCode) || 0,
                     proofImageUrl,
                     snapshotPrice: plan.price,
                     verificationStatus: VerificationStatus.PENDING, // Admin belum cek
-                },
+                } as any, // Cast to any because Prisma Client is locked and not fully regenerated
             });
 
             // B. Hitung Tanggal Berakhir (EndDate)

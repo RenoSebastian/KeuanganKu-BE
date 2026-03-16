@@ -269,6 +269,7 @@ model SubscriptionOrder {
   proofImageUrl      String             @map("proof_image_url")
   verificationStatus VerificationStatus @default(PENDING) @map("verification_status")
   adminNotes         String?            @map("admin_notes") @db.Text
+  uniqueCode         Int                @default(0) @map("unique_code")
   snapshotPrice      Decimal            @map("snapshot_price") @db.Decimal(15, 2)
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")

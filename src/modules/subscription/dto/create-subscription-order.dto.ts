@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsUUID } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsNumber, Min } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
 export class CreateSubscriptionOrderDto {
@@ -9,6 +10,16 @@ export class CreateSubscriptionOrderDto {
     @IsNotEmpty()
     @IsUUID('4', { message: 'Plan ID harus berupa UUID yang valid' })
     planId: string;
+
+    @ApiProperty({
+        description: 'Kode unik suffix pembayaran',
+        example: 123,
+    })
+    @IsNotEmpty()
+    @Type(() => Number)
+    @IsNumber()
+    @Min(0)
+    uniqueCode: number;
 
     @ApiProperty({
         type: 'string',
