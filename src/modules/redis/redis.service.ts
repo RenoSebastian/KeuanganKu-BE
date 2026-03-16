@@ -114,6 +114,89 @@ export class RedisService {
     }
 
     // ====================================================================
+    // REAL-TIME HEARTBEAT TRACKING (FASE 3 - PWA OPTIMIZATION)
+    // ====================================================================
+
+    private getOnlineKey(userId: string, deviceId: string): string {
+        return `${this.keyPrefix}online:${userId}:${deviceId}`;
+    }
+
+    /**
+     * Merekam bahwa user sedang online.
+     * Menggunakan TTL pendek (misal 45-60 detik) agar terhapus otomatis 
+     * jika device mati mendadak tanpa disconnect yang bersih.
+     */
+    async recordHeartbeat(userId: string, deviceId: string, role: string, userName: string, ttl: number = 60): Promise<void> {
+        try {
+            const key = this.getOnlineKey(userId, deviceId);
+            const value = JSON.stringify({ userId, deviceId, role, userName, lastSeen: Date.now() });
+            await this.redisClient.set(key, value, 'EX', ttl);
+        } catch (error) {
+            // Silently fail for heartbeats to avoid spamming logs / throwing 500s constantly
+            // console.warn('Redis Heartbeat Error', error);
+        }
+    }
+
+    /**
+     * Menghapus status online saat user logout / explicit disconnect
+     */
+    async removeHeartbeat(userId: string, deviceId: string): Promise<void> {
+        try {
+            const key = this.getOnlineKey(userId, deviceId);
+            await this.redisClient.del(key);
+        } catch (error) {
+            // Silently fail
+        }
+    }
+
+    /**
+     * Scan Redis untuk menghitung total keys online (Mencegah blocking O(N) KEYS command)
+     */
+    async getOnlineUsersCount(): Promise<number> {
+        try {
+            let cursor = '0';
+            let count = 0;
+            const matchPattern = `${this.keyPrefix}online:*`;
+
+            do {
+                // Gunakan perintah SCAN untuk iterasi kunci tanpa memblokir thread Redis Server
+                const [newCursor, keys] = await this.redisClient.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+                cursor = newCursor;
+                count += keys.length;
+            } while (cursor !== '0');
+
+            return count;
+        } catch (error) {
+            return 0; // Fallback jika Redis down
+        }
+    }
+
+    /**
+     * Scan Redis untuk mendapatkan detail lengkap user yang online
+     */
+    async getOnlineUsersDetailed(): Promise<any[]> {
+        try {
+            let cursor = '0';
+            const matchedKeys: string[] = [];
+            const matchPattern = `${this.keyPrefix}online:*`;
+
+            do {
+                const [newCursor, keys] = await this.redisClient.scan(cursor, 'MATCH', matchPattern, 'COUNT', 100);
+                cursor = newCursor;
+                matchedKeys.push(...keys);
+            } while (cursor !== '0');
+
+            if (matchedKeys.length === 0) return [];
+
+            // Fetch semua data dari kunci yang ditemukan dalam satu pipeline
+            const values = await this.redisClient.mget(...matchedKeys);
+            return values.filter(v => v !== null).map(v => JSON.parse(v!));
+        } catch (error) {
+            return [];
+        }
+    }
+
+    // ====================================================================
     // OTP MANAGEMENT METHODS (TEMPORARY STATE)
     // ====================================================================
 

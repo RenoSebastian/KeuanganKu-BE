@@ -5,11 +5,15 @@ import { SearchModule } from '../search/search.module';
 import { SubscriptionModule } from '../subscription/subscription.module';
 // [FIX] Import UserQuotaService
 import { UserQuotaService } from './services/user-quota.service';
+import { RedisModule } from '../redis/redis.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
     SearchModule,
     forwardRef(() => SubscriptionModule),
+    RedisModule,
+    AuditModule,
   ],
   controllers: [UsersController],
   providers: [

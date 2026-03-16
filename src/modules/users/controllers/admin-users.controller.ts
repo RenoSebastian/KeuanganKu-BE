@@ -31,6 +31,7 @@ import { UpdateUserDto } from '../dto/update-user.dto';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../common/guards/roles.guard';
 import { Roles } from '../../../common/decorators/roles.decorator';
+import { GetUser } from '../../../common/decorators/get-user.decorator';
 
 @ApiTags('Admin User Management')
 @Controller('admin/users')
@@ -69,8 +70,11 @@ export class AdminUsersController {
     @ApiOperation({ summary: 'Create New Agent/User Manually' })
     @ApiResponse({ status: HttpStatus.CREATED, description: 'Agent successfully created.' })
     @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Email/NIP already exists.' })
-    async create(@Body() createUserDto: CreateUserDto) {
-        return this.usersService.createUser(createUserDto);
+    async create(
+        @GetUser('id') adminId: string,
+        @Body() createUserDto: CreateUserDto
+    ) {
+        return this.usersService.createUser(adminId, createUserDto);
     }
 
     /**
@@ -98,10 +102,11 @@ export class AdminUsersController {
     @ApiOperation({ summary: 'Update Agent Profile (Admin Override)' })
     @ApiResponse({ status: 200, description: 'User updated successfully.' })
     async update(
+        @GetUser('id') adminId: string,
         @Param('id', ParseUUIDPipe) id: string,
         @Body() updateUserDto: UpdateUserDto,
     ) {
-        return this.usersService.updateUser(id, updateUserDto);
+        return this.usersService.updateUser(adminId, id, updateUserDto);
     }
 
     /**
@@ -112,7 +117,10 @@ export class AdminUsersController {
     @Delete(':id')
     @ApiOperation({ summary: 'Delete Agent (and remove from Search Index)' })
     @ApiResponse({ status: 200, description: 'User deleted successfully.' })
-    async remove(@Param('id', ParseUUIDPipe) id: string) {
-        return this.usersService.deleteUser(id);
+    async remove(
+        @GetUser('id') adminId: string,
+        @Param('id', ParseUUIDPipe) id: string
+    ) {
+        return this.usersService.deleteUser(adminId, id);
     }
 }

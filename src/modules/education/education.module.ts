@@ -13,9 +13,10 @@ import { QuizEngineService } from './services/quiz-engine.service';
 import { EducationCategoryService } from './services/education-category.service'; // [FIX] Import Service Kategori
 
 import { MediaModule } from '../media/media.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
-    imports: [PrismaModule, MediaModule],
+    imports: [PrismaModule, MediaModule, AuditModule],
     controllers: [
         AdminEducationController,
         PublicEducationController,

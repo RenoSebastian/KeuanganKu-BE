@@ -11,6 +11,7 @@ import { SearchService } from '../search/search.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { EditUserDto } from './dto/edit-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
+import { AuditService } from '../audit/audit.service';
 
 @Injectable()
 export class UsersService {
@@ -19,6 +20,7 @@ export class UsersService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly searchService: SearchService,
+    private readonly auditService: AuditService,
   ) { }
 
   // =================================================================
@@ -138,7 +140,7 @@ export class UsersService {
   }
 
   // 2. Create User (Admin / Registration Handler)
-  async createUser(dto: CreateUserDto) {
+  async createUser(adminId: string, dto: CreateUserDto) {
     // Cek duplikasi Email atau NIP
     const existing = await this.prisma.user.findFirst({
       where: {
@@ -199,6 +201,19 @@ export class UsersService {
       );
 
       const { passwordHash, ...result } = newUser;
+
+      // [AUDIT LOG] Log Admin Action for Create User
+      this.auditService.logAdminAction({
+        adminId,
+        action: 'CREATE_USER',
+        targetUserId: result.id,
+        details: {
+          entityName: 'USER',
+          before: null,
+          after: result,
+        }
+      }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
+
       return result;
     } catch (error: any) {
       if (error.code === 'P2003') {
@@ -237,13 +252,13 @@ export class UsersService {
   }
 
   // 4. Update User (Admin)
-  async updateUser(id: string, dto: UpdateUserDto) {
-    return this.processUpdate(id, dto);
+  async updateUser(adminId: string, id: string, dto: UpdateUserDto) {
+    return this.processUpdate(id, dto, adminId);
   }
 
   // 5. Delete User (Admin)
-  async deleteUser(id: string) {
-    await this.findOne(id); // Ensure exists
+  async deleteUser(adminId: string, id: string) {
+    const oldData = await this.findOne(id); // Ensure exists
 
     try {
       const deleted = await this.prisma.user.delete({ where: { id } });
@@ -252,6 +267,18 @@ export class UsersService {
       this.searchService
         .removeDocument('global_search', id)
         .catch((e) => this.logger.warn(`Search removal warning: ${e.message}`));
+
+      // [AUDIT LOG] Log Admin Action for Delete User
+      this.auditService.logAdminAction({
+        adminId,
+        action: 'DELETE_USER',
+        targetUserId: id,
+        details: {
+          entityName: 'USER',
+          before: oldData,
+          after: null,
+        }
+      }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
 
       return { message: 'User deleted successfully', id: deleted.id };
     } catch (error: any) {
@@ -266,8 +293,13 @@ export class UsersService {
   // HELPER METHODS
   // =================================================================
 
-  private async processUpdate(userId: string, dto: any) {
+  private async processUpdate(userId: string, dto: any, adminId?: string) {
     try {
+      const oldUser = await this.prisma.user.findUnique({ where: { id: userId } });
+      if (!oldUser) throw new NotFoundException('User not found');
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { passwordHash: oldHash, ...oldSanitized } = oldUser;
+
       const { password, dateOfBirth, dependentCount, agencyId, agencyName, ...restData } =
         dto;
 
@@ -306,6 +338,22 @@ export class UsersService {
       );
 
       const { passwordHash, ...result } = updatedUser;
+
+      if (adminId) {
+        // [AUDIT LOG] Log Admin Action for Update User
+        this.auditService.logAdminAction({
+          adminId,
+          action: 'UPDATE_USER',
+          targetUserId: result.id,
+          details: {
+            entityName: 'USER',
+            before: oldSanitized,
+            after: result,
+            changes: dto,
+          }
+        }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
+      }
+
       return result;
     } catch (error: any) {
       this.logger.error(`Failed update user ${userId}: ${error.message}`);

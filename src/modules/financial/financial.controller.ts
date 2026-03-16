@@ -561,29 +561,59 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (STATELESS)
+  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (DECOUPLED)
   // ===========================================================================
 
-  @Post('simulation/checkup')
-  @ApiOperation({ summary: 'Simulasi Financial Checkup (JSON)' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async createCheckupSimulation(
+  @Post('simulation/checkup/calculate')
+  @ApiOperation({ summary: 'Kalkulasi Financial Checkup (JSON State Return)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async calculateCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
   ) {
-    const result = await this.financialService.simulateAgentCheckup(user, dto);
+    const result = await this.financialService.calculateCheckupSimulation(user, dto);
 
     await this.auditService.logActivity({
       userId: user.id,
-      action: 'SIMULATE_CHECKUP',
+      action: 'CALCULATE_CHECKUP',
       entity: 'SimulationLog',
-      entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated checkup simulation for client ${dto.client.name}`,
+      entityId: result.simulationId,
+      details: `Agent ${user.fullName} calculated checkup simulation for client ${dto.client.name}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
     return result;
+  }
+
+  @Get('simulation/checkup/:id/pdf')
+  @ApiOperation({ summary: 'Download PDF Simulasi Checkup (On-Demand)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async downloadCheckupPdfById(
+    @Param('id') id: string,
+    @GetUser() user: client.User,
+    @Res() res: express.Response,
+  ) {
+    // 1. Service Call (Generate PDF from persisted state)
+    const pdfBuffer = await this.financialService.downloadCheckupPdfById(id, user);
+
+    // 2. Audit Log (Download Event)
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'DOWNLOAD_SIMULATION_PDF',
+      entity: 'SimulationLog',
+      entityId: id,
+      details: `Agent ${user.fullName} downloaded checkup PDF ${id}`,
+    });
+
+    // 3. Return Stream
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Checkup_Simulation_${id}.pdf"`,
+      'Content-Length': (pdfBuffer as Buffer).length,
+    });
+
+    res.end(pdfBuffer);
   }
 
   // ===========================================================================

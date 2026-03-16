@@ -70,8 +70,12 @@ export class FinancialService {
     return this.checkupService.getMyBudgets(userId);
   }
 
-  simulateAgentCheckup(user: any, dto: CreateCheckupSimulationDto) {
-    return this.checkupService.simulateAgentCheckup(user, dto);
+  calculateCheckupSimulation(user: any, dto: CreateCheckupSimulationDto) {
+    return this.checkupService.calculateCheckupSimulation(user, dto);
+  }
+
+  downloadCheckupPdfById(simulationId: string, user: any) {
+    return this.checkupService.downloadCheckupPdfById(simulationId, user);
   }
 
   simulateAgentBudget(user: any, dto: CreateBudgetSimulationDto) {

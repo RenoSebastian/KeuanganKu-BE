@@ -66,16 +66,6 @@ export class DirectorController {
   }
 
   // ===========================================================================
-  // 4. GLOBAL SEARCH
-  // ===========================================================================
-  @Get('search')
-  @ApiOperation({ summary: 'Cari karyawan berdasarkan Nama, Email, atau Unit' })
-  @ApiQuery({ name: 'q', required: true, description: 'Kata kunci pencarian' })
-  searchEmployees(@Query('q') keyword: string) {
-    return this.directorService.searchEmployees(keyword);
-  }
-
-  // ===========================================================================
   // 5. EMPLOYEE DETAIL (Deep Dive + Audit Trail)
   // ===========================================================================
   @Get('employees/:id/checkup') 

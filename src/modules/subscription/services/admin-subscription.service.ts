@@ -19,6 +19,7 @@ import { AuditService } from '../../audit/audit.service';
 
 // Import Redis Service untuk keperluan Cache Invalidation (Fase 3)
 import { RedisService } from '../../redis/redis.service';
+import { NotificationGateway } from '../../notification/notification.gateway';
 
 @Injectable()
 export class AdminSubscriptionService {
@@ -33,6 +34,7 @@ export class AdminSubscriptionService {
         private readonly userQuotaService: UserQuotaService, // Ledger System
         private readonly auditService: AuditService, // Audit Trail
         private readonly redisService: RedisService, // Injeksi Redis untuk Cache Invalidation
+        private readonly notificationGateway: NotificationGateway, // WebSockets
     ) { }
 
     /**
@@ -182,6 +184,13 @@ export class AdminSubscriptionService {
 
         // [Fase 3] Hapus Cache Dashboard Metrics agar pendapatan (Gross & Pending) ter-update
         this.invalidateDashboardCache();
+
+        // [NEW] Real-time Dashboard Update: Beri tahu semua admin secara instan bahwa order ini sudah diproses (biar UI turun/hilang dari tabel)
+        this.notificationGateway.broadcastToAdmins('PAYMENT_ORDER_PROCESSED', {
+            orderId: order.id,
+            status: dto.status,
+            adminId: adminId
+        });
 
         await this.auditService.logAdminAction({
             adminId,

@@ -74,16 +74,9 @@ export class AdminDashboardService {
     // =========================================================================
 
     async getDashboardStats() {
-        // 1. Hitung User Online (Real-time dari tabel ActiveSession)
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-
-        const onlineUsersCount = await this.prisma.activeSession.count({
-            where: {
-                lastActivityAt: {
-                    gte: fiveMinutesAgo,
-                },
-            },
-        });
+        // [FASE 3 OPTIMIZATION] Hitung User Online langsung dari SCAN Redis (In-Memory)
+        // Menghindari query COUNT ke MySQL tabel ActiveSession yang berat
+        const onlineUsersCount = await this.redisService.getOnlineUsersCount();
 
         // 2. Hitung Total User Terdaftar
         const totalUsers = await this.prisma.user.count({
@@ -119,23 +112,21 @@ export class AdminDashboardService {
     }
 
     async getOnlineUsersList() {
-        const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+        // [FASE 3 OPTIMIZATION] Ambil data User Online dari SCAN Redis (In-Memory)
+        const onlineSessions = await this.redisService.getOnlineUsersDetailed();
 
-        return this.prisma.activeSession.findMany({
-            where: {
-                lastActivityAt: { gte: fiveMinutesAgo },
-            },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        fullName: true,
-                        email: true,
-                        agency: { select: { name: true } },
-                    },
-                },
-            },
-            orderBy: { lastActivityAt: 'desc' },
-        });
+        // Format data agar sesuai ekspektasi struktur FE (menyerupai data dari Prisma)
+        return onlineSessions.map(session => ({
+            id: `redis-${session.userId}-${session.deviceId}`,
+            userId: session.userId,
+            deviceId: session.deviceId,
+            lastActivityAt: new Date(session.lastSeen),
+            user: {
+                id: session.userId,
+                fullName: session.userName,
+                email: 'Redis Cached', // Untuk efisiensi kita tidak join DB disini, fallback UI
+                agency: null
+            }
+        })).sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
     }
 }

@@ -51,30 +51,45 @@ export class AdminEducationController {
     @Patch('modules/:id')
     @ApiOperation({ summary: 'Update module metadata (Title, Thumbnail, etc) & Cleanup old files' })
     @ApiResponse({ status: 200, description: 'Module updated.' })
-    update(@Param('id') id: string, @Body() dto: UpdateModuleDto) {
+    update(
+        @GetUser('id') adminId: string,
+        @Param('id') id: string,
+        @Body() dto: UpdateModuleDto
+    ) {
         // [LOGIC CHANGE] Service akan otomatis menghapus file lama jika thumbnail berubah
-        return this.managementService.updateModule(id, dto);
+        return this.managementService.updateModule(adminId, id, dto);
     }
 
     @Patch('modules/:id/status')
     @ApiOperation({ summary: 'Publish, Archive, or Draft a module' })
-    updateStatus(@Param('id') id: string, @Body() dto: UpdateModuleStatusDto) {
-        return this.managementService.updateStatus(id, dto);
+    updateStatus(
+        @GetUser('id') adminId: string,
+        @Param('id') id: string,
+        @Body() dto: UpdateModuleStatusDto
+    ) {
+        return this.managementService.updateStatus(adminId, id, dto);
     }
 
     @Post('modules/:id/reorder-sections')
     @ApiOperation({ summary: 'Reorder sections within a module' })
     @HttpCode(HttpStatus.OK)
-    reorderSections(@Param('id') id: string, @Body() dto: ReorderSectionsDto) {
-        return this.managementService.reorderSections(id, dto);
+    reorderSections(
+        @GetUser('id') adminId: string,
+        @Param('id') id: string,
+        @Body() dto: ReorderSectionsDto
+    ) {
+        return this.managementService.reorderSections(adminId, id, dto);
     }
 
     @Delete('modules/:id')
     @ApiOperation({ summary: 'Permanently delete a module and its physical files' })
     @ApiResponse({ status: 200, description: 'Module and associated files deleted.' })
-    delete(@Param('id') id: string) {
+    delete(
+        @GetUser('id') adminId: string,
+        @Param('id') id: string
+    ) {
         // [LOGIC CHANGE] Service akan melakukan cascade delete DB + delete file fisik
-        return this.managementService.deleteModule(id);
+        return this.managementService.deleteModule(adminId, id);
     }
 
     // --- QUIZ MANAGEMENT ---
@@ -84,8 +99,12 @@ export class AdminEducationController {
         summary: 'Upsert (Create/Replace) Quiz for a module',
         description: 'Transactional save. Replaces all existing questions with the new payload.'
     })
-    upsertQuiz(@Param('id') id: string, @Body() dto: UpsertQuizDto) {
-        return this.managementService.upsertQuiz(id, dto);
+    upsertQuiz(
+        @GetUser('id') adminId: string,
+        @Param('id') id: string,
+        @Body() dto: UpsertQuizDto
+    ) {
+        return this.managementService.upsertQuiz(adminId, id, dto);
     }
 
     @Get('modules')

@@ -23,6 +23,9 @@ import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 
+// Import RedisService
+import { RedisService } from '../redis/redis.service';
+
 // DTO Imports
 import { UsersService } from './users.service';
 import { EditUserDto } from './dto/edit-user.dto';
@@ -34,7 +37,10 @@ import { UpdateUserDto } from './dto/update-user.dto';
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Controller('users')
 export class UsersController {
-  constructor(private readonly userService: UsersService) { }
+  constructor(
+    private readonly userService: UsersService,
+    private readonly redisService: RedisService
+  ) { }
 
   // =================================================================
   // SELF-SERVICE (User Profile & Subscription State)
@@ -70,41 +76,27 @@ export class UsersController {
   // ADMIN ONLY (Employee Management)
   // =================================================================
 
-  @Get()
-  @Roles(client.Role.ADMIN)
-  @ApiOperation({ summary: 'Get All Users (Admin Only)' })
-  findAll(
-    @Query('search') search?: string,
-    @Query('role') role?: client.Role,
+  // Admin Routes have been moved to admin-users.controller.ts to avoid duplication.
+
+  // =================================================================
+  // [NEW] REAL-TIME HEARTBEAT PING
+  // =================================================================
+
+  @Post('heartbeat')
+  @ApiOperation({
+    summary: 'Send Online Heartbeat Pong',
+    description: 'Endpoint ringan yang selalu dipanggil oleh frontend PWA (setiap 30-45 detik) untuk menandakan user aktif di sistem. Menyimpan status di Redis In-Memory agar Dashboard Admin sinkron.'
+  })
+  @ApiResponse({ status: 200, description: 'Heartbeat acknowledged' })
+  async sendHeartbeat(
+    @GetUser('id') userId: string,
+    @GetUser('role') role: string,
+    @GetUser('email') email: string, // Ganti dengan info yang relevan dari decoded token misal nama atau email sementara fallback
+    @Body('deviceId') deviceId: string
   ) {
-    return this.userService.findAll({ search, role });
-  }
-
-  @Post()
-  @Roles(client.Role.ADMIN)
-  @ApiOperation({ summary: 'Create New User/Employee' })
-  create(@Body() createUserDto: CreateUserDto) {
-    return this.userService.createUser(createUserDto);
-  }
-
-  @Get(':id')
-  @Roles(client.Role.ADMIN)
-  @ApiOperation({ summary: 'Get Specific User Detail' })
-  findOne(@Param('id') id: string) {
-    return this.userService.findOne(id);
-  }
-
-  @Patch(':id')
-  @Roles(client.Role.ADMIN)
-  @ApiOperation({ summary: 'Update Specific User' })
-  update(@Param('id') id: string, @Body() updateUserDto: UpdateUserDto) {
-    return this.userService.updateUser(id, updateUserDto);
-  }
-
-  @Delete(':id')
-  @Roles(client.Role.ADMIN)
-  @ApiOperation({ summary: 'Delete User (Soft/Hard Delete)' })
-  remove(@Param('id') id: string) {
-    return this.userService.deleteUser(id);
+    if (!deviceId) deviceId = 'web-browser';
+    // Gunakan email sementara kalo fullName ga ada di Decorator. Atau panggil profile dari cache kalau mau lebih complex
+    await this.redisService.recordHeartbeat(userId, deviceId, role, email);
+    return { ok: true };
   }
 }
