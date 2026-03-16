@@ -136,7 +136,7 @@ model Agency {
 // [NEW] Central Bank Logic - Konfigurasi Global Ekonomi (Dinamis)
 // Tabel ini hanya akan memiliki 1 baris data (Singleton)
 model GlobalMarketSettings {
-  id            String   @id @default(uuid())
+  id           String   @id @default(uuid())
   inflationRate Decimal  @default(5.0) @map("inflation_rate") @db.Decimal(5, 2)   // Persentase (5.0 = 5%)
   interestRate  Decimal  @default(4.5) @map("interest_rate") @db.Decimal(5, 2)    // Suku Bunga Acuan (BI Rate)
   riskFreeRate  Decimal  @default(6.0) @map("risk_free_rate") @db.Decimal(5, 2)   // Return Obligasi Negara
@@ -202,11 +202,49 @@ model User {
   usage                UserUsage?
   quotaLedger          UserQuotaLedger[]
   activeSessions       ActiveSession[]
+  
+  // [NEW] Time-series history untuk tracking engagement
+  loginHistories       UserLoginHistory[]
 
   @@index([agencyId])
   @@index([email])
   @@index([deletedAt]) // Index untuk optimasi filter soft delete
   @@map("users")
+}
+
+// =========================================================
+// ANALYTICS & TIME-SERIES LOGGING (TASK 1 & TASK 4)
+// =========================================================
+
+// [NEW] Tabel append-only untuk merekam jejak analitik waktu login pengguna (Task 4)
+model UserLoginHistory {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  loginAt     DateTime @default(now()) @map("login_at")
+  ipAddress   String?  @map("ip_address")
+  deviceInfo  String?  @map("device_info")
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([loginAt]) // Index krusial untuk time-series agregasi berdasarkan hari/minggu/bulan
+  @@map("user_login_histories")
+}
+
+// [NEW] Buku besar arus kas keuangan dari transaksi (Task 1 & 2)
+model CashflowLedger {
+  id              String   @id @default(uuid())
+  referenceId     String   @map("reference_id") // Order ID / Revoke ID
+  source          String   // 'SUBSCRIPTION', 'SUBSCRIPTION_REFUND', dll
+  grossAmount     Decimal  @map("gross_amount") @db.Decimal(15, 2)
+  mrrAmount       Decimal  @map("mrr_amount") @db.Decimal(15, 2)
+  transactionDate DateTime @default(now()) @map("transaction_date")
+  notes           String?  @db.Text
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@index([transactionDate]) // Index krusial untuk report time-series bulanan
+  @@index([source])
+  @@map("cashflow_ledgers")
 }
 
 // =========================================================
@@ -537,17 +575,17 @@ model FinancialCheckup {
 }
 
 model EducationPlan {
-  id           String          @id @default(uuid())
-  userId       String          @map("user_id")
-  childName    String          @map("child_name")
-  childDob     DateTime        @map("child_dob")
+  id            String          @id @default(uuid())
+  userId        String          @map("user_id")
+  childName     String          @map("child_name")
+  childDob      DateTime        @map("child_dob")
   inflationRate Decimal         @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate   Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
-  method       EducationMethod @default(GEOMETRIC)
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
-  user         User            @relation(fields: [userId], references: [id])
-  stages       EducationStage[]
+  returnRate    Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
+  method        EducationMethod @default(GEOMETRIC)
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+  user          User            @relation(fields: [userId], references: [id])
+  stages        EducationStage[]
 
   @@map("education_plans")
 }
@@ -560,7 +598,7 @@ model EducationStage {
   currentCost  Decimal       @map("current_cost") @db.Decimal(15, 2)
   futureCost   Decimal       @map("future_cost") @db.Decimal(15, 2)
   yearsToStart Int           @map("years_to_start")
-  monthlySaving Decimal       @map("monthly_saving") @db.Decimal(15, 2)
+  monthlySaving Decimal      @map("monthly_saving") @db.Decimal(15, 2)
   plan         EducationPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
 
   @@map("education_stages")

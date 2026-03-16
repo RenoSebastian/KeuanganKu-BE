@@ -12,13 +12,13 @@ export class CreateSubscriptionOrderDto {
     planId: string;
 
     @ApiProperty({
-        description: 'Kode unik suffix pembayaran',
+        description: 'Kode unik suffix pembayaran untuk identifikasi mutasi rekening',
         example: 123,
     })
     @IsNotEmpty()
     @Type(() => Number)
     @IsNumber()
-    @Min(0)
+    @Min(0, { message: 'Kode unik tidak boleh negatif' })
     uniqueCode: number;
 
     @ApiProperty({

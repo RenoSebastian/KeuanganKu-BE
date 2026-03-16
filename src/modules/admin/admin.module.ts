@@ -1,11 +1,15 @@
+// File: src/modules/admin/admin.module.ts
+
 import { Module } from '@nestjs/common';
 import { AdminDashboardController } from './controllers/admin-dashboard.controller';
 import { MarketSettingsController } from './controllers/market-settings.controller';
+
+// Services
 import { AdminDashboardService } from './services/admin-dashboard.service';
-
-// Import AdminAnalyticsService yang baru saja dibuat di Fase 2
 import { AdminAnalyticsService } from './services/admin-analytics.service';
+import { AdminPdfGeneratorService } from './services/admin-pdf-generator.service';
 
+// Modules
 import { MasterDataModule } from '../master-data/master-data.module';
 
 @Module({
@@ -18,11 +22,10 @@ import { MasterDataModule } from '../master-data/master-data.module';
     ],
     providers: [
         AdminDashboardService,
-        AdminAnalyticsService // Mendaftarkan Sang Engine ke dalam DI Container
+        AdminAnalyticsService,
+        AdminPdfGeneratorService // [NEW] Mendaftarkan PDF Generator ke DI Container
     ],
     exports: [
-        // Mengekspor AdminAnalyticsService jika sewaktu-waktu module lain 
-        // (seperti CronJob Module terpisah) perlu mengakses agregasi data ini
         AdminAnalyticsService
     ]
 })

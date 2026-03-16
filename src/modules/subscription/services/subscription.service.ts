@@ -81,6 +81,14 @@ export class SubscriptionService {
             throw new NotFoundException('Paket langganan tidak ditemukan atau tidak aktif');
         }
 
+        // [CORE LOGIC]: Kalkulasi Total Harga Berdasarkan Siklus Tagihan (Multiplier)
+        // Mengekstrak Information Expert dari entitas Plan untuk mendapat total bersih
+        const durationMultiplier = plan.durationMonths && plan.durationMonths > 0 ? plan.durationMonths : 1;
+
+        // Konversi objek Prisma Decimal ke number primitif
+        const basePriceNum = Number(plan.price);
+        const calculatedTotalAmount = basePriceNum * durationMultiplier;
+
         // 3. Upload Bukti ke Storage
         const uploadResult = await this.mediaStorageService.uploadFile(
             file,
@@ -97,7 +105,7 @@ export class SubscriptionService {
                     planId: plan.id,
                     uniqueCode: Number(dto.uniqueCode) || 0,
                     proofImageUrl,
-                    snapshotPrice: plan.price,
+                    snapshotPrice: calculatedTotalAmount, // Snapshot dikunci menggunakan harga agregasi
                     verificationStatus: VerificationStatus.PENDING, // Admin belum cek
                 } as any, // Cast to any because Prisma Client is locked and not fully regenerated
             });
@@ -136,16 +144,12 @@ export class SubscriptionService {
                 },
             });
 
-            // [PERBAIKAN ARSITEKTUR]: Blok update simulationQuota menjadi 9999 (Destructive Update)
-            // TELAH DIHAPUS. Akses unlimited ditangani murni dari validasi status ACTIVE 
-            // di layer service pengecekan kuota. Immutable Quota State tercapai.
-
             // D. [NEW] Broadcast Real-time Event ke Admin Dashboard
             this.notificationGateway.broadcastToAdmins('NEW_PAYMENT_ORDER', {
                 orderId: order.id,
                 userId: userId,
                 planName: plan.name,
-                snapshotPrice: plan.price,
+                snapshotPrice: calculatedTotalAmount, // Broadcast nilai mutlak untuk ditampilkan di UI Antrean
                 createdAt: order.createdAt
             });
 
