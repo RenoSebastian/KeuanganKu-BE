@@ -3,12 +3,14 @@ import { PrismaService } from '../../../../prisma/prisma.service';
 import { MediaStorageService } from '../../media/services/media-storage.service';
 import { CreateSubscriptionOrderDto } from '../dto/create-subscription-order.dto';
 import { SubscriptionStatus, VerificationStatus } from '@prisma/client';
+import { NotificationGateway } from '../../notification/notification.gateway';
 
 @Injectable()
 export class SubscriptionService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly mediaStorageService: MediaStorageService,
+        private readonly notificationGateway: NotificationGateway,
     ) { }
 
     /**
@@ -136,6 +138,15 @@ export class SubscriptionService {
             // [PERBAIKAN ARSITEKTUR]: Blok update simulationQuota menjadi 9999 (Destructive Update)
             // TELAH DIHAPUS. Akses unlimited ditangani murni dari validasi status ACTIVE 
             // di layer service pengecekan kuota. Immutable Quota State tercapai.
+
+            // D. [NEW] Broadcast Real-time Event ke Admin Dashboard
+            this.notificationGateway.broadcastToAdmins('NEW_PAYMENT_ORDER', {
+                orderId: order.id,
+                userId: userId,
+                planName: plan.name,
+                snapshotPrice: plan.price,
+                createdAt: order.createdAt
+            });
 
             return {
                 message: 'Paket berhasil diaktifkan. Menunggu verifikasi admin.',

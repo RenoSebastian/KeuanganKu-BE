@@ -257,7 +257,7 @@ export class CheckupCalculatorService {
     // DOMAIN: AGENT SIMULATION (CHECKUP & BUDGETING)
     // ===========================================================================
 
-    async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
+    async calculateCheckupSimulation(user: User, dto: CreateCheckupSimulationDto) {
         // 1. Check Quota
         await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
 
@@ -276,7 +276,7 @@ export class CheckupCalculatorService {
             else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
 
             // 3. Log Activity
-            await this.prisma.simulationLog.create({
+            const simulationLog = await this.prisma.simulationLog.create({
                 data: {
                     agentId: user.id,
                     clientName: dto.client.name,
@@ -299,49 +299,68 @@ export class CheckupCalculatorService {
                 },
             });
 
-            // 4. Generate PDF
-            const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
-                dto,
-                analysisResult,
-                user,
-            );
-
-            // 5. Generate Token
-            const { client, spouse, ...financialData } = dto;
-            const mgcToken = this.tokenService.generateMgcToken({
-                meta: {
-                    version: '1.0',
-                    generatedAt: new Date().toISOString(),
-                    agentId: user.id,
-                    module: 'CHECKUP',
-                },
-                client,
-                spouse,
-                financial: financialData,
-                result: analysisResult,
-            });
-
-            const cleanName = dto.client.name.replace(/[^a-zA-Z0-9]/g, '_');
+            // 4. Return Structured JSON without PDF
             return {
-                pdfBuffer,
-                mgcToken,
-                filename: `Financial_Checkup_${cleanName}_${Date.now()}.pdf`,
-                data: {
-                    client,
-                    spouse,
-                    financial: financialData,
-                    result: analysisResult,
+                simulationId: simulationLog.id,
+                status: analysisResult.globalStatus,
+                healthScore: analysisResult.score,
+                financialRatios: analysisResult.ratios,
+                calculationDetails: {
+                    totalIncome: (dto.incomeFixed + dto.incomeVariable) * 12,
+                    calculatedSurplus: analysisResult.surplusDeficit * 12,
+                    netWorth: analysisResult.netWorth
                 },
+                // Raw payload to hydrate Frontend Context instantly
+                chartData: {
+                     client: dto.client,
+                     financial: dto,
+                     result: analysisResult
+                }
             };
+
         } catch (error: any) {
             this.logger.error(
-                `Checkup Simulation Error: ${error.message}`,
+                `Calculate Checkup Simulation Error: ${error.message}`,
                 error.stack,
             );
             if (error instanceof ForbiddenException) throw error;
             throw new InternalServerErrorException(
-                'Gagal memproses simulasi Financial Checkup.',
+                'Gagal memproses kalkulasi Financial Checkup.',
             );
+        }
+    }
+
+    async downloadCheckupPdfById(simulationId: string, user: User) {
+        try {
+            // 1. Retrieve the existing Run
+            const simulation = await this.prisma.simulationLog.findFirst({
+                where: {
+                    id: simulationId,
+                    agentId: user.id,
+                    moduleType: 'CHECKUP',
+                },
+            });
+
+            if (!simulation) {
+                throw new NotFoundException('Data simulasi tidak ditemukan atau Anda tidak memiliki akses.');
+            }
+
+            // 2. Rehydrate Data
+            const inputDto = simulation.inputPayload as any;
+            const analysisResult = simulation.outputResult as any;
+
+            // 3. Generate PDF precisely from the saved state
+            const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
+                inputDto,
+                analysisResult,
+                user,
+            );
+
+            return pdfBuffer;
+        } catch (error: any) {
+            this.logger.error(`Download Checkup PDF Error: ${error.message}`, error.stack);
+            if (error instanceof NotFoundException) throw error;
+            throw new InternalServerErrorException('Gagal menghasilkan dokumen PDF Checkup.');
         }
     }
 

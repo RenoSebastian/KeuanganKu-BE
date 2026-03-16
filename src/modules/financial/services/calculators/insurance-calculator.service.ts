@@ -31,7 +31,7 @@ export class InsuranceCalculatorService {
      */
     async calculateAndSaveInsurance(userId: string, dto: CreateInsuranceDto) {
         // 1. Ambil Data Pasar
-        const marketRates = await this.marketSettingsService.getCurrentSettings();
+        const marketRates = await this.marketSettingsService.getSettings();
         const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
         const returnRate = dto.returnRate ?? 7; // Default asumsi konservatif
 

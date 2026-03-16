@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { SubmitQuizDto } from '../dto/submit-quiz.dto';
+import { UpsertQuizDto } from '../dto/upsert-quiz.dto';
 import { EducationReadService } from './education-read.service';
 import { EducationModuleStatus, EducationProgressStatus } from '@prisma/client';
 import {
@@ -25,7 +26,130 @@ export class QuizEngineService {
         private readonly readService: EducationReadService,
     ) { }
 
-    // --- 1. GET QUIZ ---
+    // --- 1. UPSERT QUIZ (WIPE & REPLACE DENGAN GARBAGE COLLECTION LOGIC) ---
+
+    async upsertQuiz(moduleId: string, dto: UpsertQuizDto) {
+        return this.prisma.$transaction(async (tx) => {
+            // 1. Validasi Modul
+            const module = await tx.educationModule.findUnique({
+                where: { id: moduleId },
+                include: {
+                    quiz: {
+                        include: {
+                            questions: {
+                                include: { options: true }
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (!module) {
+                throw new NotFoundException(`Education Module with ID ${moduleId} not found`);
+            }
+
+            const orphanedImages: string[] = [];
+            const existingQuiz = module.quiz;
+
+            // 2. Diffing Algorithm untuk Garbage Collection
+            if (existingQuiz) {
+                const oldImages = new Set<string>();
+                const newImages = new Set<string>();
+
+                // Kumpulkan semua state gambar lama
+                existingQuiz.questions.forEach(q => {
+                    if (q.imageUrl) oldImages.add(q.imageUrl);
+                    q.options.forEach(o => {
+                        if (o.imageUrl) oldImages.add(o.imageUrl);
+                    });
+                });
+
+                // Kumpulkan semua state gambar baru dari DTO
+                dto.questions.forEach(q => {
+                    if (q.imageUrl) newImages.add(q.imageUrl);
+                    q.options.forEach(o => {
+                        if (o.imageUrl) newImages.add(o.imageUrl);
+                    });
+                });
+
+                // Kalkulasi Orphaned Images (Ada di lama, tidak ada di baru)
+                oldImages.forEach(img => {
+                    if (!newImages.has(img)) {
+                        orphanedImages.push(img);
+                    }
+                });
+
+                // Wipe Data Lama (Hapus relasi Questions, Options akan terhapus via Cascade)
+                await tx.quizQuestion.deleteMany({
+                    where: { quizId: existingQuiz.id }
+                });
+            }
+
+            // 3. Upsert Quiz & Rekonstruksi Relasi
+            const upsertedQuiz = await tx.quiz.upsert({
+                where: { moduleId: moduleId },
+                update: {
+                    passingScore: dto.passingScore,
+                    timeLimit: dto.timeLimit,
+                    maxAttempts: dto.maxAttempts,
+                    description: dto.description,
+                    questions: {
+                        create: dto.questions.map(q => ({
+                            questionText: q.questionText,
+                            type: q.type,
+                            orderIndex: q.orderIndex,
+                            imageUrl: q.imageUrl,
+                            explanation: q.explanation,
+                            points: q.points,
+                            options: {
+                                create: q.options.map(o => ({
+                                    optionText: o.optionText,
+                                    isCorrect: o.isCorrect,
+                                    imageUrl: o.imageUrl,
+                                    orderIndex: o.orderIndex,
+                                }))
+                            }
+                        }))
+                    }
+                },
+                create: {
+                    moduleId: moduleId,
+                    passingScore: dto.passingScore,
+                    timeLimit: dto.timeLimit,
+                    maxAttempts: dto.maxAttempts,
+                    description: dto.description,
+                    questions: {
+                        create: dto.questions.map(q => ({
+                            questionText: q.questionText,
+                            type: q.type,
+                            orderIndex: q.orderIndex,
+                            imageUrl: q.imageUrl,
+                            explanation: q.explanation,
+                            points: q.points,
+                            options: {
+                                create: q.options.map(o => ({
+                                    optionText: o.optionText,
+                                    isCorrect: o.isCorrect,
+                                    imageUrl: o.imageUrl,
+                                    orderIndex: o.orderIndex,
+                                }))
+                            }
+                        }))
+                    }
+                }
+            });
+
+            this.logger.log(`Quiz Upserted for Module: ${moduleId}. Orphaned Images found: ${orphanedImages.length}`);
+
+            // Mengembalikan Data dan Metadata GC agar bisa di-dispatch oleh Controller
+            return {
+                quiz: upsertedQuiz,
+                garbageUrls: orphanedImages
+            };
+        });
+    }
+
+    // --- 2. GET QUIZ ---
 
     async getQuizByModuleSlug(userId: string, moduleSlug: string) {
         const module = await this.prisma.educationModule.findUnique({
@@ -36,7 +160,7 @@ export class QuizEngineService {
                         questions: {
                             orderBy: { orderIndex: 'asc' },
                             include: {
-                                options: { select: { id: true, optionText: true, isCorrect: false } },
+                                options: { select: { id: true, optionText: true, isCorrect: false, imageUrl: true } },
                             },
                         },
                     },
@@ -61,7 +185,7 @@ export class QuizEngineService {
         };
     }
 
-    // --- 2. SUBMIT & GRADING ---
+    // --- 3. SUBMIT & GRADING ---
 
     async submitQuiz(userId: string, moduleSlug: string, dto: SubmitQuizDto) {
         return this.prisma.$transaction(async (tx) => {

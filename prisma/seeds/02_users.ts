@@ -7,7 +7,7 @@ export async function seedUsers(prisma: PrismaClient) {
     const passwordHash = await bcrypt.hash('password123', 10);
 
     // 1. Super Admin
-    const adminEmail = 'admin@keuanganku.com';
+    const adminEmail = 'hello@keuanganku.id';
     await prisma.user.upsert({
         where: { email: adminEmail },
         update: {},

@@ -13,6 +13,7 @@ import { ReorderSectionsDto } from '../dto/reorder-sections.dto';
 import { UpsertQuizDto } from '../dto/upsert-quiz.dto';
 import { EducationModuleStatus, EducationLevel } from '@prisma/client';
 import { MediaStorageService } from '../../media/services/media-storage.service';
+import { AuditService } from '../../audit/audit.service';
 import slugify from 'slugify';
 
 @Injectable()
@@ -22,6 +23,7 @@ export class EducationManagementService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly mediaService: MediaStorageService,
+        private readonly auditService: AuditService,
     ) { }
 
     // --- CORE CRUD OPERATIONS ---
@@ -70,7 +72,8 @@ export class EducationManagementService {
                         sectionOrder: s.sectionOrder,
                         title: s.title,
                         contentMarkdown: s.contentMarkdown,
-                        illustrationUrl: s.illustrationUrl, // Menyimpan path relatif
+                        // [FIXED]: Menyesuaikan dengan tipe data schema Prisma yang baru (array of string)
+                        imageUrls: s.imageUrls || [],
                     }));
                     await tx.moduleSection.createMany({ data: sectionPayload });
                 }
@@ -79,6 +82,19 @@ export class EducationManagementService {
             });
 
             this.logger.log(`Module created: ${result.id} by User ${userId}`);
+
+            // [AUDIT LOG]
+            this.auditService.logAdminAction({
+                adminId: userId,
+                action: 'CREATE_EDUCATION_MODULE',
+                targetUserId: 'SYSTEM',
+                details: {
+                    entityName: 'EDUCATION_MODULE',
+                    before: null,
+                    after: result
+                }
+            }).catch(e => this.logger.warn(`Audit error: ${e.message}`));
+
             return result;
         } catch (error) {
             this.logger.error(`Failed to create education module: ${error.message}`);
@@ -89,7 +105,7 @@ export class EducationManagementService {
     /**
      * Update Modul dengan mekanisme "Smart Garbage Collection" untuk file lama.
      */
-    async updateModule(moduleId: string, dto: UpdateModuleDto) {
+    async updateModule(adminId: string, moduleId: string, dto: UpdateModuleDto) {
         // 1. Ambil data lama untuk perbandingan (Snapshot State Lama)
         const oldModule = await this.prisma.educationModule.findUnique({
             where: { id: moduleId },
@@ -138,10 +154,23 @@ export class EducationManagementService {
             this.mediaService.deleteFile(oldModule.thumbnailUrl);
         }
 
+        // [AUDIT LOG]
+        this.auditService.logAdminAction({
+            adminId,
+            action: 'UPDATE_EDUCATION_MODULE',
+            targetUserId: 'SYSTEM',
+            details: {
+                entityName: 'EDUCATION_MODULE',
+                before: oldModule,
+                after: updatedModule,
+                changes: dto
+            }
+        }).catch(e => this.logger.warn(`Audit error: ${e.message}`));
+
         return updatedModule;
     }
 
-    async updateStatus(id: string, dto: UpdateModuleStatusDto) {
+    async updateStatus(adminId: string, id: string, dto: UpdateModuleStatusDto) {
         const module = await this.prisma.educationModule.findUnique({
             where: { id },
             include: {
@@ -152,7 +181,7 @@ export class EducationManagementService {
 
         if (!module) throw new NotFoundException('Module not found');
 
-        // --- LOGIC GUARDRAILS: PUBLISH SAFETY CHECK ---
+        // --- LOGIC GUARDRAILS: PUBLISH SAFETY CHECK (DEFENSE IN DEPTH) ---
         if (dto.status === EducationModuleStatus.PUBLISHED) {
             if (!module.sections || module.sections.length === 0) {
                 throw new BadRequestException(
@@ -160,16 +189,18 @@ export class EducationManagementService {
                 );
             }
 
+            // Pengecekan Integritas Kuis
             if (module.quiz) {
-                if (!module.quiz.questions || module.quiz.questions.length === 0) {
+                const questionCount = module.quiz.questions?.length || 0;
+                if (questionCount < 5) {
                     throw new BadRequestException(
-                        'Cannot PUBLISH. This module has a Quiz enabled but contains NO questions.',
+                        `Cannot PUBLISH. This module has a Quiz enabled but currently only contains ${questionCount} question(s). A minimum of 5 questions is required before publishing.`,
                     );
                 }
             }
         }
 
-        return this.prisma.educationModule.update({
+        const updated = await this.prisma.educationModule.update({
             where: { id },
             data: {
                 status: dto.status,
@@ -177,12 +208,26 @@ export class EducationManagementService {
                     dto.status === EducationModuleStatus.PUBLISHED ? new Date() : module.publishedAt,
             },
         });
+
+        // [AUDIT LOG]
+        this.auditService.logAdminAction({
+            adminId,
+            action: 'UPDATE_EDUCATION_MODULE_STATUS',
+            targetUserId: 'SYSTEM',
+            details: {
+                entityName: 'EDUCATION_MODULE',
+                before: { status: module.status },
+                after: { status: updated.status }
+            }
+        }).catch(e => this.logger.warn(`Audit error: ${e.message}`));
+
+        return updated;
     }
 
     /**
      * Menghapus Modul dan SEMUA aset file terkait (Cascade Cleanup).
      */
-    async deleteModule(moduleId: string) {
+    async deleteModule(adminId: string, moduleId: string) {
         // 1. Ambil data sebelum dihapus untuk mendapatkan daftar file
         const moduleToDelete = await this.prisma.educationModule.findUnique({
             where: { id: moduleId },
@@ -211,10 +256,12 @@ export class EducationManagementService {
             filesToDelete.push(moduleToDelete.thumbnailUrl);
         }
 
-        // Kumpulkan Ilustrasi setiap section
+        // [FIXED] Kumpulkan Ilustrasi dari setiap section dengan membaca tipe data array (imageUrls)
         if (moduleToDelete.sections) {
             moduleToDelete.sections.forEach((sec) => {
-                if (sec.illustrationUrl) filesToDelete.push(sec.illustrationUrl);
+                if (sec.imageUrls && sec.imageUrls.length > 0) {
+                    filesToDelete.push(...sec.imageUrls);
+                }
             });
         }
 
@@ -223,14 +270,26 @@ export class EducationManagementService {
             this.cleanupMediaBackground(filesToDelete);
         }
 
+        // [AUDIT LOG]
+        this.auditService.logAdminAction({
+            adminId,
+            action: 'DELETE_EDUCATION_MODULE',
+            targetUserId: 'SYSTEM',
+            details: {
+                entityName: 'EDUCATION_MODULE',
+                before: moduleToDelete,
+                after: null
+            }
+        }).catch(e => this.logger.warn(`Audit error: ${e.message}`));
+
         return { message: 'Modul dan aset berhasil dihapus' };
     }
 
-    async reorderSections(moduleId: string, dto: ReorderSectionsDto) {
+    async reorderSections(adminId: string, moduleId: string, dto: ReorderSectionsDto) {
         const module = await this.prisma.educationModule.findUnique({ where: { id: moduleId } });
         if (!module) throw new NotFoundException('Module not found');
 
-        return this.prisma.$transaction(
+        const result = await this.prisma.$transaction(
             dto.items.map((item) =>
                 this.prisma.moduleSection.update({
                     where: { id: item.sectionId, moduleId },
@@ -238,15 +297,29 @@ export class EducationManagementService {
                 }),
             ),
         );
+
+        // [AUDIT LOG]
+        this.auditService.logAdminAction({
+            adminId,
+            action: 'REORDER_EDUCATION_SECTIONS',
+            targetUserId: 'SYSTEM',
+            details: {
+                entityName: 'EDUCATION_MODULE',
+                moduleId,
+                changes: dto
+            }
+        }).catch(e => this.logger.warn(`Audit error: ${e.message}`));
+
+        return result;
     }
 
-    // --- QUIZ MANAGEMENT LOGIC (Phase 1 & 3 Integration) ---
+    // --- QUIZ MANAGEMENT LOGIC ---
 
     /**
      * Menangani Update/Insert Quiz beserta Pertanyaan dan Opsi-nya.
      * [PHASE 1 FEATURE]: Garbage Collection untuk file media yang tidak terpakai (Orphan Files).
      */
-    async upsertQuiz(moduleId: string, dto: UpsertQuizDto) {
+    async upsertQuiz(adminId: string, moduleId: string, dto: UpsertQuizDto) {
         // 1. Validate Parent Module
         const module = await this.prisma.educationModule.findUnique({ where: { id: moduleId } });
         if (!module) throw new NotFoundException('Module not found');
@@ -331,7 +404,6 @@ export class EducationManagementService {
                 });
 
                 // B. Wipe Clean Questions (Cascade delete will remove options)
-                // Note: File fisik tidak terhapus otomatis oleh DB, makanya kita butuh logic orphanFiles di atas.
                 await tx.quizQuestion.deleteMany({
                     where: { quizId: quiz.id },
                 });
@@ -378,6 +450,18 @@ export class EducationManagementService {
                 this.cleanupMediaBackground(orphanFiles);
             }
 
+            // [AUDIT LOG]
+            this.auditService.logAdminAction({
+                adminId,
+                action: 'UPSERT_EDUCATION_QUIZ',
+                targetUserId: 'SYSTEM',
+                details: {
+                    entityName: 'EDUCATION_MODULE_QUIZ',
+                    moduleId,
+                    changes: dto
+                }
+            }).catch(e => this.logger.warn(`Audit error: ${e.message}`));
+
             return result;
 
         } catch (error) {
@@ -401,7 +485,7 @@ export class EducationManagementService {
             filePaths.map(path => this.mediaService.deleteFile(path))
         );
 
-        const successCount = results.filter(r => r.status === 'fulfilled' && r.value === true).length;
+        const successCount = results.filter(r => r.status === 'fulfilled' && (r as any).value === true).length;
         const failCount = results.length - successCount;
 
         this.logger.log(`Cleanup Complete. Success: ${successCount}, Failed/Skipped: ${failCount}`);
@@ -436,7 +520,6 @@ export class EducationManagementService {
         return slug;
     }
 
-    // education-management.service.ts
     async findAllModules() {
         return this.prisma.educationModule.findMany({
             orderBy: { createdAt: 'desc' },

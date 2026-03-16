@@ -78,7 +78,7 @@ export class SubscriptionController {
         return this.subscriptionService.getMySubscription(user.id);
     }
 
-    @Get('orders')
+    @Get('my-orders')
     @ApiOperation({ summary: 'Get my subscription order history' })
     async getMyOrders(@GetUser() user: User) {
         return this.subscriptionService.getMyOrders(user.id);

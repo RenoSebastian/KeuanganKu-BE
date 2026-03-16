@@ -674,7 +674,10 @@ model ModuleSection {
   sectionOrder    Int             @map("section_order")
   title           String?
   contentMarkdown String          @map("content_markdown") @db.Text
-  illustrationUrl String?         @map("illustration_url")
+  
+  // UBAH BAGIAN INI MENJADI ARRAY
+  imageUrls       String[]        @map("image_urls")
+
   createdAt       DateTime        @default(now()) @map("created_at")
   updatedAt       DateTime        @updatedAt @map("updated_at")
   module          EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)

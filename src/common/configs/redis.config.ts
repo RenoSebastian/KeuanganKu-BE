@@ -7,7 +7,7 @@ export interface RedisConfig {
     db: number;
     keyPrefix: string;
     sessionTtl: number;
-    tls: boolean; // [FIX] Tambahkan properti TLS
+    tls: boolean;
 }
 
 export default registerAs(
@@ -19,7 +19,6 @@ export default registerAs(
         db: parseInt(process.env.REDIS_DB || '0', 10),
         keyPrefix: process.env.REDIS_PREFIX || 'keuanganku:',
         sessionTtl: parseInt(process.env.REDIS_SESSION_TTL || '86400', 10),
-        // [FIX] Tangkap environment variable TLS, jadikan false sebagai fallback aman
         tls: process.env.REDIS_TLS === 'true',
     }),
 );

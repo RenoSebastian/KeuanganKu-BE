@@ -8,7 +8,7 @@ import {
     Post,
     UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -17,36 +17,69 @@ import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
 import { MasterDataService } from './master-data.service';
 
-@ApiTags('Master Data')
+import { MarketSettingsService } from './services/market-settings.service';
+import { UpdateMarketSettingsDto } from './dto/update-market-settings.dto';
+import { GetUser } from '../../common/decorators/get-user.decorator';
+
+@ApiTags('Admin Master Data & Config')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
-@Controller('master-data')
+// [PHASE 1 ENHANCEMENT] Standarisasi Prefix Admin (Sesuai dengan kontrak FE)
+@Controller('admin/master-data')
 export class MasterDataController {
-    constructor(private readonly service: MasterDataService) { }
+    constructor(
+        private readonly masterDataService: MasterDataService,
+        private readonly marketSettingsService: MarketSettingsService
+    ) { }
 
-    // --- UNIT KERJA ---
+    // ========================================================================
+    // 1. CENTRAL BANK CONFIG (Pengaturan Ekonomi Global)
+    // ========================================================================
+
+    @Get('settings')
+    @ApiOperation({ summary: 'Mendapatkan pengaturan ekonomi (Inflasi, Bunga, dll) saat ini' })
+    getMarketSettings() {
+        return this.marketSettingsService.getSettings();
+    }
+
+    @Patch('settings')
+    @Roles(Role.ADMIN)
+    @ApiOperation({ summary: 'Update pengaturan ekonomi global (Hanya Admin)' })
+    updateMarketSettings(
+        @GetUser('id') adminId: string,
+        @Body() dto: UpdateMarketSettingsDto
+    ) {
+        return this.marketSettingsService.updateSettings(adminId, dto);
+    }
+
+    // ========================================================================
+    // 2. UNIT KERJA MANAGEMENT (Agency / Cabang)
+    // ========================================================================
 
     @Get('units')
-    // Bisa diakses semua user terautentikasi untuk dropdown
+    @ApiOperation({ summary: 'Daftar Unit Kerja (Agency)' })
     findAllUnits() {
-        return this.service.findAllUnits();
+        return this.masterDataService.findAllUnits();
     }
 
     @Post('units')
     @Roles(Role.ADMIN)
+    @ApiOperation({ summary: 'Buat Unit Kerja Baru' })
     createUnit(@Body() dto: CreateUnitDto) {
-        return this.service.createUnit(dto);
+        return this.masterDataService.createUnit(dto);
     }
 
     @Patch('units/:id')
     @Roles(Role.ADMIN)
+    @ApiOperation({ summary: 'Update Unit Kerja' })
     updateUnit(@Param('id') id: string, @Body() dto: UpdateUnitDto) {
-        return this.service.updateUnit(id, dto);
+        return this.masterDataService.updateUnit(id, dto);
     }
 
     @Delete('units/:id')
     @Roles(Role.ADMIN)
+    @ApiOperation({ summary: 'Hapus Unit Kerja' })
     deleteUnit(@Param('id') id: string) {
-        return this.service.deleteUnit(id);
+        return this.masterDataService.deleteUnit(id);
     }
 }

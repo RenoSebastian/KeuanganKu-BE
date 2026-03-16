@@ -7,11 +7,10 @@ import {
     Query,
     Res,
     Body,
-    Post
 } from '@nestjs/common';
 import express from 'express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiProduces } from '@nestjs/swagger';
-import { Role, User } from '@prisma/client';
+import { Role } from '@prisma/client';
 
 // Services
 import { RetentionService } from './retention.service';
@@ -28,7 +27,7 @@ import { RolesGuard } from '../../common/guards/roles.guard';
 import { Roles } from '../../common/decorators/roles.decorator';
 import { GetUser } from '../../common/decorators/get-user.decorator';
 
-@ApiTags('Admin - Data Retention & Archiving')
+@ApiTags('Admin Data Retention & Archiving')
 @Controller('admin/retention')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
@@ -41,7 +40,7 @@ export class RetentionController {
     // --- ENDPOINT 1: MONITORING (Fase 1) ---
 
     @Get('stats')
-    @Roles(Role.ADMIN) // [UPDATE] Allow Director to view stats
+    @Roles(Role.ADMIN) // Strict RBAC
     @ApiOperation({
         summary: 'Get Database Storage Statistics',
         description: 'Mengembalikan statistik ukuran tabel dan estimasi jumlah baris menggunakan metadata PostgreSQL (O(1)).'
@@ -91,14 +90,14 @@ export class RetentionController {
     ): Promise<void> {
         // [ARCHITECTURAL NOTE]
         // Menggunakan @Res() untuk mengambil alih Stream Response.
-        // Service akan menulis chunk data langsung ke client untuk efisiensi memori.
+        // Service akan menulis chunk data langsung ke client untuk efisiensi memori (Penting untuk Enterprise).
         await this.exportManagerService.exportDataStream(query, res);
     }
 
     // --- ENDPOINT 3: EXECUTION (Fase 4 - Production Ready) ---
 
     @Delete('prune')
-    @Roles(Role.ADMIN) // [SECURITY FIX] Strict RBAC Layer
+    @Roles(Role.ADMIN) // Strict RBAC Layer
     @ApiOperation({
         summary: 'Execute Data Pruning (Atomic & Idempotent)',
         description: `
