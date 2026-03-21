@@ -6,6 +6,9 @@ import { NestExpressApplication } from '@nestjs/platform-express';
 import * as express from 'express';
 import { join } from 'path';
 
+// [NEW] Import Prisma Client untuk patching tipe data Decimal
+import { Prisma } from '@prisma/client';
+
 // --- Logging & Monitoring Imports ---
 import { WinstonModule } from 'nest-winston';
 import { winstonConfig } from './common/configs/winston.config';
@@ -13,6 +16,16 @@ import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 
 async function bootstrap() {
+  /**
+   * [CORE FIX] Global Decimal Serialization Patch
+   * Mencegah Prisma mengekspos representasi internal objek Decimal { s, e, d } ke API response.
+   * Fungsi ini di-override agar setiap tipe data Decimal yang ditarik dari database
+   * secara otomatis di-casting menjadi primitive Number saat proses JSON.stringify berjalan.
+   */
+  (Prisma.Decimal.prototype as any).toJSON = function () {
+    return this.toNumber();
+  };
+
   /**
    * 1. Inisialisasi App dengan NestExpressApplication
    * Generics <NestExpressApplication> diperlukan agar kita bisa mengakses
@@ -90,11 +103,11 @@ async function bootstrap() {
    */
   const port = process.env.PORT || 4000;
 
-  // [FIX] Bind ke 0.0.0.0 untuk kompatibilitas Docker/Network
+  // Bind ke 0.0.0.0 untuk kompatibilitas Docker/Network
   // Agar bisa diakses dari luar container (misal oleh Frontend container)
   await app.listen(port, '0.0.0.0');
 
-  // [FIX] Gunakan process.cwd() agar path akurat saat mode production/dist
+  // Gunakan process.cwd() agar path akurat saat mode production/dist
   // Ini memastikan log menunjuk ke folder uploads di root project, bukan di dalam dist
   const uploadPath = join(process.cwd(), 'uploads');
 
