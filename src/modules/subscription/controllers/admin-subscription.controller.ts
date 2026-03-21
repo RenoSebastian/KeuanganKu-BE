@@ -6,10 +6,13 @@ import {
     Post,
     Param,
     UseGuards,
-    Query, // [NEW] Import Query
+    Query,
+    // [FIX 1] Import ClassSerializerInterceptor dan UseInterceptors
+    ClassSerializerInterceptor,
+    UseInterceptors
 } from '@nestjs/common';
 import { Role, VerificationStatus } from '@prisma/client';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody, ApiProperty, ApiQuery } from '@nestjs/swagger'; // [NEW] Import ApiQuery
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody, ApiProperty, ApiQuery } from '@nestjs/swagger';
 import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, IsArray, IsEnum } from 'class-validator';
 
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -90,6 +93,8 @@ export class RevokeOrderDto {
 @UseGuards(JwtAuthGuard, RolesGuard)
 @Roles(Role.ADMIN)
 @ApiBearerAuth()
+// [FIX 2] Terapkan interseptor di tingkat controller agar semua return value diserialisasi sesuai aturan DTO
+@UseInterceptors(ClassSerializerInterceptor)
 export class AdminSubscriptionController {
     constructor(
         private readonly adminSubscriptionService: AdminSubscriptionService,

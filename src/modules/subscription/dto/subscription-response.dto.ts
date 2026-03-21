@@ -1,5 +1,5 @@
 import { SubscriptionStatus } from '@prisma/client';
-import { Expose, Type } from 'class-transformer';
+import { Expose, Type, Transform } from 'class-transformer';
 
 export class SubscriptionPlanDto {
     @Expose()
@@ -26,9 +26,13 @@ export class UserSubscriptionDto {
     status: SubscriptionStatus;
 
     @Expose()
+    // [FIX] Memaksa konversi ke ISO 8601 agar tidak diserialisasi menjadi {}
+    @Transform(({ value }) => value instanceof Date ? value.toISOString() : value)
     startDate: Date;
 
     @Expose()
+    // [FIX] Memaksa konversi ke ISO 8601 agar tidak diserialisasi menjadi {}
+    @Transform(({ value }) => value instanceof Date ? value.toISOString() : value)
     endDate: Date;
 
     @Expose()
@@ -47,6 +51,8 @@ export class SubscriptionOrderResponseDto {
     verificationStatus: string;
 
     @Expose()
+    // [FIX] Memaksa konversi ke ISO 8601 agar tidak diserialisasi menjadi {}
+    @Transform(({ value }) => value instanceof Date ? value.toISOString() : value)
     createdAt: Date;
 
     @Expose()

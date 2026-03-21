@@ -20,6 +20,9 @@ import { RedisService } from '../../redis/redis.service';
 import { NotificationGateway } from '../../notification/notification.gateway';
 import { BulkVerifyDto, RevokeOrderDto } from '../controllers/admin-subscription.controller';
 
+// [FIX] Mengimpor DTO yang memiliki dekorator @Transform untuk konversi tanggal ke ISO
+import { SubscriptionOrderResponseDto } from '../dto/subscription-response.dto';
+
 @Injectable()
 export class AdminSubscriptionService {
     private readonly logger = new Logger(AdminSubscriptionService.name);
@@ -71,8 +74,16 @@ export class AdminSubscriptionService {
             })
         ]);
 
+        // [FIX] Mapping hasil kueri Prisma mentah ke instansi DTO
+        // Ini memastikan ClassSerializerInterceptor di controller mendeteksi dan mengaktifkan @Transform
+        const mappedData = data.map((order) => {
+            const dto = new SubscriptionOrderResponseDto();
+            Object.assign(dto, order);
+            return dto;
+        });
+
         return {
-            data,
+            data: mappedData,
             meta: {
                 total,
                 page,
