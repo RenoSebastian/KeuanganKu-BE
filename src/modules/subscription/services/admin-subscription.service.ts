@@ -38,9 +38,10 @@ export class AdminSubscriptionService {
     ) { }
 
     /**
-     * [PERBAIKAN ARSITEKTUR - TASK 3]
+     * [PERBAIKAN ARSITEKTUR - FINAL]
      * Mengambil data antrean order dengan dukungan Pagination.
-     * Mengembalikan struktur data beserta Meta paginasi untuk kebutuhan UI Table Front-End.
+     * Menggunakan Native JSON Serialization untuk secara absolut membunuh
+     * anomali Prisma (Date menjadi {} dan Decimal menjadi {s, e, d}).
      */
     async getPendingOrders(page: number = 1, limit: number = 10) {
         const skip = (page - 1) * limit;
@@ -74,16 +75,14 @@ export class AdminSubscriptionService {
             })
         ]);
 
-        // [FIX] Mapping hasil kueri Prisma mentah ke instansi DTO
-        // Ini memastikan ClassSerializerInterceptor di controller mendeteksi dan mengaktifkan @Transform
-        const mappedData = data.map((order) => {
-            const dto = new SubscriptionOrderResponseDto();
-            Object.assign(dto, order);
-            return dto;
-        });
+        // [SUPER HACK] Memaksa eksekusi JSON serialisasi murni di memori.
+        // Langkah ini mengonversi seluruh objek Date menjadi ISO String absolut
+        // dan objek Decimal Prisma menjadi primitif angka/string secara otomatis
+        // sebelum NestJS ClassSerializer sempat merusaknya.
+        const sanitizedData = JSON.parse(JSON.stringify(data));
 
         return {
-            data: mappedData,
+            data: sanitizedData,
             meta: {
                 total,
                 page,

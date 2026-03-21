@@ -188,9 +188,15 @@ export class AdminAnalyticsService {
                 if (trx.verificationStatus === 'VALID') ledgerStatus = CashflowStatus.VERIFIED;
                 else if (trx.verificationStatus === 'INVALID') ledgerStatus = CashflowStatus.REJECTED;
 
+                // [FIX MUTLAK] Sanitasi Date menjadi ISO String untuk mencegah '{}' pada frontend
+                // Pastikan untuk mengonversi menjadi string hanya jika objek tersebut valid
+                const safeDate = trx.updatedAt instanceof Date
+                    ? trx.updatedAt.toISOString()
+                    : trx.updatedAt;
+
                 return {
                     transactionId: trx.id,
-                    transactionDate: trx.updatedAt,
+                    transactionDate: safeDate as unknown as Date, // Cast as Date untuk memenuhi interface DTO di backend
                     planName: trx.plan?.name || 'Unknown Plan',
                     amount: Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0),
                     status: ledgerStatus,
