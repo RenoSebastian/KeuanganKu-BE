@@ -6,6 +6,7 @@ import { VerificationStatus } from '@prisma/client';
 import { RedisService } from '../../redis/redis.service';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { DashboardMetricsResponseDto } from '../dto/dashboard-metrics-response.dto';
+import { CashflowLedgerItemDto, CashflowLedgerResponseDto, CashflowStatus } from '../dto/cashflow-ledger.dto';
 
 @Injectable()
 export class AdminDashboardService {
@@ -62,13 +63,60 @@ export class AdminDashboardService {
     }
 
     /**
-     * Mengambil daftar buku besar (Ledger) arus kas.
-     * Tidak kita cache karena memiliki paginasi dan butuh akurasi real-time tingkat tinggi.
+     * Mengambil buku besar arus kas dari SubscriptionOrder
+     * [REFACTOR] Mapping eksplisit ke instance DTO agar ClassSerializerInterceptor berfungsi
      */
-    async getCashflowLedger(page: number, limit: number) {
-        return this.analyticsService.getCashflowLedger(page, limit);
-    }
+    async getCashflowLedger(page: number, limit: number): Promise<CashflowLedgerResponseDto> {
+        const skip = (page - 1) * limit;
 
+        try {
+            const [transactions, total] = await Promise.all([
+                this.prisma.subscriptionOrder.findMany({
+                    skip,
+                    take: limit,
+                    orderBy: { createdAt: 'desc' },
+                    where: { deletedAt: null },
+                    include: {
+                        user: { select: { fullName: true } },
+                        plan: { select: { name: true } },
+                        paymentAudit: true
+                    },
+                }),
+                this.prisma.subscriptionOrder.count({ where: { deletedAt: null } }),
+            ]);
+
+            // [FIX] Menggunakan 'new CashflowLedgerItemDto()' untuk mengaktifkan @Transform
+            const mappedData: CashflowLedgerItemDto[] = transactions.map(trx => {
+                let ledgerStatus: CashflowStatus = CashflowStatus.PENDING;
+                if (trx.verificationStatus === 'VALID') ledgerStatus = CashflowStatus.VERIFIED;
+                else if (trx.verificationStatus === 'INVALID') ledgerStatus = CashflowStatus.REJECTED;
+
+                const dto = new CashflowLedgerItemDto();
+                dto.transactionId = trx.id;
+                dto.transactionDate = trx.updatedAt; // Dibiarkan Date, akan diurus oleh DTO
+                dto.planName = trx.plan?.name || 'Unknown Plan';
+                dto.amount = Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0);
+                dto.status = ledgerStatus;
+                dto.verifiedBy = trx.paymentAudit?.adminId ? `Admin ID: ${trx.paymentAudit.adminId}` : undefined;
+                dto.userName = trx.user?.fullName || 'Unknown User';
+
+                return dto;
+            });
+
+            return {
+                data: mappedData,
+                meta: {
+                    total,
+                    page,
+                    limit,
+                    totalPages: Math.ceil(total / limit),
+                },
+            };
+        } catch (error) {
+            this.logger.error(`Gagal mengambil Cashflow Ledger: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
     // =========================================================================
     // EXISTING METHODS
     // =========================================================================
