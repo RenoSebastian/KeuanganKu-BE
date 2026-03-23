@@ -63,10 +63,10 @@ export class AdminDashboardService {
     }
 
     /**
-     * Mengambil buku besar arus kas dari SubscriptionOrder
-     * [REFACTOR] Mapping eksplisit ke instance DTO agar ClassSerializerInterceptor berfungsi
-     */
-    async getCashflowLedger(page: number, limit: number): Promise<CashflowLedgerResponseDto> {
+      * Mengambil buku besar arus kas dari SubscriptionOrder
+      * [FIX MUTLAK] Bypass NestJS Interceptor dengan sanitasi memori langsung
+      */
+    async getCashflowLedger(page: number, limit: number): Promise<any> {
         const skip = (page - 1) * limit;
 
         try {
@@ -79,31 +79,32 @@ export class AdminDashboardService {
                     include: {
                         user: { select: { fullName: true } },
                         plan: { select: { name: true } },
-                        paymentAudit: true
+                        paymentAudit: true // Untuk mendapatkan ID admin yang verifikasi
                     },
                 }),
                 this.prisma.subscriptionOrder.count({ where: { deletedAt: null } }),
             ]);
 
-            // [FIX] Menggunakan 'new CashflowLedgerItemDto()' untuk mengaktifkan @Transform
-            const mappedData: CashflowLedgerItemDto[] = transactions.map(trx => {
-                let ledgerStatus: CashflowStatus = CashflowStatus.PENDING;
-                if (trx.verificationStatus === 'VALID') ledgerStatus = CashflowStatus.VERIFIED;
-                else if (trx.verificationStatus === 'INVALID') ledgerStatus = CashflowStatus.REJECTED;
+            const mappedData = transactions.map(trx => {
+                let ledgerStatus = 'PENDING';
+                if (trx.verificationStatus === 'VALID') ledgerStatus = 'VERIFIED';
+                else if (trx.verificationStatus === 'INVALID') ledgerStatus = 'REJECTED';
 
-                const dto = new CashflowLedgerItemDto();
-                dto.transactionId = trx.id;
-                dto.transactionDate = trx.updatedAt; // Dibiarkan Date, akan diurus oleh DTO
-                dto.planName = trx.plan?.name || 'Unknown Plan';
-                dto.amount = Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0);
-                dto.status = ledgerStatus;
-                dto.verifiedBy = trx.paymentAudit?.adminId ? `Admin ID: ${trx.paymentAudit.adminId}` : undefined;
-                dto.userName = trx.user?.fullName || 'Unknown User';
-
-                return dto;
+                return {
+                    transactionId: trx.id,
+                    // EKSEKUSI PAKSA: Ubah ke String sebelum framework menyentuhnya
+                    transactionDate: trx.updatedAt ? trx.updatedAt.toISOString() : null,
+                    planName: trx.plan?.name || 'Unknown Plan',
+                    amount: Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0),
+                    status: ledgerStatus,
+                    verifiedBy: trx.paymentAudit?.adminId ? `Admin ID: ${trx.paymentAudit.adminId}` : undefined,
+                    userName: trx.user?.fullName || 'Unknown User',
+                };
             });
 
-            return {
+            // PENYEGELAN MEMORI: 
+            // Memaksa objek menjadi JSON primitive utuh untuk mematikan semua anomali Prisma/NestJS
+            const finalResponse = JSON.parse(JSON.stringify({
                 data: mappedData,
                 meta: {
                     total,
@@ -111,16 +112,15 @@ export class AdminDashboardService {
                     limit,
                     totalPages: Math.ceil(total / limit),
                 },
-            };
+            }));
+
+            return finalResponse;
         } catch (error) {
             this.logger.error(`Gagal mengambil Cashflow Ledger: ${error.message}`, error.stack);
             throw error;
         }
     }
-    // =========================================================================
-    // EXISTING METHODS
-    // =========================================================================
-
+    
     async getDashboardStats() {
         // [FASE 3 OPTIMIZATION] Hitung User Online langsung dari SCAN Redis (In-Memory)
         // Menghindari query COUNT ke MySQL tabel ActiveSession yang berat

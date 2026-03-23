@@ -16,47 +16,42 @@ export class SubscriptionService {
     /**
      * Mengambil daftar paket langganan yang aktif (Master Data)
      */
+    // 1. Fungsi untuk Mengambil Daftar Paket
     async getPlans() {
-        return this.prisma.subscriptionPlan.findMany({
+        const plans = await this.prisma.subscriptionPlan.findMany({
             where: { isActive: true },
-            orderBy: { price: 'asc' },
+            orderBy: { price: 'asc' }, // Opsional: mengurutkan dari yang termurah
         });
+
+        // [FIX MUTLAK] Sanitasi Memori untuk membunuh anomali Decimal {s,e,d} dan Date {}
+        return JSON.parse(JSON.stringify(plans));
     }
 
-    /**
-     * [NEW] Mengambil riwayat seluruh order/transaksi milik user
-     */
-    async getMyOrders(userId: string) {
-        return this.prisma.subscriptionOrder.findMany({
-            where: { userId },
-            include: {
-                plan: true, // Sertakan info paket
-            },
-            orderBy: {
-                createdAt: 'desc', // Urutkan dari yang terbaru
-            },
-        });
-    }
-
-    /**
-     * [NEW] Mengambil status subscription aktif milik user saat ini
-     */
+    // 2. Fungsi untuk Mengambil Status Langganan Aktif User
     async getMySubscription(userId: string) {
         const subscription = await this.prisma.userSubscription.findUnique({
             where: { userId },
-            include: {
-                plan: true,
-                lastOrder: true,
-            },
+            include: { plan: true },
         });
 
-        if (!subscription) {
-            return null;
-        }
+        if (!subscription) return null;
 
-        return subscription;
+        // [FIX MUTLAK] Sanitasi Memori
+        return JSON.parse(JSON.stringify(subscription));
     }
 
+    // 3. Fungsi untuk Mengambil Riwayat Order User
+    async getMyOrders(userId: string) {
+        const orders = await this.prisma.subscriptionOrder.findMany({
+            where: { userId },
+            include: { plan: true },
+            orderBy: { createdAt: 'desc' }, // Terbaru di atas
+        });
+
+        // [FIX MUTLAK] Sanitasi Memori
+        return JSON.parse(JSON.stringify(orders));
+    }
+    
     /**
      * Core Logic: Optimistic Activation
      * User upload bukti -> Order dibuat -> User langsung ACTIVE
