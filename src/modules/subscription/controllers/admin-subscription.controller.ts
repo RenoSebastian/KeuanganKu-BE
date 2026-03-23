@@ -6,9 +6,13 @@ import {
     Post,
     Param,
     UseGuards,
+    Query,
+    // [FIX 1] Import ClassSerializerInterceptor dan UseInterceptors
+    ClassSerializerInterceptor,
+    UseInterceptors
 } from '@nestjs/common';
 import { Role, VerificationStatus } from '@prisma/client';
-import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody, ApiProperty } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiOperation, ApiTags, ApiBody, ApiProperty, ApiQuery } from '@nestjs/swagger';
 import { IsNotEmpty, IsNumber, IsOptional, IsPositive, IsString, IsUUID, IsArray, IsEnum } from 'class-validator';
 
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -55,7 +59,6 @@ export class InjectQuotaDto {
     reason: string;
 }
 
-// [PHASE 1: ENHANCEMENT] DTO untuk operasi pemrosesan massal
 export class BulkVerifyDto {
     @ApiProperty({ description: 'Array of Order IDs yang akan dieksekusi' })
     @IsArray()
@@ -73,7 +76,6 @@ export class BulkVerifyDto {
     adminNotes?: string;
 }
 
-// [PHASE 1: ENHANCEMENT] DTO untuk operasi Reversal (Cabut akses)
 export class RevokeOrderDto {
     @ApiProperty({ description: 'ID Order yang sudah berstatus VALID' })
     @IsNotEmpty()
@@ -89,17 +91,32 @@ export class RevokeOrderDto {
 @ApiTags('Admin Subscription & Quota')
 @Controller('admin/subscription')
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles(Role.ADMIN) // Gatekeeper: Seluruh akses di bawah ini hanya untuk ROLE ADMIN
+@Roles(Role.ADMIN)
 @ApiBearerAuth()
+// [FIX 2] Terapkan interseptor di tingkat controller agar semua return value diserialisasi sesuai aturan DTO
+@UseInterceptors(ClassSerializerInterceptor)
 export class AdminSubscriptionController {
     constructor(
         private readonly adminSubscriptionService: AdminSubscriptionService,
     ) { }
 
+    /**
+     * [PERBAIKAN ARSITEKTUR - TASK 3]
+     * Implementasi Pagination & Reusability.
+     * Endpoint ini sekarang melayani Dashboard Widget (limit kecil) dan Halaman Verifikasi Utama (limit besar).
+     */
     @Get('pending')
-    @ApiOperation({ summary: 'Get pending subscription orders' })
-    async getPendingOrders() {
-        return this.adminSubscriptionService.getPendingOrders();
+    @ApiOperation({ summary: 'Mendapatkan daftar antrean verifikasi (Mendukung Pagination)' })
+    @ApiQuery({ name: 'page', required: false, type: Number, description: 'Halaman data (default: 1)' })
+    @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Batas data per halaman (default: 10, Dashboard Widget bisa menggunakan 5)' })
+    async getPendingOrders(
+        @Query('page') page: string = '1',
+        @Query('limit') limit: string = '10',
+    ) {
+        const pageNumber = Math.max(1, parseInt(page, 10) || 1);
+        const limitNumber = Math.max(1, parseInt(limit, 10) || 10);
+
+        return this.adminSubscriptionService.getPendingOrders(pageNumber, limitNumber);
     }
 
     @Patch('verify')
@@ -111,11 +128,6 @@ export class AdminSubscriptionController {
         return this.adminSubscriptionService.verifyOrder(adminId, dto);
     }
 
-    /**
-     * [PHASE 1: ENHANCEMENT]
-     * Endpoint: POST /admin/subscription/bulk-verify
-     * Memproses puluhan/ratusan bukti transfer secara bersamaan.
-     */
     @Post('bulk-verify')
     @ApiOperation({ summary: 'Bulk Approve or Reject multiple orders simultaneously' })
     async bulkVerifyOrders(
@@ -125,12 +137,6 @@ export class AdminSubscriptionController {
         return this.adminSubscriptionService.bulkVerifyOrders(adminId, dto);
     }
 
-    /**
-     * [PHASE 1: ENHANCEMENT]
-     * Endpoint: POST /admin/subscription/revoke
-     * Compensating Transaction: Membatalkan order yang terlanjur disetujui, 
-     * mencabut akses PRO, dan menarik mundur kuota (reversal).
-     */
     @Post('revoke')
     @ApiOperation({ summary: 'Revoke an already approved order (Compensating Transaction)' })
     async revokeOrder(

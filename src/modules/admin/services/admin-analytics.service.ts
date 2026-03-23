@@ -1,3 +1,5 @@
+// File: src/modules/admin/services/admin-analytics.service.ts
+
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import {
@@ -186,11 +188,17 @@ export class AdminAnalyticsService {
                 if (trx.verificationStatus === 'VALID') ledgerStatus = CashflowStatus.VERIFIED;
                 else if (trx.verificationStatus === 'INVALID') ledgerStatus = CashflowStatus.REJECTED;
 
+                // [FIX MUTLAK] Sanitasi Date menjadi ISO String untuk mencegah '{}' pada frontend
+                // Pastikan untuk mengonversi menjadi string hanya jika objek tersebut valid
+                const safeDate = trx.updatedAt instanceof Date
+                    ? trx.updatedAt.toISOString()
+                    : trx.updatedAt;
+
                 return {
                     transactionId: trx.id,
-                    transactionDate: trx.updatedAt,
+                    transactionDate: safeDate as unknown as Date, // Cast as Date untuk memenuhi interface DTO di backend
                     planName: trx.plan?.name || 'Unknown Plan',
-                    amount: Number(trx.snapshotPrice || 0),
+                    amount: Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0),
                     status: ledgerStatus,
                     verifiedBy: trx.paymentAudit?.adminId ? `Admin ID: ${trx.paymentAudit.adminId}` : undefined,
                     userName: trx.user?.fullName || 'Unknown User',
@@ -208,6 +216,67 @@ export class AdminAnalyticsService {
             };
         } catch (error) {
             this.logger.error(`Gagal mengambil Cashflow Ledger: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
+
+    // =========================================================================
+    // FASE 2: LAYER AGREGASI & ANALITIK WAKTU NYATA (TIME-SERIES)
+    // =========================================================================
+
+    /**
+     * Mengkalkulasi Time-Series Pertumbuhan Pengguna (Acquisition)
+     * Menggunakan delegasi $queryRaw untuk memberikan beban komputasi grup tanggal ke PostgreSQL
+     */
+    async getUserGrowthAnalytics(startDate: Date, endDate: Date, resolution: 'daily' | 'weekly' | 'monthly') {
+        try {
+            let truncPeriod = 'day';
+            if (resolution === 'weekly') truncPeriod = 'week';
+            if (resolution === 'monthly') truncPeriod = 'month';
+
+            const result = await this.prisma.$queryRawUnsafe<Array<{ period: Date, count: bigint }>>(`
+                SELECT DATE_TRUNC('${truncPeriod}', "created_at") as period, COUNT(id) as count
+                FROM "users"
+                WHERE "created_at" >= $1 AND "created_at" <= $2
+                AND "deleted_at" IS NULL
+                GROUP BY period
+                ORDER BY period ASC;
+            `, startDate, endDate);
+
+            return result.map(item => ({
+                period: item.period.toISOString(),
+                count: Number(item.count)
+            }));
+        } catch (error) {
+            this.logger.error(`Gagal memproses User Growth Analytics: ${error.message}`, error.stack);
+            throw error;
+        }
+    }
+
+    /**
+     * Mengkalkulasi Time-Series Keterlibatan Pengguna (Engagement/Login)
+     * Bertindak sebagai Information Expert dengan menarik data dari log append-only
+     */
+    async getUserEngagementAnalytics(startDate: Date, endDate: Date, resolution: 'daily' | 'weekly' | 'monthly') {
+        try {
+            let truncPeriod = 'day';
+            if (resolution === 'weekly') truncPeriod = 'week';
+            if (resolution === 'monthly') truncPeriod = 'month';
+
+            const result = await this.prisma.$queryRawUnsafe<Array<{ period: Date, count: bigint }>>(`
+                SELECT DATE_TRUNC('${truncPeriod}', "login_at") as period, COUNT(id) as count
+                FROM "user_login_histories"
+                WHERE "login_at" >= $1 AND "login_at" <= $2
+                GROUP BY period
+                ORDER BY period ASC;
+            `, startDate, endDate);
+
+            return result.map(item => ({
+                period: item.period.toISOString(),
+                count: Number(item.count)
+            }));
+        } catch (error) {
+            this.logger.error(`Gagal memproses User Engagement Analytics: ${error.message}`, error.stack);
             throw error;
         }
     }

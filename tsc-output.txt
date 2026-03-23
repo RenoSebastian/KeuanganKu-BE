@@ -1,0 +1,3 @@
+﻿src/modules/admin/services/admin-pdf-generator.service.ts(11,22): error TS2709: Cannot use namespace 'PdfPrinter' as a type.
+src/modules/admin/services/admin-pdf-generator.service.ts(24,28): error TS2351: This expression is not constructable.
+  Type 'typeof import("C:/Users/PC/Documents/KeuanganKu/Backend/keuanganku-be/node_modules/@types/pdfmake/index")' has no construct signatures.

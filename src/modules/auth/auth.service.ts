@@ -158,7 +158,7 @@ export class AuthService {
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // [FIX] Kita meminjam struktur data RedisOtpData (memiliki passwordHash), tapi kita isi kosong (karena login tidak butuh hash baru)
+    // Kita meminjam struktur data RedisOtpData (memiliki passwordHash), tapi kita isi kosong (karena login tidak butuh hash baru)
     const loginData = {
       email: user.email,
       fullName: user.fullName,
@@ -170,7 +170,7 @@ export class AuthService {
 
     const loginIdentifier = `login:${user.email}`;
 
-    // [FIX] Memanfaatkan setter yang sudah ada secara elegan
+    // Memanfaatkan setter yang sudah ada secara elegan
     await this.redisService.setOtp(loginIdentifier, loginData, 300);
 
     // Simpan DeviceID sementara di session biasa (bukan active session), 
@@ -201,7 +201,7 @@ export class AuthService {
   async verifyLoginOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
     const loginIdentifier = `login:${dto.email}`;
 
-    // [FIX] Memanfaatkan getter yang sudah ada
+    // Memanfaatkan getter yang sudah ada
     const loginData = await this.redisService.getOtp(loginIdentifier);
 
     if (!loginData) {
@@ -222,7 +222,7 @@ export class AuthService {
 
     if (!user) throw new UnauthorizedException('Pengguna tidak ditemukan di sistem.');
 
-    // [FIX] Memanfaatkan deleter yang sudah ada
+    // Memanfaatkan deleter yang sudah ada
     await this.redisService.deleteOtp(loginIdentifier);
 
     // Ambil device ID asli yang disimpan saat inisiasi
@@ -241,7 +241,7 @@ export class AuthService {
   async resendLoginOtp(dto: ResendOtpDto) {
     const loginIdentifier = `login:${dto.email}`;
 
-    // [FIX] Memanfaatkan getter yang sudah ada
+    // Memanfaatkan getter yang sudah ada
     const loginData = await this.redisService.getOtp(loginIdentifier);
 
     if (!loginData) throw new BadRequestException('Sesi login tidak ditemukan. Silakan ulangi proses login.');
@@ -261,7 +261,7 @@ export class AuthService {
     loginData.resendCount += 1;
     loginData.lastSentAt = now;
 
-    // [FIX] Memanfaatkan setter yang sudah ada
+    // Memanfaatkan setter yang sudah ada
     await this.redisService.setOtp(loginIdentifier, loginData, 300);
 
     const htmlTemplate = generateOtpEmailTemplate(loginData.fullName, loginData.otpCode, true, 'LOGIN');
@@ -333,7 +333,7 @@ export class AuthService {
   }
 
   // =================================================================
-  // PRIVATE HELPER: STANDARDIZASI PEMBUATAN SESI
+  // PRIVATE HELPER: STANDARDIZASI PEMBUATAN SESI & LOGGING
   // =================================================================
   private async finalizeLoginSession(user: any, deviceId: string, meta: { ipAddress: string; userAgent: string }) {
     // 1. Otoritas Opsi B (Last-In Wins): Periksa Sesi Lama di Redis
@@ -364,9 +364,10 @@ export class AuthService {
       refreshTokenHash: rtHash,
     });
 
-    // 4. Sinkronisasi System of Record (PostgreSQL)
+    // 4. Sinkronisasi System of Record & Analitik Pertumbuhan (PostgreSQL)
     await this.prisma.$transaction([
       this.prisma.activeSession.deleteMany({ where: { userId: user.id } }),
+      // Mencatat sesi aktif (Live monitoring)
       this.prisma.activeSession.create({
         data: {
           sessionId,
@@ -375,6 +376,14 @@ export class AuthService {
           ipAddress: meta.ipAddress,
           deviceInfo: meta.userAgent,
           refreshTokenHash: rtHash,
+        }
+      }),
+      // [CORE LOGIC]: Menambahkan rekam jejak Login untuk analitik Engagement Investor
+      this.prisma.userLoginHistory.create({
+        data: {
+          userId: user.id,
+          ipAddress: meta.ipAddress,
+          deviceInfo: meta.userAgent,
         }
       })
     ]);

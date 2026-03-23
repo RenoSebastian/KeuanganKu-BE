@@ -6,6 +6,7 @@ import { VerificationStatus } from '@prisma/client';
 import { RedisService } from '../../redis/redis.service';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { DashboardMetricsResponseDto } from '../dto/dashboard-metrics-response.dto';
+import { CashflowLedgerItemDto, CashflowLedgerResponseDto, CashflowStatus } from '../dto/cashflow-ledger.dto';
 
 @Injectable()
 export class AdminDashboardService {
@@ -62,17 +63,64 @@ export class AdminDashboardService {
     }
 
     /**
-     * Mengambil daftar buku besar (Ledger) arus kas.
-     * Tidak kita cache karena memiliki paginasi dan butuh akurasi real-time tingkat tinggi.
-     */
-    async getCashflowLedger(page: number, limit: number) {
-        return this.analyticsService.getCashflowLedger(page, limit);
+      * Mengambil buku besar arus kas dari SubscriptionOrder
+      * [FIX MUTLAK] Bypass NestJS Interceptor dengan sanitasi memori langsung
+      */
+    async getCashflowLedger(page: number, limit: number): Promise<any> {
+        const skip = (page - 1) * limit;
+
+        try {
+            const [transactions, total] = await Promise.all([
+                this.prisma.subscriptionOrder.findMany({
+                    skip,
+                    take: limit,
+                    orderBy: { createdAt: 'desc' },
+                    where: { deletedAt: null },
+                    include: {
+                        user: { select: { fullName: true } },
+                        plan: { select: { name: true } },
+                        paymentAudit: true // Untuk mendapatkan ID admin yang verifikasi
+                    },
+                }),
+                this.prisma.subscriptionOrder.count({ where: { deletedAt: null } }),
+            ]);
+
+            const mappedData = transactions.map(trx => {
+                let ledgerStatus = 'PENDING';
+                if (trx.verificationStatus === 'VALID') ledgerStatus = 'VERIFIED';
+                else if (trx.verificationStatus === 'INVALID') ledgerStatus = 'REJECTED';
+
+                return {
+                    transactionId: trx.id,
+                    // EKSEKUSI PAKSA: Ubah ke String sebelum framework menyentuhnya
+                    transactionDate: trx.updatedAt ? trx.updatedAt.toISOString() : null,
+                    planName: trx.plan?.name || 'Unknown Plan',
+                    amount: Number(trx.snapshotPrice || 0) + Number((trx as any).uniqueCode || 0),
+                    status: ledgerStatus,
+                    verifiedBy: trx.paymentAudit?.adminId ? `Admin ID: ${trx.paymentAudit.adminId}` : undefined,
+                    userName: trx.user?.fullName || 'Unknown User',
+                };
+            });
+
+            // PENYEGELAN MEMORI: 
+            // Memaksa objek menjadi JSON primitive utuh untuk mematikan semua anomali Prisma/NestJS
+            const finalResponse = JSON.parse(JSON.stringify({
+                data: mappedData,
+                meta: {
+                    total,
+                    page,
+                    limit,
+                    totalPages: Math.ceil(total / limit),
+                },
+            }));
+
+            return finalResponse;
+        } catch (error) {
+            this.logger.error(`Gagal mengambil Cashflow Ledger: ${error.message}`, error.stack);
+            throw error;
+        }
     }
-
-    // =========================================================================
-    // EXISTING METHODS
-    // =========================================================================
-
+    
     async getDashboardStats() {
         // [FASE 3 OPTIMIZATION] Hitung User Online langsung dari SCAN Redis (In-Memory)
         // Menghindari query COUNT ke MySQL tabel ActiveSession yang berat

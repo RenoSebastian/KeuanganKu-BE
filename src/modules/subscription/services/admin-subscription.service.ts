@@ -16,12 +16,12 @@ import {
 import { NotificationService } from '../../notification/notification.service';
 import { UserQuotaService } from '../../users/services/user-quota.service';
 import { AuditService } from '../../audit/audit.service';
-
 import { RedisService } from '../../redis/redis.service';
 import { NotificationGateway } from '../../notification/notification.gateway';
-
-// Import DTO baru dari controller untuk type-safety
 import { BulkVerifyDto, RevokeOrderDto } from '../controllers/admin-subscription.controller';
+
+// [FIX] Mengimpor DTO yang memiliki dekorator @Transform untuk konversi tanggal ke ISO
+import { SubscriptionOrderResponseDto } from '../dto/subscription-response.dto';
 
 @Injectable()
 export class AdminSubscriptionService {
@@ -37,26 +37,59 @@ export class AdminSubscriptionService {
         private readonly notificationGateway: NotificationGateway,
     ) { }
 
-    async getPendingOrders() {
-        return this.prisma.subscriptionOrder.findMany({
-            where: {
-                verificationStatus: VerificationStatus.PENDING,
-            },
-            include: {
-                user: {
-                    select: {
-                        id: true,
-                        fullName: true,
-                        email: true,
-                        agency: { select: { name: true } },
-                    },
+    /**
+     * [PERBAIKAN ARSITEKTUR - FINAL]
+     * Mengambil data antrean order dengan dukungan Pagination.
+     * Menggunakan Native JSON Serialization untuk secara absolut membunuh
+     * anomali Prisma (Date menjadi {} dan Decimal menjadi {s, e, d}).
+     */
+    async getPendingOrders(page: number = 1, limit: number = 10) {
+        const skip = (page - 1) * limit;
+
+        const [data, total] = await Promise.all([
+            this.prisma.subscriptionOrder.findMany({
+                where: {
+                    verificationStatus: VerificationStatus.PENDING,
                 },
-                plan: true,
-            },
-            orderBy: {
-                createdAt: 'desc',
-            },
-        });
+                skip,
+                take: limit,
+                include: {
+                    user: {
+                        select: {
+                            id: true,
+                            fullName: true,
+                            email: true,
+                            agency: { select: { name: true } },
+                        },
+                    },
+                    plan: true,
+                },
+                orderBy: {
+                    createdAt: 'desc', // FIFO Terbalik: Yang terbaru paling atas
+                },
+            }),
+            this.prisma.subscriptionOrder.count({
+                where: {
+                    verificationStatus: VerificationStatus.PENDING,
+                }
+            })
+        ]);
+
+        // [SUPER HACK] Memaksa eksekusi JSON serialisasi murni di memori.
+        // Langkah ini mengonversi seluruh objek Date menjadi ISO String absolut
+        // dan objek Decimal Prisma menjadi primitif angka/string secara otomatis
+        // sebelum NestJS ClassSerializer sempat merusaknya.
+        const sanitizedData = JSON.parse(JSON.stringify(data));
+
+        return {
+            data: sanitizedData,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit)
+            }
+        };
     }
 
     async verifyOrder(adminId: string, dto: VerifyOrderDto) {
@@ -94,9 +127,26 @@ export class AdminSubscriptionService {
             });
 
             if (dto.status === VerificationStatus.VALID) {
+                const duration = order.plan.durationMonths && order.plan.durationMonths > 0 ? order.plan.durationMonths : 1;
                 const startDate = new Date();
                 const endDate = new Date();
-                endDate.setMonth(endDate.getMonth() + order.plan.durationMonths);
+                endDate.setMonth(endDate.getMonth() + duration);
+
+                // Konversi objek Prisma Decimal ke JavaScript Number agar operasi matematis valid
+                const snapshotPriceNum = Number(order.snapshotPrice);
+                const mrrAmount = snapshotPriceNum / duration;
+
+                // Bypass sementara (tx as any) sampai schema.prisma diperbarui dengan model CashflowLedger
+                await (tx as any).cashflowLedger.create({
+                    data: {
+                        referenceId: order.id,
+                        source: 'SUBSCRIPTION',
+                        grossAmount: snapshotPriceNum,
+                        mrrAmount: mrrAmount,
+                        transactionDate: new Date(),
+                        notes: `Aktivasi ${order.plan.name} (${duration} bulan)`,
+                    },
+                });
 
                 await tx.userSubscription.upsert({
                     where: { userId: order.userId },
@@ -190,11 +240,6 @@ export class AdminSubscriptionService {
         return result;
     }
 
-    /**
-     * [PHASE 1 ENHANCEMENT: BULK VERIFICATION]
-     * Mengeksekusi verifikasi secara berurutan untuk menjaga keandalan database lock.
-     * Tidak akan menggagalkan seluruh array jika ada satu yang gagal (Resilient loop).
-     */
     async bulkVerifyOrders(adminId: string, dto: BulkVerifyDto) {
         const results = {
             totalProcessed: 0,
@@ -221,16 +266,11 @@ export class AdminSubscriptionService {
             results.totalProcessed++;
         }
 
-        // Cache invalidate cukup dilakukan sekali di akhir proses massal (sudah dihandle dalam iterasi namun untuk keamanan ditrigger ulang jika perlu)
         this.logger.log(`Bulk Verification completed. Processed: ${results.totalProcessed}, Success: ${results.successfulIds.length}`);
 
         return results;
     }
 
-    /**
-     * [PHASE 1 ENHANCEMENT: COMPENSATING TRANSACTION / REVOKE]
-     * Logika murni untuk menarik kembali order yang terlanjur "VALID".
-     */
     async revokeOrder(adminId: string, dto: RevokeOrderDto) {
         const order = await this.prisma.subscriptionOrder.findUnique({
             where: { id: dto.orderId },
@@ -243,7 +283,6 @@ export class AdminSubscriptionService {
         }
 
         const result = await this.prisma.$transaction(async (tx) => {
-            // 1. Cabut Status Order
             const updatedOrder = await tx.subscriptionOrder.update({
                 where: { id: dto.orderId },
                 data: {
@@ -253,7 +292,6 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // 2. Catat di Audit Keamanan
             await tx.subscriptionPaymentAudit.create({
                 data: {
                     orderId: dto.orderId,
@@ -264,12 +302,11 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // 3. Matikan akses Premium
             await tx.userSubscription.updateMany({
                 where: {
                     userId: order.userId,
                     status: SubscriptionStatus.ACTIVE,
-                    lastOrderId: order.id // Pastikan hanya mematikan langganan dari order ini
+                    lastOrderId: order.id
                 },
                 data: {
                     status: SubscriptionStatus.REVOKED,
@@ -277,11 +314,24 @@ export class AdminSubscriptionService {
                 },
             });
 
-            // 4. Quota Reversal (Tarik kembali token yang diberikan)
+            // Konversi Decimal ke Number untuk operasi matematika Reversal
+            const snapshotPriceNum = Number(order.snapshotPrice);
+            const duration = order.plan.durationMonths && order.plan.durationMonths > 0 ? order.plan.durationMonths : 1;
+
+            // Bypass sementara (tx as any)
+            await (tx as any).cashflowLedger.create({
+                data: {
+                    referenceId: `REVOKE-${order.id}`,
+                    source: 'SUBSCRIPTION_REFUND',
+                    grossAmount: -Math.abs(snapshotPriceNum),
+                    mrrAmount: -(snapshotPriceNum / duration),
+                    transactionDate: new Date(),
+                    notes: `Reversal Revoke Order ${order.id}`,
+                },
+            });
+
             const bonusQuota = order.plan.bonusQuota || 0;
             const user = await tx.user.findUniqueOrThrow({ where: { id: order.userId } });
-
-            // Cegah saldo minus ekstrim jika user sudah menghabiskan tokennya
             const newBalance = Math.max(0, user.quota - bonusQuota);
 
             await tx.user.update({
@@ -289,12 +339,11 @@ export class AdminSubscriptionService {
                 data: { quota: newBalance },
             });
 
-            // 5. Catat Mutasi Negatif di Ledger
             await tx.userQuotaLedger.create({
                 data: {
                     userId: order.userId,
-                    amount: -bonusQuota, // Nilai negatif untuk penarikan
-                    type: QuotaTransactionType.ADMIN_BONUS, // Menggunakan enum yang ada sebagai proxy reversal
+                    amount: -bonusQuota,
+                    type: QuotaTransactionType.ADMIN_BONUS,
                     referenceId: `REVOKE-${order.id}`,
                     balanceAfter: newBalance,
                     description: `Pembatalan Paket ${order.plan.name}: ${dto.reason}`,

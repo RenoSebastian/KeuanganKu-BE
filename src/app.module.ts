@@ -16,6 +16,7 @@ import redisConfig from './common/configs/redis.config';
 import { HttpExceptionFilter } from './common/filters/http-exception.filter';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 import { AuditInterceptor } from './common/interceptors/audit.interceptor';
+import { UrlTransformInterceptor } from './common/interceptors/url-transform.interceptor';
 
 // --- Guards ---
 import { ThrottlerBehindProxyGuard } from './common/guards/throttler-behind-proxy.guard';
@@ -123,6 +124,10 @@ import { AdminModule } from './modules/admin/admin.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: AuditInterceptor,
+    },
+    {
+      provide: APP_INTERCEPTOR,
+      useClass: UrlTransformInterceptor,
     },
     {
       provide: APP_GUARD,
