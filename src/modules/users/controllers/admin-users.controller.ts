@@ -12,7 +12,7 @@ import {
     HttpStatus,
     DefaultValuePipe,
     ParseIntPipe,
-    ParseEnumPipe, // [PHASE 4 IMPORT]
+    ParseEnumPipe,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import {
@@ -48,7 +48,10 @@ export class AdminUsersController {
      */
     @Get()
     @ApiOperation({ summary: 'List All Agents/Users (Pagination & Fuzzy Search)' })
-    @ApiResponse({ status: 200, description: 'Return list of users with pagination meta.' })
+    @ApiResponse({
+        status: 200,
+        description: 'Return list of users with pagination meta. Includes computed Subscription and Analytics data.'
+    })
     @ApiQuery({ name: 'search', required: false, description: 'Fuzzy search by Name, Email, NIP, or Agency' })
     @ApiQuery({ name: 'role', enum: Role, required: false, description: 'Filter by Role' })
     @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
@@ -61,6 +64,7 @@ export class AdminUsersController {
         @Query('page', new DefaultValuePipe(1), ParseIntPipe) page?: number,
         @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit?: number,
     ) {
+        // Delegasi murni ke Service (Information Expert)
         return this.usersService.findAll({ search, role, page, limit });
     }
 
@@ -70,7 +74,7 @@ export class AdminUsersController {
      */
     @Post()
     @ApiOperation({ summary: 'Create New Agent/User Manually' })
-    @ApiResponse({ status: HttpStatus.CREATED, description: 'Agent successfully created.' })
+    @ApiResponse({ status: HttpStatus.CREATED, description: 'Agent successfully created with computed initial quota.' })
     @ApiResponse({ status: HttpStatus.BAD_REQUEST, description: 'Email/NIP already exists.' })
     async create(
         @GetUser('id') adminId: string,
@@ -84,8 +88,11 @@ export class AdminUsersController {
      * Melihat detail lengkap user (Agency, Subscription, Quota, Analytics).
      */
     @Get(':id')
-    @ApiOperation({ summary: 'Get Agent Detail with Subscription & Quota Info' })
-    @ApiResponse({ status: 200, description: 'User details retrieved.' })
+    @ApiOperation({ summary: 'Get Agent Detail with Dynamic Subscription & Quota Info' })
+    @ApiResponse({
+        status: 200,
+        description: 'User details retrieved successfully. Payload includes in-memory computed FUP health and countdown.'
+    })
     @ApiResponse({ status: 404, description: 'User not found.' })
     async findOne(@Param('id', ParseUUIDPipe) id: string) {
         return this.usersService.findOne(id);
@@ -97,7 +104,10 @@ export class AdminUsersController {
      */
     @Patch(':id')
     @ApiOperation({ summary: 'Update Agent Profile (Admin Override)' })
-    @ApiResponse({ status: 200, description: 'User updated successfully.' })
+    @ApiResponse({
+        status: 200,
+        description: 'User updated successfully. Evaluates to a Single Point of Truth in UsersService.'
+    })
     async update(
         @GetUser('id') adminId: string,
         @Param('id', ParseUUIDPipe) id: string,

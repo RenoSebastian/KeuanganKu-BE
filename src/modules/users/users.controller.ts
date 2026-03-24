@@ -37,26 +37,30 @@ export class UsersController {
 
   @Get('me')
   @ApiOperation({
-    summary: 'Get My Profile (With Subscription & Usage Quota)',
-    description: 'Mengambil data profil user yang sedang login, termasuk status Subscription dan sisa Kuota.'
+    summary: 'Get My Profile (With Computed Subscription & Usage Quota)',
+    description: 'Mengambil data profil mandiri. Mengembalikan objek "computed" yang berisi kalkulasi sisa hari langganan dan status FUP.'
   })
   @ApiResponse({
     status: HttpStatus.OK,
-    description: 'Profil user berhasil diambil.',
+    description: 'Profil user berhasil diambil beserta metrik waktu nyata.',
   })
   getMe(@GetUser('id') userId: string) {
     // Sinkronisasi: Memastikan Service menarik single source of truth dari database
+    // lalu ditransformasi sebelum dikembalikan ke klien.
     return this.userService.getMe(userId);
   }
 
   @Patch('me')
-  @ApiOperation({ summary: 'Update My Profile' })
+  @ApiOperation({
+    summary: 'Update My Profile',
+    description: 'Bermuara pada persistence layer yang sama dengan Admin untuk menjaga integritas data dan trigger event WebSocket.'
+  })
   @ApiResponse({
     status: HttpStatus.OK,
     description: 'Profil berhasil diperbarui.',
   })
   editUser(@GetUser('id') userId: string, @Body() dto: EditUserDto) {
-    // [FASE 3] Keamanan: ID User diambil dari Token (Decoded JWT), bukan dari body request klien
+    // [FASE 3] Keamanan: ID User murni diambil dari Token (Decoded JWT), bukan dari body request klien.
     return this.userService.editUser(userId, dto);
   }
 
@@ -78,7 +82,7 @@ export class UsersController {
   ) {
     if (!deviceId) deviceId = 'web-browser';
 
-    // Sinkronisasi Real-time: Mencatat status aktif user ke Redis
+    // Sinkronisasi Real-time: Mencatat status aktif user ke Redis Session
     await this.redisService.recordHeartbeat(userId, deviceId, role, email);
     return { ok: true };
   }

@@ -5,12 +5,18 @@ import { CreateUserDto } from './create-user.dto';
 import { formatToWhatsAppNumber } from '../../../common/utils/phone-formatter.util';
 
 export class UpdateUserDto extends PartialType(CreateUserDto) {
-    // Override untuk menangani kasus string kosong "" dari frontend
-    // Jika frontend mengirim "", ubah jadi undefined agar tidak diproses oleh Prisma
+    // =================================================================
+    // SAAS ARCHITECTURE: AGENCY RELATIONSHIP
+    // Mengubah string kosong "" (dari form frontend) menjadi null
+    // agar Prisma mengeksekusi perintah 'disconnect' pada relasi.
+    // =================================================================
+    @ApiPropertyOptional({
+        description: 'ID Agency (Kirim string kosong "" atau null untuk menghapus relasi)',
+    })
     @IsOptional()
     @IsUUID()
-    @Transform(({ value }) => (value === '' ? undefined : value))
-    unitKerjaId?: string;
+    @Transform(({ value }) => (value === '' ? null : value))
+    agencyId?: string;
 
     // =================================================================
     // PHASE 3: PHONE NUMBER INTEGRATION (GATEKEEPER)

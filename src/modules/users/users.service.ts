@@ -30,6 +30,72 @@ export class UsersService {
   ) { }
 
   // =================================================================
+  // PURE FABRICATION & INFORMATION EXPERT (Data Transformation)
+  // =================================================================
+
+  /**
+   * Mengkalkulasi metrik dinamis (Countdown & FUP) secara in-memory (O(1)).
+   * Memastikan Separation of Concerns: Database murni menyimpan state absolut,
+   * Service Layer mengeksekusi logika bisnis waktu nyata.
+   */
+  private attachComputedMetrics(user: any) {
+    if (!user) return user;
+    const { passwordHash, ...sanitized } = user;
+
+    let remainingDays = 0;
+    let isPro = false;
+    let subStatus = 'INACTIVE';
+
+    // 1. Subscription Countdown Logic
+    if (sanitized.subscription && sanitized.subscription.endDate) {
+      const now = new Date().getTime();
+      const end = new Date(sanitized.subscription.endDate).getTime();
+
+      if (end > now) {
+        remainingDays = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
+        subStatus = sanitized.subscription.status;
+        isPro = subStatus === 'ACTIVE';
+      } else {
+        subStatus = 'EXPIRED';
+      }
+    }
+
+    // 2. Fair Usage Policy (FUP) & Usage Analytics Logic
+    let healthStatus = 'NORMAL';
+    if (sanitized.usage) {
+      const used = sanitized.usage.totalUsed || 0;
+      const limit = sanitized.usage.simulationQuota || 0;
+
+      if (isPro) {
+        // Mode Analytics untuk PRO (Tidak ada Hard Limit, tapi dipantau kesehatannya)
+        if (used > 5000) healthStatus = 'CRITICAL';
+        else if (used > 2000) healthStatus = 'WARNING';
+      } else {
+        // Mode Hard Limit untuk User Basic/Free
+        if (limit <= 0) healthStatus = 'DEPLETED';
+        else if (limit <= 2) healthStatus = 'WARNING';
+      }
+    }
+
+    // Menginjeksikan object 'computed' sebagai API Contract baru ke FE
+    return {
+      ...sanitized,
+      computed: {
+        subscription: {
+          remainingDays,
+          isActive: isPro,
+          derivedStatus: subStatus,
+        },
+        usageAnalytics: {
+          isUnlimited: isPro,
+          healthStatus,
+          totalUsage: sanitized.usage?.totalUsed || 0,
+        },
+      },
+    };
+  }
+
+  // =================================================================
   // SELF-SERVICE (User Profile & Context)
   // =================================================================
 
@@ -40,22 +106,17 @@ export class UsersService {
         agency: true,
         usage: true,
         subscription: {
-          include: {
-            plan: true,
-          },
+          include: { plan: true },
         },
         _count: {
-          select: {
-            simulationLogs: true,
-          },
+          select: { simulationLogs: true },
         },
       },
     });
 
     if (!user) throw new NotFoundException(`User profile not found`);
 
-    const { passwordHash, ...result } = user;
-    return result;
+    return this.attachComputedMetrics(user);
   }
 
   async editUser(userId: string, dto: EditUserDto) {
@@ -134,10 +195,7 @@ export class UsersService {
     ]);
 
     return {
-      data: users.map((u) => {
-        const { passwordHash, ...rest } = u;
-        return rest;
-      }),
+      data: users.map((u) => this.attachComputedMetrics(u)),
       meta: {
         total,
         page,
@@ -162,7 +220,6 @@ export class UsersService {
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
     const { password, dateOfBirth, agencyId, phoneNumber, ...rest } = dto;
-
     const cleanPhoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
 
     try {
@@ -200,7 +257,7 @@ export class UsersService {
         this.logger.error(`Failed to sync new user to search: ${err.message}`),
       );
 
-      const { passwordHash, ...result } = newUser;
+      const result = this.attachComputedMetrics(newUser);
 
       this.auditService.logAdminAction({
         adminId,
@@ -237,8 +294,7 @@ export class UsersService {
 
     if (!user) throw new NotFoundException('User data not found');
 
-    const { passwordHash, ...result } = user;
-    return result;
+    return this.attachComputedMetrics(user);
   }
 
   async updateUser(adminId: string, id: string, dto: UpdateUserDto) {
@@ -270,9 +326,13 @@ export class UsersService {
   }
 
   // =================================================================
-  // HELPER METHODS
+  // HELPER METHODS (Persistence & Sync)
   // =================================================================
 
+  /**
+   * Single Point of Truth untuk eksekusi UPDATE.
+   * Dipanggil oleh entitas mandiri (Self) maupun Admin untuk menjaga integritas data.
+   */
   private async processUpdate(userId: string, dto: any, adminId?: string) {
     try {
       const oldUser = await this.prisma.user.findUnique({ where: { id: userId } });
@@ -281,8 +341,6 @@ export class UsersService {
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
 
       // [FASE 1] Dynamic Payload Mapping & Mencegah Silent Data Drop
-      // Variabel pasif seperti agencyName, companyName, atau goals TIDAK Boleh di-destructure di sini
-      // agar otomatis tertampung di dalam ...restData dan dikirim ke Prisma.
       const {
         password,
         dateOfBirth,
@@ -292,10 +350,9 @@ export class UsersService {
         ...restData
       } = dto;
 
-      // restData kini berisi payload yang murni dan tidak ada variabel yang terbuang
       const updatePayload: any = { ...restData };
 
-      // Penanganan khusus untuk field yang membutuhkan konversi tipe data
+      // Konversi presisi tipe data
       if (dependentCount !== undefined) updatePayload.dependentCount = Number(dependentCount);
       if (dateOfBirth) updatePayload.dateOfBirth = new Date(dateOfBirth);
       if (password) {
@@ -315,6 +372,7 @@ export class UsersService {
         include: {
           agency: true,
           subscription: true,
+          usage: true,
         },
       });
 
@@ -322,9 +380,9 @@ export class UsersService {
         this.logger.warn(`Search update warning: ${e.message}`),
       );
 
-      const { passwordHash, ...result } = updatedUser;
+      const result = this.attachComputedMetrics(updatedUser);
 
-      // Logika Audit Admin
+      // Logika Audit Sentral
       if (adminId) {
         this.auditService.logAdminAction({
           adminId,
@@ -340,7 +398,6 @@ export class UsersService {
       }
 
       // [FASE 2] Event-Driven State Sync (Publisher)
-      // Catatan: Pastikan `server` di-ekspos secara publik (`public server: Server`) di notification.gateway.ts
       try {
         this.notificationGateway.server.to(userId).emit('USER_PROFILE_MUTATED', {
           triggerBy: adminId ? 'ADMIN' : 'SELF',
