@@ -59,6 +59,7 @@ async function bootstrap() {
     origin: [
       'http://localhost:3000',           // Frontend Local
       'https://keuanganku.geocitra.com', // Production Domain
+      'https://keuanganku.id',
       'http://localhost:8080',           // Docker Internal
     ],
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
@@ -90,7 +91,7 @@ async function bootstrap() {
     .setVersion('1.0')
     .addBearerAuth()
     .addServer('http://localhost:4000', 'Local Development')
-    .addServer('https://keuanganku.geocitra.com', 'Production Server')
+    .addServer('https://keuanganku.id', 'Production Server')
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
