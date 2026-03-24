@@ -24,7 +24,7 @@ import { GetUser } from '../../common/decorators/get-user.decorator';
 @ApiTags('Admin Master Data & Config')
 @UseGuards(JwtAuthGuard, RolesGuard)
 @ApiBearerAuth()
-// [PHASE 1 ENHANCEMENT] Standarisasi Prefix Admin (Sesuai dengan kontrak FE)
+// Prefix Utama Controller
 @Controller('admin/master-data')
 export class MasterDataController {
     constructor(
@@ -34,6 +34,7 @@ export class MasterDataController {
 
     // ========================================================================
     // 1. CENTRAL BANK CONFIG (Pengaturan Ekonomi Global)
+    // Endpoint: /api/admin/master-data/settings
     // ========================================================================
 
     @Get('settings')
@@ -53,33 +54,34 @@ export class MasterDataController {
     }
 
     // ========================================================================
-    // 2. UNIT KERJA MANAGEMENT (Agency / Cabang)
+    // 2. AGENCY MANAGEMENT (Sebelumnya Unit Kerja)
+    // Endpoint: /api/admin/master-data/agencies
     // ========================================================================
 
-    @Get('units')
-    @ApiOperation({ summary: 'Daftar Unit Kerja (Agency)' })
+    @Get('agencies')
+    @ApiOperation({ summary: 'Daftar Agency (Cabang)' })
     findAllUnits() {
         return this.masterDataService.findAllUnits();
     }
 
-    @Post('units')
+    @Post('agencies')
     @Roles(Role.ADMIN)
-    @ApiOperation({ summary: 'Buat Unit Kerja Baru' })
+    @ApiOperation({ summary: 'Buat Agency Baru' })
     createUnit(@Body() dto: CreateUnitDto) {
         return this.masterDataService.createUnit(dto);
     }
 
-    @Patch('units/:id')
+    @Patch('agencies/:id')
     @Roles(Role.ADMIN)
-    @ApiOperation({ summary: 'Update Unit Kerja' })
+    @ApiOperation({ summary: 'Update Agency' })
     updateUnit(@Param('id') id: string, @Body() dto: UpdateUnitDto) {
         return this.masterDataService.updateUnit(id, dto);
     }
 
-    @Delete('units/:id')
+    @Delete('agencies/:id')
     @Roles(Role.ADMIN)
-    @ApiOperation({ summary: 'Hapus Unit Kerja' })
+    @ApiOperation({ summary: 'Hapus Agency' })
     deleteUnit(@Param('id') id: string) {
         return this.masterDataService.deleteUnit(id);
     }
-}
+}   
