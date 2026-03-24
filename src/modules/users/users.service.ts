@@ -13,6 +13,9 @@ import { EditUserDto } from './dto/edit-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuditService } from '../audit/audit.service';
 
+// [NEW] PHASE 4: Import fungsi sanitizer murni
+import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
+
 @Injectable()
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
@@ -79,18 +82,20 @@ export class UsersService {
       where.role = role;
     }
 
-    // [PHASE 2: ENHANCEMENT] Optimasi Trigram Fuzzy Search
+    // [PHASE 2 & 4: ENHANCEMENT] Optimasi Trigram Fuzzy Search dengan pencarian Nomor HP
     if (search && search.trim() !== '') {
       const searchStr = search.trim();
+
       // Step 1: Tarik ID yang memiliki probabilitas kemiripan teks menggunakan GiST Index
-      // Menggunakan threshold SIMILARITY > 0.15 agar toleran terhadap typo minor
+      // Menggunakan nama tabel mapping asli "users" dan kolom mapping "phone_number"
       const matchedRecords = await this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT id FROM "User"
-        WHERE "fullName" % ${searchStr}
+        SELECT id FROM "users"
+        WHERE "full_name" % ${searchStr}
            OR "email" ILIKE ${'%' + searchStr + '%'}
            OR "nip" ILIKE ${'%' + searchStr + '%'}
-           OR SIMILARITY("fullName", ${searchStr}) > 0.15
-        ORDER BY SIMILARITY("fullName", ${searchStr}) DESC
+           OR "phone_number" ILIKE ${'%' + searchStr + '%'}
+           OR SIMILARITY("full_name", ${searchStr}) > 0.15
+        ORDER BY SIMILARITY("full_name", ${searchStr}) DESC
       `;
 
       const matchedIds = matchedRecords.map(r => r.id);
@@ -159,7 +164,11 @@ export class UsersService {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    const { password, dateOfBirth, agencyId, ...rest } = dto;
+    // Ekstraksi phoneNumber untuk disanitasi
+    const { password, dateOfBirth, agencyId, phoneNumber, ...rest } = dto;
+
+    // [NEW] Lapis keamanan kedua (Defense in Depth) untuk sanitasi WA Number
+    const cleanPhoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
 
     try {
       const newUser = await this.prisma.$transaction(async (tx) => {
@@ -167,6 +176,7 @@ export class UsersService {
           data: {
             ...rest,
             passwordHash: hashedPassword,
+            phoneNumber: cleanPhoneNumber, // Injeksi nomor yang sudah bersih
             dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
             agencyId: agencyId || null,
             usage: {
@@ -275,7 +285,9 @@ export class UsersService {
       if (!oldUser) throw new NotFoundException('User not found');
 
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
-      const { password, dateOfBirth, dependentCount, agencyId, agencyName, ...restData } = dto;
+
+      // Ekstraksi phoneNumber dari DTO
+      const { password, dateOfBirth, dependentCount, agencyId, agencyName, phoneNumber, ...restData } = dto;
 
       const updatePayload: any = { ...restData };
 
@@ -287,6 +299,13 @@ export class UsersService {
       }
       if (agencyId !== undefined) {
         updatePayload.agencyId = agencyId === '' ? null : agencyId;
+      }
+
+      // [NEW] Logika Sanitasi dan Update PhoneNumber
+      if (phoneNumber !== undefined) {
+        // Jika frontend/DTO meloloskan string kosong, kita simpan null.
+        // Jika tidak, kita pastikan data dilewatkan ke sanitizer sebelum masuk Prisma
+        updatePayload.phoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
       }
 
       const updatedUser = await this.prisma.user.update({
@@ -305,7 +324,6 @@ export class UsersService {
       const { passwordHash, ...result } = updatedUser;
 
       if (adminId) {
-        // [PHASE 2: ENHANCEMENT] Detailed Update Logging
         this.auditService.logAdminAction({
           adminId,
           action: 'UPDATE_USER',
@@ -345,6 +363,8 @@ export class UsersService {
         isPro: isPro,
         location: user.address,
         goals: user.goals,
+        // [NEW] Menambahkan nomor HP ke dokumen Meilisearch agar lebih kaya
+        phoneNumber: user.phoneNumber,
       };
 
       await this.searchService.addDocuments('global_search', [searchPayload]);

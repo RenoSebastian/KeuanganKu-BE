@@ -1,3 +1,4 @@
+// File: src/modules/redis/redis.service.ts
 import { Injectable, Inject, InternalServerErrorException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import Redis from 'ioredis';
@@ -17,6 +18,8 @@ export interface RedisOtpData {
     email: string;
     fullName: string;
     passwordHash: string;
+    // [NEW] PHASE 4: Phone Number ditambahkan sebagai opsional agar kompatibel dengan logic Auth yang baru
+    phoneNumber?: string | null;
     otpCode: string;
     resendCount: number;
     lastSentAt: number;

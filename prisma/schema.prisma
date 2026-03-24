@@ -160,6 +160,9 @@ model User {
   passwordHash String  @map("password_hash")
   fullName     String  @map("full_name")
 
+  // [NEW] Phone Number - Opsional agar tidak merusak data lama
+  phoneNumber String? @map("phone_number") @db.VarChar(20)
+
   gender         String?   @db.VarChar(50)
   address        String?   @db.Text
   agentLevel     String?   @map("agent_level") // Junior, Senior, MDRT
@@ -175,7 +178,7 @@ model User {
   role      Role      @default(USER)
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
-  deletedAt DateTime? @map("deleted_at") // [NEW] Soft Delete
+  deletedAt DateTime? @map("deleted_at") // Soft Delete
 
   agency Agency? @relation(fields: [agencyId], references: [id])
 
@@ -203,7 +206,7 @@ model User {
   quotaLedger        UserQuotaLedger[]
   activeSessions     ActiveSession[]
 
-  // [NEW] Time-series history untuk tracking engagement
+  // Time-series history untuk tracking engagement
   loginHistories UserLoginHistory[]
 
   @@index([agencyId])
@@ -213,10 +216,10 @@ model User {
 }
 
 // =========================================================
-// ANALYTICS & TIME-SERIES LOGGING (TASK 1 & TASK 4)
+// ANALYTICS & TIME-SERIES LOGGING
 // =========================================================
 
-// [NEW] Tabel append-only untuk merekam jejak analitik waktu login pengguna (Task 4)
+// Tabel append-only untuk merekam jejak analitik waktu login pengguna
 model UserLoginHistory {
   id         String   @id @default(uuid())
   userId     String   @map("user_id")
@@ -231,7 +234,7 @@ model UserLoginHistory {
   @@map("user_login_histories")
 }
 
-// [NEW] Buku besar arus kas keuangan dari transaksi (Task 1 & 2)
+// Buku besar arus kas keuangan dari transaksi
 model CashflowLedger {
   id              String   @id @default(uuid())
   referenceId     String   @map("reference_id") // Order ID / Revoke ID
@@ -272,7 +275,7 @@ model UserQuotaLedger {
   balanceAfter Int                  @map("balance_after") // Saldo setelah transaksi
   description  String?              @db.Text
   createdAt    DateTime             @default(now()) @map("created_at")
-  deletedAt    DateTime?            @map("deleted_at") // [NEW] Soft Delete (Rarely used but safe)
+  deletedAt    DateTime?            @map("deleted_at") // Soft Delete (Rarely used but safe)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -311,7 +314,7 @@ model SubscriptionOrder {
   snapshotPrice      Decimal            @map("snapshot_price") @db.Decimal(15, 2)
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
-  deletedAt          DateTime?          @map("deleted_at") // [NEW] Soft Delete
+  deletedAt          DateTime?          @map("deleted_at") // Soft Delete
 
   user                  User                      @relation(fields: [userId], references: [id], onDelete: Cascade)
   plan                  SubscriptionPlan          @relation(fields: [planId], references: [id])
@@ -345,7 +348,7 @@ model UserSubscription {
   status             SubscriptionStatus @default(ACTIVE)
   startDate          DateTime           @default(now()) @map("start_date")
   endDate            DateTime           @map("end_date")
-  gracePeriodEndDate DateTime?          @map("grace_period_end_date") // [NEW] Buffer Time (Netflix Style)
+  gracePeriodEndDate DateTime?          @map("grace_period_end_date") // Buffer Time (Netflix Style)
   lastOrderId        String             @map("last_order_id")
   createdAt          DateTime           @default(now()) @map("created_at")
   updatedAt          DateTime           @updatedAt @map("updated_at")
@@ -445,7 +448,7 @@ model AccessLog {
   @@map("access_logs")
 }
 
-// [NEW] Admin Activity Log (Untuk Audit Konfigurasi & Aksi Sensitif Admin)
+// Admin Activity Log (Untuk Audit Konfigurasi & Aksi Sensitif Admin)
 model AdminActivityLog {
   id         String   @id @default(uuid())
   adminId    String   @map("admin_id")

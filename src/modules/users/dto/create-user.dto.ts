@@ -11,6 +11,7 @@ import {
     IsString,
     IsUUID,
     MinLength,
+    Matches
 } from 'class-validator';
 
 export class CreateUserDto {
@@ -48,6 +49,19 @@ export class CreateUserDto {
     @Transform(({ value }) => (value === '' ? null : value))
     agencyId?: string;
 
+    // =================================================================
+    // [NEW] PHASE 3: PHONE NUMBER INTEGRATION
+    // =================================================================
+
+    @ApiPropertyOptional({
+        example: '08123456789',
+        description: 'Nomor WhatsApp aktif untuk keperluan billing/tagihan'
+    })
+    @IsOptional()
+    @IsString({ message: 'Nomor telepon harus berupa teks' })
+    @Matches(/^[+0-9\s-]+$/, { message: 'Format nomor telepon mengandung karakter tidak valid' })
+    phoneNumber?: string;
+
     @ApiPropertyOptional({ example: '1990-01-01', description: 'Tanggal lahir' })
     @IsDateString()
     @IsOptional()
@@ -59,7 +73,7 @@ export class CreateUserDto {
     dependentCount?: number;
 
     // =================================================================
-    // [NEW] PHASE 4: ADDITIONAL PROFILE FIELDS
+    // PHASE 4: ADDITIONAL PROFILE FIELDS
     // =================================================================
 
     @ApiPropertyOptional({ example: 'Laki-laki', description: 'Jenis Kelamin' })

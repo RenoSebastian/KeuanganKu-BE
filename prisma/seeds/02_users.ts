@@ -1,3 +1,4 @@
+// File: prisma/seeds/02_users.ts
 import { PrismaClient, Role } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
@@ -17,7 +18,7 @@ export async function seedUsers(prisma: PrismaClient) {
             passwordHash,
             role: Role.ADMIN,
             quota: 9999, // Admin unlimited
-            // Tidak perlu agencyId
+            phoneNumber: '6281111111111',
         },
     });
 
@@ -33,6 +34,7 @@ export async function seedUsers(prisma: PrismaClient) {
             role: Role.USER,
             companyName: 'Prudential Life',
             agentLevel: 'Senior',
+            phoneNumber: '6282222222222',
             quota: 0, // Nanti dapat dari seed subscription atau logic create user
         },
     });
