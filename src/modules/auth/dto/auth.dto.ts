@@ -1,5 +1,5 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength, Length } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+import { IsEmail, IsNotEmpty, IsString, MinLength, Length, IsOptional, Matches } from 'class-validator';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 // ====================================================================
 // 1. REGISTER DTO (Agent Profile)
@@ -20,6 +20,17 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty({ message: 'Nama lengkap wajib diisi' })
   fullName: string;
+
+  // [NEW] Fase 3: Integrasi Nomor Telepon
+  @ApiPropertyOptional({
+    example: '08123456789',
+    description: 'Nomor WhatsApp (Opsional saat daftar awal)'
+  })
+  @IsOptional()
+  @IsString({ message: 'Nomor telepon harus berupa teks' })
+  // Regex untuk membatasi input agar hanya menerima angka, spasi, dash (-), dan plus (+)
+  @Matches(/^[+0-9\s-]+$/, { message: 'Format nomor telepon mengandung karakter tidak valid' })
+  phoneNumber?: string;
 }
 
 // ====================================================================

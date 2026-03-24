@@ -7,8 +7,10 @@ import {
     IsString,
     IsUUID,
     MinLength,
+    Matches
 } from 'class-validator';
 import { CreateUserDto } from './create-user.dto';
+import { formatToWhatsAppNumber } from '../../../common/utils/phone-formatter.util';
 
 export class AdminUpdateUserDto extends PartialType(CreateUserDto) {
     // Override untuk memastikan Admin bisa mengubah Role user
@@ -46,4 +48,22 @@ export class AdminUpdateUserDto extends PartialType(CreateUserDto) {
     @IsUUID()
     @Transform(({ value }) => (value === '' ? null : value))
     unitKerjaId?: string;
+
+    // =================================================================
+    // PHASE 3: PHONE NUMBER INTEGRATION (GATEKEEPER)
+    // =================================================================
+    @ApiPropertyOptional({
+        description: 'Nomor WhatsApp (Kirim string kosong "" untuk menghapus data)'
+    })
+    @IsOptional()
+    @IsString()
+    @Transform(({ value }) => {
+        // Jika admin mengosongkan input nomor HP, konversi ke null
+        if (value === '' || value === null) return null;
+
+        // Lewatkan ke fungsi sanitizer agar otomatis berformat 62...
+        return formatToWhatsAppNumber(value);
+    })
+    @Matches(/^[0-9]+$/, { message: 'Format nomor telepon tidak valid' })
+    phoneNumber?: string;
 }

@@ -19,6 +19,9 @@ import { NotificationGateway } from '../notification/notification.gateway';
 import { EmailService } from '../email/email.service';
 import { generateOtpEmailTemplate } from '../email/templates/otp-email.template';
 
+// [NEW] PHASE 4: Integrasi Sanitizer (Sebagai lapis ganda / safety net)
+import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
@@ -48,10 +51,15 @@ export class AuthService {
     const hash = await bcrypt.hash(dto.password, salt);
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
+    // [NEW] Memastikan data nomor telepon (jika ada) steril sebelum masuk Redis
+    const cleanPhoneNumber = dto.phoneNumber ? formatToWhatsAppNumber(dto.phoneNumber) : null;
+
     const otpData = {
       email: dto.email,
       fullName: dto.fullName,
       passwordHash: hash,
+      // [NEW] Menambahkan phoneNumber ke payload Redis (Sesi Pendaftaran)
+      phoneNumber: cleanPhoneNumber,
       otpCode: otpCode,
       resendCount: 0,
       lastSentAt: Date.now(),
@@ -91,6 +99,9 @@ export class AuthService {
           email: otpData.email,
           fullName: otpData.fullName,
           passwordHash: otpData.passwordHash,
+          // [NEW] Menarik data phoneNumber dari Redis dan menyimpannya ke Prisma
+          // Menggunakan 'any' assertion jika DTO getOtp dari RedisService belum diupdate tipe datanya
+          phoneNumber: (otpData as any).phoneNumber || null,
           role: 'USER',
           usage: {
             create: { simulationQuota: 10, totalUsed: 0 },
@@ -158,24 +169,21 @@ export class AuthService {
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Kita meminjam struktur data RedisOtpData (memiliki passwordHash), tapi kita isi kosong (karena login tidak butuh hash baru)
+    // Kita meminjam struktur data RedisOtpData
     const loginData = {
       email: user.email,
       fullName: user.fullName,
       otpCode: otpCode,
-      passwordHash: '', // Dikosongkan, tidak digunakan saat verifikasi login
+      passwordHash: '',
+      phoneNumber: user.phoneNumber, // [NEW] Optional passing existing phone number (aman meski null)
       resendCount: 0,
       lastSentAt: Date.now(),
     };
 
     const loginIdentifier = `login:${user.email}`;
 
-    // Memanfaatkan setter yang sudah ada secara elegan
     await this.redisService.setOtp(loginIdentifier, loginData, 300);
 
-    // Simpan DeviceID sementara di session biasa (bukan active session), 
-    // karena RedisOtpData Anda mungkin tidak memiliki properti deviceId.
-    // Alternatif ini sangat aman dan menghindari perubahan interface DTO di RedisService
     await this.redisService.setSession(`pending_device:${user.email}`, {
       sessionId: 'pending',
       deviceId: dto.deviceId,
@@ -200,8 +208,6 @@ export class AuthService {
   // =================================================================
   async verifyLoginOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
     const loginIdentifier = `login:${dto.email}`;
-
-    // Memanfaatkan getter yang sudah ada
     const loginData = await this.redisService.getOtp(loginIdentifier);
 
     if (!loginData) {
@@ -222,14 +228,11 @@ export class AuthService {
 
     if (!user) throw new UnauthorizedException('Pengguna tidak ditemukan di sistem.');
 
-    // Memanfaatkan deleter yang sudah ada
     await this.redisService.deleteOtp(loginIdentifier);
 
-    // Ambil device ID asli yang disimpan saat inisiasi
     const pendingSession = await this.redisService.getSession(`pending_device:${dto.email}`);
     const originalDeviceId = pendingSession ? pendingSession.deviceId : dto.deviceId;
 
-    // Bersihkan pending device
     await this.redisService.deleteSession(`pending_device:${dto.email}`);
 
     return this.finalizeLoginSession(user, originalDeviceId, meta);
@@ -240,8 +243,6 @@ export class AuthService {
   // =================================================================
   async resendLoginOtp(dto: ResendOtpDto) {
     const loginIdentifier = `login:${dto.email}`;
-
-    // Memanfaatkan getter yang sudah ada
     const loginData = await this.redisService.getOtp(loginIdentifier);
 
     if (!loginData) throw new BadRequestException('Sesi login tidak ditemukan. Silakan ulangi proses login.');
@@ -261,7 +262,6 @@ export class AuthService {
     loginData.resendCount += 1;
     loginData.lastSentAt = now;
 
-    // Memanfaatkan setter yang sudah ada
     await this.redisService.setOtp(loginIdentifier, loginData, 300);
 
     const htmlTemplate = generateOtpEmailTemplate(loginData.fullName, loginData.otpCode, true, 'LOGIN');
@@ -276,7 +276,7 @@ export class AuthService {
   }
 
   // =================================================================
-  // REFRESH TOKEN ROTATION (Silent Re-authentication)
+  // REFRESH TOKEN ROTATION
   // =================================================================
   async refreshTokens(dto: RefreshTokenDto) {
     try {
@@ -288,7 +288,6 @@ export class AuthService {
       }
 
       const userId = payload.sub;
-
       const activeSession = await this.redisService.getSession(userId);
 
       if (!activeSession) {
@@ -336,27 +335,22 @@ export class AuthService {
   // PRIVATE HELPER: STANDARDIZASI PEMBUATAN SESI & LOGGING
   // =================================================================
   private async finalizeLoginSession(user: any, deviceId: string, meta: { ipAddress: string; userAgent: string }) {
-    // 1. Otoritas Opsi B (Last-In Wins): Periksa Sesi Lama di Redis
     const oldSession = await this.redisService.getSession(user.id);
 
     if (oldSession) {
       this.logger.warn(`[Session Kicked] User ${user.email} login dari perangkat baru. Menendang sesi lama.`);
 
-      // Putus koneksi WebSocket lama jika terhubung
       if (oldSession.socketId) {
         this.notificationGateway.forceDisconnectClient(oldSession.socketId, 'concurrent_login');
       }
     }
 
-    // 2. Bangun Sesi Baru
     const sessionId = uuidv4();
     const tokens = await this.generateTokens(user.id, user.email, user.role, sessionId);
 
-    // Hash Refresh Token sebelum masuk Redis & Database
     const salt = await bcrypt.genSalt();
     const rtHash = await bcrypt.hash(tokens.refresh_token, salt);
 
-    // 3. Overwrite Redis (Atomik O(1))
     await this.redisService.setSession(user.id, {
       sessionId,
       deviceId,
@@ -364,10 +358,8 @@ export class AuthService {
       refreshTokenHash: rtHash,
     });
 
-    // 4. Sinkronisasi System of Record & Analitik Pertumbuhan (PostgreSQL)
     await this.prisma.$transaction([
       this.prisma.activeSession.deleteMany({ where: { userId: user.id } }),
-      // Mencatat sesi aktif (Live monitoring)
       this.prisma.activeSession.create({
         data: {
           sessionId,
@@ -378,7 +370,6 @@ export class AuthService {
           refreshTokenHash: rtHash,
         }
       }),
-      // [CORE LOGIC]: Menambahkan rekam jejak Login untuk analitik Engagement Investor
       this.prisma.userLoginHistory.create({
         data: {
           userId: user.id,
@@ -390,7 +381,6 @@ export class AuthService {
 
     const { passwordHash, ...userData } = user;
 
-    // 5. Return Payload JWT & Profil ke Frontend
     return {
       message: 'Verifikasi berhasil. Anda telah otomatis masuk.',
       access_token: tokens.access_token,
@@ -402,14 +392,12 @@ export class AuthService {
   private async generateTokens(userId: string, email: string, role: string, sessionId: string) {
     const secret = this.config.get<string>('JWT_SECRET');
 
-    // Access Token (Usia Pendek - Contoh: 15 Menit)
     const atPayload = { sub: userId, email, role, sessionId, type: 'ACCESS' };
     const accessToken = await this.jwt.signAsync(atPayload, {
       secret,
       expiresIn: '15m',
     });
 
-    // Refresh Token (Usia Panjang - Contoh: 30 Hari)
     const rtPayload = { sub: userId, sessionId, type: 'REFRESH' };
     const refreshToken = await this.jwt.signAsync(rtPayload, {
       secret,

@@ -12,6 +12,10 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { EditUserDto } from './dto/edit-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuditService } from '../audit/audit.service';
+import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
+
+// [FASE 2] Import gateway untuk implementasi Observer Pattern (Event-Driven)
+import { NotificationGateway } from '../notification/notification.gateway';
 
 @Injectable()
 export class UsersService {
@@ -21,6 +25,8 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly searchService: SearchService,
     private readonly auditService: AuditService,
+    // [FASE 2] Injeksi NotificationGateway untuk kapabilitas Publisher
+    private readonly notificationGateway: NotificationGateway,
   ) { }
 
   // =================================================================
@@ -79,23 +85,21 @@ export class UsersService {
       where.role = role;
     }
 
-    // [PHASE 2: ENHANCEMENT] Optimasi Trigram Fuzzy Search
     if (search && search.trim() !== '') {
       const searchStr = search.trim();
-      // Step 1: Tarik ID yang memiliki probabilitas kemiripan teks menggunakan GiST Index
-      // Menggunakan threshold SIMILARITY > 0.15 agar toleran terhadap typo minor
+
       const matchedRecords = await this.prisma.$queryRaw<{ id: string }[]>`
-        SELECT id FROM "User"
-        WHERE "fullName" % ${searchStr}
+        SELECT id FROM "users"
+        WHERE "full_name" % ${searchStr}
            OR "email" ILIKE ${'%' + searchStr + '%'}
            OR "nip" ILIKE ${'%' + searchStr + '%'}
-           OR SIMILARITY("fullName", ${searchStr}) > 0.15
-        ORDER BY SIMILARITY("fullName", ${searchStr}) DESC
+           OR "phone_number" ILIKE ${'%' + searchStr + '%'}
+           OR SIMILARITY("full_name", ${searchStr}) > 0.15
+        ORDER BY SIMILARITY("full_name", ${searchStr}) DESC
       `;
 
       const matchedIds = matchedRecords.map(r => r.id);
 
-      // Jika tidak ada yang match sama sekali, jangan buang resource untuk Step 2
       if (matchedIds.length === 0) {
         return {
           data: [],
@@ -103,17 +107,15 @@ export class UsersService {
         };
       }
 
-      // Filter array IDs untuk Step 2
       where.id = { in: matchedIds };
     }
 
-    // Step 2: Main Query dengan pagination & Relasional Include
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip,
         take: limit,
-        orderBy: search ? undefined : { createdAt: 'desc' }, // Jika search, pertahankan urutan kemiripan dari DB
+        orderBy: search ? undefined : { createdAt: 'desc' },
         include: {
           agency: {
             select: { name: true, code: true },
@@ -159,7 +161,9 @@ export class UsersService {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    const { password, dateOfBirth, agencyId, ...rest } = dto;
+    const { password, dateOfBirth, agencyId, phoneNumber, ...rest } = dto;
+
+    const cleanPhoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
 
     try {
       const newUser = await this.prisma.$transaction(async (tx) => {
@@ -167,6 +171,7 @@ export class UsersService {
           data: {
             ...rest,
             passwordHash: hashedPassword,
+            phoneNumber: cleanPhoneNumber,
             dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
             agencyId: agencyId || null,
             usage: {
@@ -197,7 +202,6 @@ export class UsersService {
 
       const { passwordHash, ...result } = newUser;
 
-      // Log keamananan untuk creation
       this.auditService.logAdminAction({
         adminId,
         action: 'CREATE_USER',
@@ -275,10 +279,23 @@ export class UsersService {
       if (!oldUser) throw new NotFoundException('User not found');
 
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
-      const { password, dateOfBirth, dependentCount, agencyId, agencyName, ...restData } = dto;
 
+      // [FASE 1] Dynamic Payload Mapping & Mencegah Silent Data Drop
+      // Variabel pasif seperti agencyName, companyName, atau goals TIDAK Boleh di-destructure di sini
+      // agar otomatis tertampung di dalam ...restData dan dikirim ke Prisma.
+      const {
+        password,
+        dateOfBirth,
+        dependentCount,
+        agencyId,
+        phoneNumber,
+        ...restData
+      } = dto;
+
+      // restData kini berisi payload yang murni dan tidak ada variabel yang terbuang
       const updatePayload: any = { ...restData };
 
+      // Penanganan khusus untuk field yang membutuhkan konversi tipe data
       if (dependentCount !== undefined) updatePayload.dependentCount = Number(dependentCount);
       if (dateOfBirth) updatePayload.dateOfBirth = new Date(dateOfBirth);
       if (password) {
@@ -287,6 +304,9 @@ export class UsersService {
       }
       if (agencyId !== undefined) {
         updatePayload.agencyId = agencyId === '' ? null : agencyId;
+      }
+      if (phoneNumber !== undefined) {
+        updatePayload.phoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
       }
 
       const updatedUser = await this.prisma.user.update({
@@ -304,8 +324,8 @@ export class UsersService {
 
       const { passwordHash, ...result } = updatedUser;
 
+      // Logika Audit Admin
       if (adminId) {
-        // [PHASE 2: ENHANCEMENT] Detailed Update Logging
         this.auditService.logAdminAction({
           adminId,
           action: 'UPDATE_USER',
@@ -317,6 +337,19 @@ export class UsersService {
             changes: dto,
           }
         }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
+      }
+
+      // [FASE 2] Event-Driven State Sync (Publisher)
+      // Catatan: Pastikan `server` di-ekspos secara publik (`public server: Server`) di notification.gateway.ts
+      try {
+        this.notificationGateway.server.to(userId).emit('USER_PROFILE_MUTATED', {
+          triggerBy: adminId ? 'ADMIN' : 'SELF',
+          timestamp: new Date().toISOString(),
+          userId: userId
+        });
+        this.logger.log(`Emitted USER_PROFILE_MUTATED to room ${userId}`);
+      } catch (socketErr: any) {
+        this.logger.warn(`Failed to emit socket sync event for user ${userId}: ${socketErr.message}`);
       }
 
       return result;
@@ -345,6 +378,7 @@ export class UsersService {
         isPro: isPro,
         location: user.address,
         goals: user.goals,
+        phoneNumber: user.phoneNumber,
       };
 
       await this.searchService.addDocuments('global_search', [searchPayload]);
