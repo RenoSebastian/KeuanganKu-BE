@@ -12,9 +12,10 @@ import { CreateUserDto } from './dto/create-user.dto';
 import { EditUserDto } from './dto/edit-user.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { AuditService } from '../audit/audit.service';
-
-// [NEW] PHASE 4: Import fungsi sanitizer murni
 import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
+
+// [FASE 2] Import gateway untuk implementasi Observer Pattern (Event-Driven)
+import { NotificationGateway } from '../notification/notification.gateway';
 
 @Injectable()
 export class UsersService {
@@ -24,6 +25,8 @@ export class UsersService {
     private readonly prisma: PrismaService,
     private readonly searchService: SearchService,
     private readonly auditService: AuditService,
+    // [FASE 2] Injeksi NotificationGateway untuk kapabilitas Publisher
+    private readonly notificationGateway: NotificationGateway,
   ) { }
 
   // =================================================================
@@ -82,12 +85,9 @@ export class UsersService {
       where.role = role;
     }
 
-    // [PHASE 2 & 4: ENHANCEMENT] Optimasi Trigram Fuzzy Search dengan pencarian Nomor HP
     if (search && search.trim() !== '') {
       const searchStr = search.trim();
 
-      // Step 1: Tarik ID yang memiliki probabilitas kemiripan teks menggunakan GiST Index
-      // Menggunakan nama tabel mapping asli "users" dan kolom mapping "phone_number"
       const matchedRecords = await this.prisma.$queryRaw<{ id: string }[]>`
         SELECT id FROM "users"
         WHERE "full_name" % ${searchStr}
@@ -100,7 +100,6 @@ export class UsersService {
 
       const matchedIds = matchedRecords.map(r => r.id);
 
-      // Jika tidak ada yang match sama sekali, jangan buang resource untuk Step 2
       if (matchedIds.length === 0) {
         return {
           data: [],
@@ -108,17 +107,15 @@ export class UsersService {
         };
       }
 
-      // Filter array IDs untuk Step 2
       where.id = { in: matchedIds };
     }
 
-    // Step 2: Main Query dengan pagination & Relasional Include
     const [users, total] = await Promise.all([
       this.prisma.user.findMany({
         where,
         skip,
         take: limit,
-        orderBy: search ? undefined : { createdAt: 'desc' }, // Jika search, pertahankan urutan kemiripan dari DB
+        orderBy: search ? undefined : { createdAt: 'desc' },
         include: {
           agency: {
             select: { name: true, code: true },
@@ -164,10 +161,8 @@ export class UsersService {
     const salt = await bcrypt.genSalt();
     const hashedPassword = await bcrypt.hash(dto.password, salt);
 
-    // Ekstraksi phoneNumber untuk disanitasi
     const { password, dateOfBirth, agencyId, phoneNumber, ...rest } = dto;
 
-    // [NEW] Lapis keamanan kedua (Defense in Depth) untuk sanitasi WA Number
     const cleanPhoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
 
     try {
@@ -176,7 +171,7 @@ export class UsersService {
           data: {
             ...rest,
             passwordHash: hashedPassword,
-            phoneNumber: cleanPhoneNumber, // Injeksi nomor yang sudah bersih
+            phoneNumber: cleanPhoneNumber,
             dateOfBirth: dateOfBirth ? new Date(dateOfBirth) : null,
             agencyId: agencyId || null,
             usage: {
@@ -207,7 +202,6 @@ export class UsersService {
 
       const { passwordHash, ...result } = newUser;
 
-      // Log keamananan untuk creation
       this.auditService.logAdminAction({
         adminId,
         action: 'CREATE_USER',
@@ -286,11 +280,22 @@ export class UsersService {
 
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
 
-      // Ekstraksi phoneNumber dari DTO
-      const { password, dateOfBirth, dependentCount, agencyId, agencyName, phoneNumber, ...restData } = dto;
+      // [FASE 1] Dynamic Payload Mapping & Mencegah Silent Data Drop
+      // Variabel pasif seperti agencyName, companyName, atau goals TIDAK Boleh di-destructure di sini
+      // agar otomatis tertampung di dalam ...restData dan dikirim ke Prisma.
+      const {
+        password,
+        dateOfBirth,
+        dependentCount,
+        agencyId,
+        phoneNumber,
+        ...restData
+      } = dto;
 
+      // restData kini berisi payload yang murni dan tidak ada variabel yang terbuang
       const updatePayload: any = { ...restData };
 
+      // Penanganan khusus untuk field yang membutuhkan konversi tipe data
       if (dependentCount !== undefined) updatePayload.dependentCount = Number(dependentCount);
       if (dateOfBirth) updatePayload.dateOfBirth = new Date(dateOfBirth);
       if (password) {
@@ -300,11 +305,7 @@ export class UsersService {
       if (agencyId !== undefined) {
         updatePayload.agencyId = agencyId === '' ? null : agencyId;
       }
-
-      // [NEW] Logika Sanitasi dan Update PhoneNumber
       if (phoneNumber !== undefined) {
-        // Jika frontend/DTO meloloskan string kosong, kita simpan null.
-        // Jika tidak, kita pastikan data dilewatkan ke sanitizer sebelum masuk Prisma
         updatePayload.phoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
       }
 
@@ -323,6 +324,7 @@ export class UsersService {
 
       const { passwordHash, ...result } = updatedUser;
 
+      // Logika Audit Admin
       if (adminId) {
         this.auditService.logAdminAction({
           adminId,
@@ -335,6 +337,19 @@ export class UsersService {
             changes: dto,
           }
         }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
+      }
+
+      // [FASE 2] Event-Driven State Sync (Publisher)
+      // Catatan: Pastikan `server` di-ekspos secara publik (`public server: Server`) di notification.gateway.ts
+      try {
+        this.notificationGateway.server.to(userId).emit('USER_PROFILE_MUTATED', {
+          triggerBy: adminId ? 'ADMIN' : 'SELF',
+          timestamp: new Date().toISOString(),
+          userId: userId
+        });
+        this.logger.log(`Emitted USER_PROFILE_MUTATED to room ${userId}`);
+      } catch (socketErr: any) {
+        this.logger.warn(`Failed to emit socket sync event for user ${userId}: ${socketErr.message}`);
       }
 
       return result;
@@ -363,7 +378,6 @@ export class UsersService {
         isPro: isPro,
         location: user.address,
         goals: user.goals,
-        // [NEW] Menambahkan nomor HP ke dokumen Meilisearch agar lebih kaya
         phoneNumber: user.phoneNumber,
       };
 
