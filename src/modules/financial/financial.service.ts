@@ -70,8 +70,18 @@ export class FinancialService {
     return this.checkupService.getMyBudgets(userId);
   }
 
-  calculateCheckupSimulation(user: any, dto: CreateCheckupSimulationDto) {
-    return this.checkupService.calculateCheckupSimulation(user, dto);
+  // [FIX] Injeksi Contract MGC Token untuk arsitektur Decoupled Checkup
+  async calculateCheckupSimulation(user: any, dto: CreateCheckupSimulationDto) {
+    const result = await this.checkupService.calculateCheckupSimulation(user, dto);
+
+    // Generate Magic Token dari payload mentah
+    const mgcToken = this.tokenService.generateMgcToken(dto);
+
+    // Return hasil kalkulasi dengan token di root level untuk memenuhi ekspektasi Frontend
+    return {
+      ...result,
+      mgcToken
+    };
   }
 
   downloadCheckupPdfById(simulationId: string, user: any) {
@@ -138,8 +148,18 @@ export class FinancialService {
     return this.educationService.deleteEducationPlan(userId, planId);
   }
 
-  simulateAgentEducation(user: any, dto: CreateEducationSimulationDto) {
-    return this.educationService.simulateAgentEducation(user, dto);
+  // [FIX] Injeksi Contract MGC Token untuk arsitektur Decoupled Education (jika diterapkan)
+  async simulateAgentEducation(user: any, dto: CreateEducationSimulationDto) {
+    const result = await this.educationService.simulateAgentEducation(user, dto);
+
+    // Generate Magic Token dari payload mentah
+    const mgcToken = this.tokenService.generateMgcToken(dto);
+
+    // Return hasil kalkulasi dengan token di root level
+    return {
+      ...result,
+      mgcToken
+    };
   }
 
   async downloadEducationPdfById(simulationId: string, user: any) {

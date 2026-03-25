@@ -22,6 +22,7 @@ import { FinancialService } from './financial.service';
 import { PdfGeneratorService } from './services/pdf-generator.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import { SimulationTokenService } from './services/core/simulation-token.service';
 
 // DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -60,6 +61,7 @@ export class FinancialController {
     private readonly pdfGeneratorService: PdfGeneratorService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly simulationTokenService: SimulationTokenService,
   ) { }
 
   // ===========================================================================
@@ -573,17 +575,23 @@ export class FinancialController {
   ) {
     const result = await this.financialService.calculateCheckupSimulation(user, dto);
 
+    // [FIX] Injeksi Magic Token ke root object sesuai dengan interface di Frontend
+    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
+
     await this.auditService.logActivity({
       userId: user.id,
       action: 'CALCULATE_CHECKUP',
       entity: 'SimulationLog',
-      entityId: result.meta?.simulationId || 'UNKNOWN', // [FIXED] Penyesuaian akses ke properti meta
+      entityId: result.meta?.simulationId || 'UNKNOWN',
       details: `Agent ${user.fullName} calculated checkup simulation for client ${dto.client.name}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    return result;
+    return {
+      ...result,
+      mgcToken
+    };
   }
 
   @Get('simulation/checkup/:id/pdf')
@@ -629,19 +637,23 @@ export class FinancialController {
   ) {
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
+    // [FIX] Injeksi Magic Token agar behavior seragam dengan endpoint Decoupled lainnya
+    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
+
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
-      // Jika Education juga menggunakan pattern 'meta', maka ubah ke result.meta?.simulationId
-      // Jika tidak, tetap biarkan result.simulationId
       entityId: result.simulationId || 'UNKNOWN',
       details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    return result;
+    return {
+      ...result,
+      mgcToken
+    };
   }
 
   @Get('simulation/education/:id/pdf')

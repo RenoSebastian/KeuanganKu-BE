@@ -311,8 +311,7 @@ export class CheckupCalculatorService {
                     },
                 });
 
-                // [STEP 1 FIX] Generate MGC Token (Backup Data)
-                // Kita menghasilkan token secara asinkron sebelum me-return JSON
+                // 4. Generate MGC Token dengan Konteks Eksplisit
                 const mgcToken = this.tokenService.generateMgcToken({
                     meta: {
                         version: '1.0',
@@ -328,9 +327,10 @@ export class CheckupCalculatorService {
 
                 // ====================================================================
                 // [STEP 5] HARMONISASI PAYLOAD RESPONSE
+                // Penempatan mgcToken pada root level untuk diproses UI Component
                 // ====================================================================
                 return {
-                    mgcToken: mgcToken, // Berhasil diisi, bukan lagi string kosong
+                    mgcToken: mgcToken,
                     filename: `Checkup_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.mgc`,
                     data: {
                         client: dto.client,
