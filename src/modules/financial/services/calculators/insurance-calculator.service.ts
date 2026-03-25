@@ -68,7 +68,7 @@ export class InsuranceCalculatorService {
      */
     async simulateAgentInsurance(user: User, dto: CreateInsuranceSimulationDto) {
         // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'INSURANCE');
 
         try {
             // 2. Kalkulasi Core (Asuransi biasanya tidak pakai market rate dinamis kompleks, 

@@ -138,7 +138,7 @@ export class EducationCalculatorService {
      */
     async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
         // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'EDUCATION');
 
         try {
             // 2. Kalkulasi Aggregat (Grand Total)

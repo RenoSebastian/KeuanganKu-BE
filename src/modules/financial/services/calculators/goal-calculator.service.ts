@@ -100,7 +100,7 @@ export class GoalCalculatorService {
      */
     async simulateAgentGoal(user: User, dto: CreateGoalSimulationDto) {
         // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'GOALS');
 
         try {
             // 2. Validasi Target Tanggal (Cegah error math)

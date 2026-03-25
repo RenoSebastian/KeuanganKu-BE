@@ -70,7 +70,7 @@ export class PensionCalculatorService {
      */
     async simulateAgentPension(user: User, dto: CreatePensionSimulationDto) {
         // 1. Validasi Quota & Idempotency (via Core Service)
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'PENSION');
 
         try {
             // 2. Ambil Dynamic Rates

@@ -52,7 +52,7 @@ export class RiskProfileCalculatorService {
         dto: CreateRiskProfileSimulationDto,
     ) {
         // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'RISK_PROFILE');
 
         try {
             // 2. Kalkulasi

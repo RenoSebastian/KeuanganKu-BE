@@ -258,11 +258,11 @@ export class CheckupCalculatorService {
     // ===========================================================================
 
     async calculateCheckupSimulation(user: User, dto: CreateCheckupSimulationDto) {
-        // [STEP 2] Guard clause helper untuk proteksi level Domain
+        // [STEP 2] Guard clause helper
         const val = (n: any) => Number(n) || 0;
 
         try {
-            // 1. Kalkulasi Matematika murni (CPU Bound) - Di luar transaksi agar lebih cepat
+            // 1. Kalkulasi Matematika murni (CPU Bound)
             const calculationInput: any = {
                 ...dto,
                 userProfile: dto.client,
@@ -275,19 +275,19 @@ export class CheckupCalculatorService {
             if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
             else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
 
-            // Variabel aman yang sudah melewati guard clause
             const safeTotalIncome = (val(dto.incomeFixed) + val(dto.incomeVariable)) * 12;
             const safeSurplusDeficit = val(analysisResult.surplusDeficit) * 12;
             const safeHealthScore = val(analysisResult.score);
 
             // ====================================================================
-            // [STEP 3] ATOMIC TRANSACTION START: Menyatukan Quota & Persistence
+            // [STEP 3] ATOMIC TRANSACTION START
             // ====================================================================
             return await this.prisma.$transaction(async (tx) => {
-                // 2. Check & Deduct Quota dengan memberikan 'CHECKUP' dan txContext
+
+                // 2. Check & Deduct Quota
                 await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP', tx);
 
-                // 3. Log Activity (Disimpan menggunakan transaksi 'tx' yang sama)
+                // 3. Log Activity
                 const simulationLog = await tx.simulationLog.create({
                     data: {
                         agentId: user.id,
@@ -311,14 +311,27 @@ export class CheckupCalculatorService {
                     },
                 });
 
+                // [STEP 1 FIX] Generate MGC Token (Backup Data)
+                // Kita menghasilkan token secara asinkron sebelum me-return JSON
+                const mgcToken = this.tokenService.generateMgcToken({
+                    meta: {
+                        version: '1.0',
+                        generatedAt: new Date().toISOString(),
+                        agentId: user.id,
+                        simulationId: simulationLog.id,
+                    },
+                    client: dto.client,
+                    spouse: dto.spouse,
+                    financial: dto,
+                    result: analysisResult,
+                });
+
                 // ====================================================================
                 // [STEP 5] HARMONISASI PAYLOAD RESPONSE
-                // Menyesuaikan struktur dengan interface CheckupSimulationResponse di FE
                 // ====================================================================
                 return {
-                    // BE Decoupled tidak menghasilkan file di titik ini
-                    mgcToken: "",
-                    filename: `Checkup_Simulation_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+                    mgcToken: mgcToken, // Berhasil diisi, bukan lagi string kosong
+                    filename: `Checkup_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.mgc`,
                     data: {
                         client: dto.client,
                         spouse: dto.spouse,
@@ -338,7 +351,6 @@ export class CheckupCalculatorService {
                     }
                 };
             });
-            // --- ATOMIC TRANSACTION END ---
 
         } catch (error: any) {
             this.logger.error(
@@ -387,12 +399,8 @@ export class CheckupCalculatorService {
     }
 
     async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
-        // [FIX TS ERROR] Tambahkan parameter ketiga 'BUDGETING' untuk menyesuaikan kontrak fungsi
-        // Note: Tidak di-wrap dalam transaction penuh karena PDF generation sangat berat
-        // QuotaService akan membuat transaksinya sendiri (fallback) jika tx tidak dikirim.
         await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'BUDGETING');
 
-        // [STEP 2] Guard clause
         const val = (n: any) => Number(n) || 0;
 
         try {
