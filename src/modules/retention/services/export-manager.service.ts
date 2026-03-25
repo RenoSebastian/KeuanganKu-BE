@@ -2,7 +2,7 @@ import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { RetentionStrategyFactory } from '../strategies/retention-strategy.factory';
 import { ExportQueryDto, RetentionEntityType } from '../dto/export-query.dto';
-import { Response } from 'express'; // [FIX] Import Response type
+import { Response } from 'express';
 import { createHmac } from 'crypto';
 
 @Injectable()
@@ -11,6 +11,9 @@ export class ExportManagerService {
 
     // [SECURE] Harus sama persis dengan yang ada di RetentionService agar validasi token sukses
     private readonly HMAC_SECRET = process.env.RETENTION_SECRET || 'DO_NOT_USE_THIS_IN_PROD_SUPER_SECRET_KEY_99';
+
+    // [ARCHITECTURE] Konstanta Signature untuk validasi file di Client-Side (Fase 3: Smart File Recognition)
+    private readonly MGC_SIGNATURE = 'MGC_SECURE_V1';
 
     constructor(
         private readonly prisma: PrismaService,
@@ -29,7 +32,6 @@ export class ExportManagerService {
         return map[entityType];
     }
 
-    // [FIX] Method renamed to match Controller call & Updated signature to accept Response
     async exportDataStream(query: ExportQueryDto, res: Response): Promise<void> {
         const tableName = this.getTableName(query.entityType);
 
@@ -40,29 +42,30 @@ export class ExportManagerService {
         this.logger.log(`Stream export initiated for ${query.entityType} (Table: ${tableName})...`);
 
         // 1. Fetch Data
-        // Note: Untuk dataset sangat besar, idealnya menggunakan cursor-based streaming.
-        // Namun untuk stabilitas queryRaw, kita fetch dulu lalu stream write.
         const data = await this.prisma.$queryRawUnsafe(
             `SELECT * FROM "${tableName}" WHERE created_at <= $1`,
             new Date(query.cutoffDate),
         );
 
         if (!Array.isArray(data) || data.length === 0) {
-            // Throw sebelum header dikirim aman
             throw new BadRequestException('No data found to export for the given criteria.');
         }
 
-        // 2. Prepare Response Headers (Trigger Download di Browser)
-        const filename = `${query.entityType}_${query.cutoffDate}_${Date.now()}.json`;
-        res.setHeader('Content-Type', 'application/json');
+        // 2. Prepare Response Headers (Fase 1: Backend Optimization)
+        // Mengubah ekstensi menjadi .mgc dan memaksakan oktet-stream untuk meminimalisir OS content-sniffing
+        const filename = `${query.entityType}_${query.cutoffDate}_${Date.now()}.mgc`;
+        res.setHeader('Content-Type', 'application/octet-stream');
         res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
-        // 3. Generate Security Token (Sync with RetentionService Logic)
+        // [CRITICAL] Mengekspos header agar Frontend Interceptor bisa membaca metadata nama file asli
+        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
+
+        // 3. Generate Security Token
         const pruneToken = this.generatePruneToken(query.entityType, query.cutoffDate);
 
         // 4. Construct & Stream Payload
-        // Kita membungkus data dalam struktur JSON yang valid
         const exportStructure = {
+            _mgc_signature: this.MGC_SIGNATURE, // Disuntikkan di baris pertama untuk Pre-flight Stream Validation
             metadata: {
                 entity: query.entityType,
                 table: tableName,
@@ -77,18 +80,17 @@ export class ExportManagerService {
             data: data,
         };
 
-        // Write directly to HTTP Response stream
-        res.write(JSON.stringify(exportStructure, null, 2));
+        // Mengonversi payload menjadi Buffer stream biner untuk memastikan transfer data yang presisi
+        const bufferPayload = Buffer.from(JSON.stringify(exportStructure, null, 2), 'utf-8');
+        res.write(bufferPayload);
         res.end();
     }
 
-    // [SECURE] Token Generation Logic (Must Match RetentionService)
     private generatePruneToken(entityType: string, cutoffDate: string): string {
         const payload = JSON.stringify({ entityType, cutoffDate });
         const signature = createHmac('sha256', this.HMAC_SECRET)
             .update(payload)
             .digest('hex');
-        // Return format: Base64Payload.Signature
         return `${Buffer.from(payload).toString('base64')}.${signature}`;
     }
 }

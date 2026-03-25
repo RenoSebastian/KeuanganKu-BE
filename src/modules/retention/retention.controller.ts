@@ -9,7 +9,7 @@ import {
     Body,
 } from '@nestjs/common';
 import express from 'express';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiProduces } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiProduces, ApiHeader } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 
 // Services
@@ -59,21 +59,22 @@ export class RetentionController {
     @Get('export')
     @Roles(Role.ADMIN)
     @ApiOperation({
-        summary: 'Safe Export Archive Data (Streaming)',
+        summary: 'Safe Export Archive Data (Binary/MGC Stream)',
         description: `
-      Meng-export data kandidat penghapusan ke format JSON secara streaming (Memory Safe).
+      Meng-export data kandidat penghapusan ke format kustom .mgc (Magic Secure) secara streaming (Memory Safe).
       
       Mekanisme:
       1. Validasi Input (EntityType & Cutoff Date).
       2. Identifikasi ID kandidat menggunakan 'Smart Deletion Logic'.
-      3. Streaming data per batch (1000 baris) langsung ke HTTP Response.
+      3. Injeksi 'Magic Signature' pada baris pertama untuk validasi klien (Bypass OS Sniffing).
+      4. Streaming data per batch langsung ke HTTP Response sebagai application/octet-stream.
       
       Note: Endpoint ini WAJIB dipanggil dan file tersimpan sebelum melakukan pruning manual.
     `,
     })
     @ApiResponse({
         status: HttpStatus.OK,
-        description: 'Stream file JSON dimulai. Browser akan otomatis memunculkan dialog download.',
+        description: 'Stream file .mgc dimulai. Frontend memproses buffer memori (Blob) untuk mencegah intervensi PWA Wrapper Android.',
     })
     @ApiResponse({
         status: HttpStatus.NOT_FOUND,
@@ -83,7 +84,13 @@ export class RetentionController {
         status: HttpStatus.BAD_REQUEST,
         description: 'Parameter EntityType tidak valid atau Format Tanggal salah.',
     })
-    @ApiProduces('application/json')
+    // [ARCHITECTURE] Ekspos header untuk OpenAPI/Swagger Documentations
+    @ApiHeader({
+        name: 'Access-Control-Expose-Headers',
+        description: 'Mengekspos Content-Disposition agar PWA client dapat membaca nama asli file (.mgc)',
+    })
+    // [FIX] Mengubah deklarasi response type menjadi octet-stream sesuai standar arsitektur fail-safe OS
+    @ApiProduces('application/octet-stream')
     async exportData(
         @Query() query: ExportQueryDto,
         @Res() res: express.Response,
@@ -91,6 +98,7 @@ export class RetentionController {
         // [ARCHITECTURAL NOTE]
         // Menggunakan @Res() untuk mengambil alih Stream Response.
         // Service akan menulis chunk data langsung ke client untuk efisiensi memori (Penting untuk Enterprise).
+        // Delegasi injeksi header Content-Type & Content-Disposition dilakukan penuh di layer Service.
         await this.exportManagerService.exportDataStream(query, res);
     }
 
