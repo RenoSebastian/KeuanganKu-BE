@@ -258,11 +258,11 @@ export class CheckupCalculatorService {
     // ===========================================================================
 
     async calculateCheckupSimulation(user: User, dto: CreateCheckupSimulationDto) {
-        // 1. Check Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        // [STEP 2] Guard clause helper untuk proteksi level Domain
+        const val = (n: any) => Number(n) || 0;
 
         try {
-            // 2. Kalkulasi
+            // 1. Kalkulasi Matematika murni (CPU Bound) - Di luar transaksi agar lebih cepat
             const calculationInput: any = {
                 ...dto,
                 userProfile: dto.client,
@@ -275,48 +275,70 @@ export class CheckupCalculatorService {
             if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
             else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
 
-            // 3. Log Activity
-            const simulationLog = await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.client.name,
-                    clientAge: clientAge,
-                    clientCity: dto.client.city,
-                    clientJob: dto.client.occupation,
-                    totalIncome: (dto.incomeFixed + dto.incomeVariable) * 12,
-                    calculatedSurplus: analysisResult.surplusDeficit * 12,
-                    healthScore: analysisResult.score,
-                    status: dbStatus,
-                    financialRatios: JSON.parse(
-                        JSON.stringify(analysisResult.ratios),
-                    ) as Prisma.InputJsonValue,
-                    moduleType: 'CHECKUP',
-                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(analysisResult),
-                    ) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
-            });
+            // Variabel aman yang sudah melewati guard clause
+            const safeTotalIncome = (val(dto.incomeFixed) + val(dto.incomeVariable)) * 12;
+            const safeSurplusDeficit = val(analysisResult.surplusDeficit) * 12;
+            const safeHealthScore = val(analysisResult.score);
 
-            // 4. Return Structured JSON without PDF
-            return {
-                simulationId: simulationLog.id,
-                status: analysisResult.globalStatus,
-                healthScore: analysisResult.score,
-                financialRatios: analysisResult.ratios,
-                calculationDetails: {
-                    totalIncome: (dto.incomeFixed + dto.incomeVariable) * 12,
-                    calculatedSurplus: analysisResult.surplusDeficit * 12,
-                    netWorth: analysisResult.netWorth
-                },
-                // Raw payload to hydrate Frontend Context instantly
-                chartData: {
-                     client: dto.client,
-                     financial: dto,
-                     result: analysisResult
-                }
-            };
+            // ====================================================================
+            // [STEP 3] ATOMIC TRANSACTION START: Menyatukan Quota & Persistence
+            // ====================================================================
+            return await this.prisma.$transaction(async (tx) => {
+                // 2. Check & Deduct Quota dengan memberikan 'CHECKUP' dan txContext
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP', tx);
+
+                // 3. Log Activity (Disimpan menggunakan transaksi 'tx' yang sama)
+                const simulationLog = await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.client.name,
+                        clientAge: clientAge,
+                        clientCity: dto.client.city,
+                        clientJob: dto.client.occupation,
+                        totalIncome: safeTotalIncome,
+                        calculatedSurplus: safeSurplusDeficit,
+                        healthScore: safeHealthScore,
+                        status: dbStatus,
+                        financialRatios: JSON.parse(
+                            JSON.stringify(analysisResult.ratios),
+                        ) as Prisma.InputJsonValue,
+                        moduleType: 'CHECKUP',
+                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(
+                            JSON.stringify(analysisResult),
+                        ) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
+
+                // ====================================================================
+                // [STEP 5] HARMONISASI PAYLOAD RESPONSE
+                // Menyesuaikan struktur dengan interface CheckupSimulationResponse di FE
+                // ====================================================================
+                return {
+                    // BE Decoupled tidak menghasilkan file di titik ini
+                    mgcToken: "",
+                    filename: `Checkup_Simulation_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
+                    data: {
+                        client: dto.client,
+                        spouse: dto.spouse,
+                        financial: dto,
+                        result: {
+                            score: safeHealthScore,
+                            status: analysisResult.globalStatus,
+                            globalStatus: analysisResult.globalStatus,
+                            netWorth: val(analysisResult.netWorth),
+                            surplusDeficit: val(analysisResult.surplusDeficit),
+                            ratios: analysisResult.ratios,
+                            generatedAt: analysisResult.generatedAt
+                        }
+                    },
+                    meta: {
+                        simulationId: simulationLog.id,
+                    }
+                };
+            });
+            // --- ATOMIC TRANSACTION END ---
 
         } catch (error: any) {
             this.logger.error(
@@ -365,14 +387,19 @@ export class CheckupCalculatorService {
     }
 
     async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
-        // 1. Check Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId);
+        // [FIX TS ERROR] Tambahkan parameter ketiga 'BUDGETING' untuk menyesuaikan kontrak fungsi
+        // Note: Tidak di-wrap dalam transaction penuh karena PDF generation sangat berat
+        // QuotaService akan membuat transaksinya sendiri (fallback) jika tx tidak dikirim.
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'BUDGETING');
+
+        // [STEP 2] Guard clause
+        const val = (n: any) => Number(n) || 0;
 
         try {
             // 2. Kalkulasi
             const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
-                dto.fixedIncome,
-                dto.variableIncome,
+                val(dto.fixedIncome),
+                val(dto.variableIncome),
             );
 
             const clientAge = this.calculateAge(dto.clientDob);
@@ -385,8 +412,8 @@ export class CheckupCalculatorService {
                     clientAge: clientAge,
                     clientCity: dto.clientCity,
                     clientJob: dto.clientJob,
-                    totalIncome: calculationResult.meta.totalIncome,
-                    calculatedSurplus: calculationResult.analysis.totalRecommendedSavings,
+                    totalIncome: val(calculationResult.meta.totalIncome),
+                    calculatedSurplus: val(calculationResult.analysis.totalRecommendedSavings),
                     healthScore: 100,
                     status: HealthStatus.SEHAT,
                     financialRatios: JSON.parse(
@@ -423,8 +450,8 @@ export class CheckupCalculatorService {
                     phone: dto.clientPhone,
                 },
                 financial: {
-                    fixedIncome: dto.fixedIncome,
-                    variableIncome: dto.variableIncome,
+                    fixedIncome: val(dto.fixedIncome),
+                    variableIncome: val(dto.variableIncome),
                 },
                 result: calculationResult,
             });

@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common';
 import * as express from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler'; // [NEW] Import Throttle decorator
+import { Throttle } from '@nestjs/throttler';
 
 // Services
 import { FinancialService } from './financial.service';
@@ -92,7 +92,7 @@ export class FinancialController {
 
   @Get('checkup/pdf/:id')
   @ApiOperation({ summary: 'Download PDF Report (Server-Side Generated)' })
-  @Throttle({ default: { limit: 10, ttl: 60000 } }) // Limit download PDF
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadCheckupPdf(
     @Param('id') id: string,
     @GetUser('id') userId: string,
@@ -218,7 +218,7 @@ export class FinancialController {
 
   @Post('goals/simulate')
   @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (Stateless)' })
-  @Throttle({ default: { limit: 20, ttl: 60000 } }) // Lebih longgar karena ringan
+  @Throttle({ default: { limit: 20, ttl: 60000 } })
   simulateGoal(@GetUser('id') userId: string, @Body() dto: SimulateGoalDto) {
     return this.financialService.simulateGoal(userId, dto);
   }
@@ -344,7 +344,7 @@ export class FinancialController {
 
   @Post('simulation/risk-profile-pdf')
   @ApiOperation({ summary: 'Simulasi Risk Profile & Download PDF Langsung' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } }) // Berat (PDF Gen)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createRiskProfileSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateRiskProfileSimulationDto,
@@ -442,7 +442,7 @@ export class FinancialController {
 
   @Post('simulation/decode')
   @ApiOperation({ summary: 'Decode Token Simulasi (.mgc)' })
-  @Throttle({ default: { limit: 50, ttl: 60000 } }) // Ringan (Crypto only)
+  @Throttle({ default: { limit: 50, ttl: 60000 } })
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
     await this.auditService.logActivity({
       userId,
@@ -577,7 +577,7 @@ export class FinancialController {
       userId: user.id,
       action: 'CALCULATE_CHECKUP',
       entity: 'SimulationLog',
-      entityId: result.simulationId,
+      entityId: result.meta?.simulationId || 'UNKNOWN', // [FIXED] Penyesuaian akses ke properti meta
       details: `Agent ${user.fullName} calculated checkup simulation for client ${dto.client.name}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
@@ -633,7 +633,9 @@ export class FinancialController {
       userId: user.id,
       action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
-      entityId: result.simulationId,
+      // Jika Education juga menggunakan pattern 'meta', maka ubah ke result.meta?.simulationId
+      // Jika tidak, tetap biarkan result.simulationId
+      entityId: result.simulationId || 'UNKNOWN',
       details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
@@ -666,7 +668,7 @@ export class FinancialController {
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Education_Plan_${id}.pdf"`,
-      'Content-Length': (pdfBuffer as Buffer).length, // [FIXED] Force cast to Buffer for safety
+      'Content-Length': (pdfBuffer as Buffer).length,
     });
 
     res.end(pdfBuffer);

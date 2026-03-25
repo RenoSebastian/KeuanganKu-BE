@@ -5,7 +5,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../../../prisma/prisma.service';
 import { NotificationService } from '../../../notification/notification.service';
-import { NotificationType, NotificationCategory } from '@prisma/client';
+import { NotificationType, NotificationCategory, Prisma } from '@prisma/client';
 
 @Injectable()
 export class FinancialQuotaService {
@@ -18,14 +18,20 @@ export class FinancialQuotaService {
 
     /**
      * Core Logic: Validasi Akses & Potong Kuota
-     * 1. Cek Subscription (PRO = Bypass).
-     * 2. Cek Idempotency/Session (Revisi = Gratis).
-     * 3. Cek Token (Free User = Bayar 1 Token).
-     * 4. Kirim Notifikasi jika Token Menipis.
+     * [UPDATED - Step 3 & 4] Mendukung Transaction Propagation (txContext) dan Module Type Idempotency.
      */
-    async validateAndDeductQuota(userId: string, sessionId: string): Promise<boolean> {
+    async validateAndDeductQuota(
+        userId: string,
+        sessionId: string,
+        moduleType: string, // Step 4: Pencegahan eksploitasi token antar modul
+        txContext?: Prisma.TransactionClient // Step 3: Menerima konteks transaksi dari luar
+    ): Promise<boolean> {
+
+        // Gunakan transaksi bawaan jika dikirim, atau gunakan instance prisma utama
+        const db = txContext || this.prisma;
+
         // 1. Cek Status PRO (Unlimited Pass)
-        const subscription = await this.prisma.userSubscription.findUnique({
+        const subscription = await db.userSubscription.findUnique({
             where: { userId },
         });
 
@@ -34,20 +40,22 @@ export class FinancialQuotaService {
         }
 
         // 2. Cek Riwayat Session (Idempotency Check - Revisi Gratis)
-        // Kita cari apakah user ini sudah pernah melakukan simulasi dengan Session ID yang sama
-        const existingSession = await this.prisma.simulationLog.findFirst({
+        // [FIXED] Menambahkan moduleType agar session Checkup tidak bisa dipakai untuk Budgeting
+        const existingSession = await db.simulationLog.findFirst({
             where: {
                 agentId: userId,
                 sessionId: sessionId,
+                moduleType: moduleType,
             },
         });
 
         if (existingSession) {
-            return true; // Revisi Gratis (Sudah pernah bayar untuk sesi ini)
+            return true; // Revisi Gratis (Sudah pernah bayar untuk sesi modul ini)
         }
 
-        // 3. Logic Token untuk User FREE (Atomic Transaction)
-        return this.prisma.$transaction(async (tx) => {
+        // 3. Logic Token untuk User FREE
+        // Fungsi helper untuk mengeksekusi logika kuota (agar bisa dipakai dengan/tanpa txContext luar)
+        const executeTokenDeduction = async (tx: Prisma.TransactionClient) => {
             let usage = await tx.userUsage.findUnique({
                 where: { userId },
             });
@@ -74,6 +82,18 @@ export class FinancialQuotaService {
                 },
             });
 
+            // [STEP 4: FIXED] Catat transaksi ini ke Buku Besar (Ledger) untuk Akuntansi & Audit
+            await tx.userQuotaLedger.create({
+                data: {
+                    userId,
+                    amount: -1,
+                    type: 'USAGE_SIMULATION',
+                    referenceId: sessionId,
+                    balanceAfter: updatedUsage.simulationQuota,
+                    description: `Pemotongan kuota untuk simulasi modul ${moduleType}`,
+                }
+            });
+
             // 4. Trigger Notifikasi jika kuota menipis (Sisa 1)
             if (updatedUsage.simulationQuota === 1) {
                 // Fire-and-forget notification agar tidak memblokir response
@@ -82,8 +102,7 @@ export class FinancialQuotaService {
                         .createAndSend({
                             userId,
                             title: 'Kuota Hampir Habis ⚠️',
-                            message:
-                                'Perhatian! Kuota simulasi gratis Anda tinggal 1 token lagi. Segera upgrade ke PRO untuk layanan tanpa batas.',
+                            message: 'Perhatian! Kuota simulasi gratis Anda tinggal 1 token lagi. Segera upgrade ke PRO untuk layanan tanpa batas.',
                             type: NotificationType.WARNING,
                             category: NotificationCategory.QUOTA,
                         })
@@ -93,7 +112,16 @@ export class FinancialQuotaService {
                 });
             }
 
-            return true; // Sukses potong kuota
-        });
+            return true;
+        };
+
+        // Delegasi Eksekusi
+        if (txContext) {
+            // Jika sudah berada dalam transaksi gabungan (dari CalculatorService), jalankan langsung
+            return executeTokenDeduction(txContext);
+        } else {
+            // Jika dipanggil secara terisolasi, buat transaksi baru (Fallback)
+            return this.prisma.$transaction(executeTokenDeduction);
+        }
     }
 }

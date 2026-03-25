@@ -182,12 +182,12 @@ model User {
 
   agency Agency? @relation(fields: [agencyId], references: [id])
 
-  budgetPlans     BudgetPlan[]
-  financialChecks FinancialCheckup[]
-  eduPlans        EducationPlan[]
-  pensionPlans    PensionPlan[]
-  insurancePlans  InsurancePlan[]
-  goalPlans       GoalPlan[]
+  budgetPlans      BudgetPlan[]
+  financialChecks  FinancialCheckup[]
+  eduPlans         EducationPlan[]
+  pensionPlans     PensionPlan[]
+  insurancePlans   InsurancePlan[]
+  goalPlans        GoalPlan[]
 
   educationProgress UserEducationProgress[]
 
@@ -291,7 +291,9 @@ model SubscriptionPlan {
   name           String
   description    String?  @db.Text
   durationMonths Int
-  price          Decimal  @db.Decimal(15, 2)
+  price          Decimal  @db.Decimal(15, 2) // Net Price (Harga Akhir)
+  originalPrice  Decimal? @map("original_price") @db.Decimal(15, 2) // [NEW] Harga coret sebelum diskon
+  discountNote   String?  @map("discount_note") @db.VarChar(255) // [NEW] Catatan hemat. Ex: "Hemat 150.000"
   bonusQuota     Int      @default(0) @map("bonus_quota") // Kuota gratis saat beli paket
   isActive       Boolean  @default(true) @map("is_active")
   createdAt      DateTime @default(now()) @map("created_at")
@@ -578,17 +580,17 @@ model FinancialCheckup {
 }
 
 model EducationPlan {
-  id            String           @id @default(uuid())
-  userId        String           @map("user_id")
-  childName     String           @map("child_name")
-  childDob      DateTime         @map("child_dob")
-  inflationRate Decimal          @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal          @default(12.0) @map("return_rate") @db.Decimal(5, 2)
-  method        EducationMethod  @default(GEOMETRIC)
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
-  user          User             @relation(fields: [userId], references: [id])
-  stages        EducationStage[]
+  id           String           @id @default(uuid())
+  userId       String           @map("user_id")
+  childName    String           @map("child_name")
+  childDob     DateTime         @map("child_dob")
+  inflationRate Decimal         @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate   Decimal          @default(12.0) @map("return_rate") @db.Decimal(5, 2)
+  method       EducationMethod  @default(GEOMETRIC)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+  user         User             @relation(fields: [userId], references: [id])
+  stages       EducationStage[]
 
   @@map("education_plans")
 }
@@ -751,14 +753,14 @@ model UserEducationProgress {
 }
 
 model Quiz {
-  id           String          @id @default(uuid())
-  moduleId     String          @unique @map("module_id")
-  passingScore Int             @default(70) @map("passing_score")
-  timeLimit    Int             @default(0) @map("time_limit")
-  maxAttempts  Int             @default(3) @map("max_attempts")
-  description  String?         @db.Text
-  createdAt    DateTime        @default(now()) @map("created_at")
-  updatedAt    DateTime        @updatedAt @map("updated_at")
+  id           String   @id @default(uuid())
+  moduleId     String   @unique @map("module_id")
+  passingScore Int      @default(70) @map("passing_score")
+  timeLimit    Int      @default(0) @map("time_limit")
+  maxAttempts  Int      @default(3) @map("max_attempts")
+  description  String?  @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
   module       EducationModule @relation(fields: [moduleId], references: [id], onDelete: Cascade)
   questions    QuizQuestion[]
 

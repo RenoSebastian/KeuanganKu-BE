@@ -3,29 +3,31 @@ import { PrismaClient } from '@prisma/client';
 export const seedSubscriptionPlans = async (prisma: PrismaClient) => {
     console.log('Seeding Subscription Plans...');
 
+    // Analisa Data: Harga yang dimasukkan ke DB adalah harga akhir (Net Price) yang akan di-checkout oleh user.
+    // Logika harga coret (strikethrough) dan kalkulasi "hemat" akan ditangani secara dinamis di level komponen UI Frontend.
     const plans = [
         {
             code: 'MONTHLY_1',
-            name: 'Monthly Pro',
-            description: 'Akses penuh fitur konsultan selama 1 bulan. Ideal untuk mencoba.',
+            name: 'Montly Plan',
+            description: 'Akses penuh fitur kalkulator finansial selama 1 bulan.',
             durationMonths: 1,
-            price: 175000,
+            price: 150000,
             isActive: true,
         },
         {
             code: 'MONTHLY_6',
-            name: 'Semi-Annual Pro',
-            description: 'Komitmen jangka menengah. Hemat biaya bulanan untuk 6 bulan.',
+            name: '6-Month Plan',
+            description: 'Bayar 5 bulan dapat 6 bulan. Solusi tepat untuk perencanaan jangka menengah.',
             durationMonths: 6,
-            price: 140000, // Diskon: Seharusnya 354.000 (Hemat ~29rb)
+            price: 750000, // Frontend akan otomatis menghitung: (150.000 * 6) - 750.000 = Hemat 150.000
             isActive: true,
         },
         {
             code: 'YEARLY_1',
-            name: 'Yearly Expert',
-            description: 'Pilihan terbaik untuk profesional. Akses penuh 1 tahun dengan harga terbaik.',
+            name: 'Annual Plan',
+            description: 'Bayar 9 bulan dapat 12 bulan. Pilihan paling hemat untuk akses setahun penuh.',
             durationMonths: 12,
-            price: 122500, // Diskon: Seharusnya 708.000 (Hemat ~108rb)
+            price: 1350000, // Frontend akan otomatis menghitung: (150.000 * 12) - 1.350.000 = Hemat 450.000
             isActive: true,
         },
     ];
@@ -46,9 +48,10 @@ export const seedSubscriptionPlans = async (prisma: PrismaClient) => {
                     isActive: plan.isActive,
                 },
             });
-            console.log(`✅ Created plan: ${plan.name}`);
+            console.log(`✅ Created plan: ${plan.name} at Rp ${plan.price}`);
         } else {
-            // Optional: Update price/name if changed in code
+            // Melakukan update (upsert manual) agar perubahan harga dan deskripsi baru 
+            // langsung terefleksi ketika seeder dijalankan ulang di production
             await prisma.subscriptionPlan.update({
                 where: { code: plan.code },
                 data: {
@@ -58,7 +61,7 @@ export const seedSubscriptionPlans = async (prisma: PrismaClient) => {
                     price: plan.price,
                 },
             });
-            console.log(`🔄 Updated plan: ${plan.name}`);
+            console.log(`🔄 Updated plan: ${plan.name} to Rp ${plan.price}`);
         }
     }
 

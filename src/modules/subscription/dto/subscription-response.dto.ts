@@ -16,6 +16,14 @@ export class SubscriptionPlanDto {
 
     @Expose()
     price: number;
+
+    // [NEW] Diekspos ke frontend untuk kebutuhan UI harga coret
+    @Expose()
+    originalPrice?: number;
+
+    // [NEW] Diekspos ke frontend untuk kebutuhan label marketing (misal: "Hemat 150.000")
+    @Expose()
+    discountNote?: string;
 }
 
 export class UserSubscriptionDto {
