@@ -219,18 +219,16 @@ model User {
   @@map("users")
 }
 
-// [NEW] Entitas Sesi Pemulihan Sandi Berbasis OTP (High Cohesion)
+// [REFACTOR FASE 5] Entitas Sesi Pemulihan Sandi Berbasis Magic Link URL
 model PasswordResetToken {
   id         String   @id @default(uuid())
-  userId     String   @map("user_id")
-  hashedOTP  String   @map("hashed_otp") // Zero-Trust: OTP tidak disimpan plaintext
-  retryCount Int      @default(0) @map("retry_count") // Proteksi Brute-force
-  expiresAt  DateTime @map("expires_at") // TTL Management
+  userId     String   @unique @map("user_id") // [FIX] Constraint 1:1, Satu user hanya boleh punya 1 token aktif
+  hashedToken String   @map("hashed_token") // Menampung Hash dari CSPRNG (Bukan OTP lagi)
+  expiresAt  DateTime @map("expires_at") // TTL Management (ex: 15 menit)
   createdAt  DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@index([userId])
   @@index([expiresAt]) // Optimasi untuk query garbage collection
   @@map("password_reset_tokens")
 }
@@ -429,23 +427,23 @@ model ActiveSession {
 
 // Log aktivitas simulasi user (History Penggunaan)
 model SimulationLog {
-  id                String        @id @default(uuid())
-  agentId           String        @map("agent_id")
-  clientName        String        @map("client_name")
-  clientAge         Int?          @map("client_age")
-  clientCity        String?       @map("client_city")
-  clientJob         String?       @map("client_job")
-  inputPayload      Json          @map("input_payload")
-  outputResult      Json?         @map("output_result")
-  sessionId         String        @map("session_id")
-  totalIncome       Decimal?      @map("total_income") @db.Decimal(15, 2)
+  id              String        @id @default(uuid())
+  agentId         String        @map("agent_id")
+  clientName      String        @map("client_name")
+  clientAge       Int?          @map("client_age")
+  clientCity      String?       @map("client_city")
+  clientJob       String?       @map("client_job")
+  inputPayload    Json          @map("input_payload")
+  outputResult    Json?         @map("output_result")
+  sessionId       String        @map("session_id")
+  totalIncome     Decimal?      @map("total_income") @db.Decimal(15, 2)
   calculatedSurplus Decimal?      @map("calculated_surplus") @db.Decimal(15, 2)
-  healthScore       Int?          @map("health_score")
-  status            HealthStatus? @default(BAHAYA)
-  financialRatios   Json?         @map("financial_ratios")
-  moduleType        String        @default("BUDGETING") @map("module_type")
-  simulationDate    DateTime      @default(now()) @map("simulation_date")
-  createdAt         DateTime      @default(now()) @map("created_at")
+  healthScore     Int?          @map("health_score")
+  status          HealthStatus? @default(BAHAYA)
+  financialRatios Json?         @map("financial_ratios")
+  moduleType      String        @default("BUDGETING") @map("module_type")
+  simulationDate  DateTime      @default(now()) @map("simulation_date")
+  createdAt       DateTime      @default(now()) @map("created_at")
 
   agent User @relation(fields: [agentId], references: [id])
 
@@ -600,17 +598,17 @@ model FinancialCheckup {
 }
 
 model EducationPlan {
-  id            String           @id @default(uuid())
-  userId        String           @map("user_id")
-  childName     String           @map("child_name")
-  childDob      DateTime         @map("child_dob")
-  inflationRate Decimal          @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
-  returnRate    Decimal          @default(12.0) @map("return_rate") @db.Decimal(5, 2)
-  method        EducationMethod  @default(GEOMETRIC)
-  createdAt     DateTime         @default(now()) @map("created_at")
-  updatedAt     DateTime         @updatedAt @map("updated_at")
-  user          User             @relation(fields: [userId], references: [id])
-  stages        EducationStage[]
+  id           String          @id @default(uuid())
+  userId       String          @map("user_id")
+  childName    String          @map("child_name")
+  childDob     DateTime        @map("child_dob")
+  inflationRate Decimal        @default(10.0) @map("inflation_rate") @db.Decimal(5, 2)
+  returnRate   Decimal         @default(12.0) @map("return_rate") @db.Decimal(5, 2)
+  method       EducationMethod @default(GEOMETRIC)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+  user         User            @relation(fields: [userId], references: [id])
+  stages       EducationStage[]
 
   @@map("education_plans")
 }

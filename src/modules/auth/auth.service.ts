@@ -11,11 +11,10 @@ import {
   RegisterDto,
   LoginDto,
   RefreshTokenDto,
-  VerifyOtpDto as VerifyLoginOtpDto, // Alias untuk OTP Auth Umum
+  VerifyOtpDto as VerifyLoginOtpDto,
   ResendOtpDto
 } from './dto/auth.dto';
-import { RequestOtpDto } from './dto/request-otp.dto';
-import { VerifyForgotPasswordOtpDto } from './dto/verify-otp.dto'; // Alias untuk OTP Reset Password
+import { RequestOtpDto as RequestResetDto } from './dto/request-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
@@ -28,7 +27,6 @@ import { RedisService } from '../redis/redis.service';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { EmailService } from '../email/email.service';
 import { generateOtpEmailTemplate } from '../email/templates/otp-email.template';
-import { getPasswordResetOtpTemplate } from '../email/templates/password-reset.template';
 import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
 
 @Injectable()
@@ -414,150 +412,115 @@ export class AuthService {
     };
   }
 
-  // =================================================================
-  // [PHASE 4] FORGOT PASSWORD INITIATION
-  // =================================================================
-  async forgotPassword(dto: RequestOtpDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { email: dto.email },
-      select: { id: true, email: true, fullName: true }
-    });
-
-    // [SECURITY LAYER] Indistinguishable Response (Mencegah enumerasi akun)
-    const standardResponse = {
-      message: 'Jika email yang Anda masukkan terdaftar di sistem kami, instruksi pemulihan telah dikirimkan.'
-    };
-
-    if (!user) {
-      // Log silent agar analis keamanan tahu ada upaya terhadap email tak terdaftar
-      this.logger.warn(`[Suspicious] Upaya forgot password pada email tak terdaftar: ${dto.email}`);
-      return standardResponse;
-    }
-
-    // [CORE LOGIC] Menggunakan CSPRNG untuk keamanan absolut (menghindari tebakan pseudo-random)
-    const otpCode = crypto.randomInt(100000, 999999).toString();
-    const hashedOTP = await bcrypt.hash(otpCode, 10);
-
-    // Menghapus token pemulihan lama (jika user meminta ulang sebelum expired) untuk menghindari spam/race-condition
-    await this.prisma.passwordResetToken.deleteMany({
-      where: { userId: user.id }
-    });
-
-    // Menyimpan token baru ke database dengan TTL 5 menit
-    await this.prisma.passwordResetToken.create({
-      data: {
-        userId: user.id,
-        hashedOTP: hashedOTP,
-        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-        retryCount: 0
-      }
-    });
-
-    const htmlTemplate = getPasswordResetOtpTemplate(user.fullName, otpCode, 5);
-
-    this.emailService.sendEmail(user.email, 'Pemulihan Kata Sandi KeuanganKu', htmlTemplate)
-      .catch(err => this.logger.error(`[SILENT FAIL] Gagal mengirim OTP Reset ke ${user.email}`, err));
-
-    return standardResponse;
-  }
-
-  // =================================================================
-  // [PHASE 4] VERIFY PASSWORD OTP & MINT SCOPED JWT
-  // =================================================================
-  async verifyPasswordOtp(dto: VerifyForgotPasswordOtpDto) {
+  // ====================================================================
+  // [PHASE 4] FORGOT PASSWORD (MAGIC LINK GENERATION)
+  // ====================================================================
+  async forgotPassword(dto: RequestResetDto) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email }
     });
 
-    // Indistinguishable error untuk menjaga privasi eksistensi email
-    if (!user) throw new BadRequestException('Email atau Kode OTP tidak valid.');
+    // Security: Indistinguishable error untuk mencegah User Enumeration Attack
+    if (!user) {
+      this.logger.debug(`[Forgot Password] Percobaan pada email tak terdaftar: ${dto.email}`);
+      return { message: 'Jika email terdaftar, instruksi pemulihan telah dikirim ke kotak masuk Anda.' };
+    }
 
-    const tokenRecord = await this.prisma.passwordResetToken.findFirst({
-      where: { userId: user.id }
+    // 1. Generate CSPRNG Raw Token (URL Safe)
+    const rawToken = crypto.randomBytes(32).toString('hex');
+
+    // 2. [REFACTORED] Hash token menggunakan SHA-256 agar bisa di-query langsung via O(1) B-Tree Index
+    // Alasan: Bcrypt terlalu lambat untuk pencarian dan rawToken (32 byte) sendiri sudah aman dari Rainbow Table
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    // 3. Waktu Kedaluwarsa (15 Menit TTL)
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 15);
+
+    // 4. Persistence: Upsert agar token lama hangus & digantikan yang baru
+    await this.prisma.passwordResetToken.upsert({
+      where: { userId: user.id },
+      update: { hashedToken, expiresAt },
+      create: { userId: user.id, hashedToken, expiresAt }
     });
 
-    if (!tokenRecord) {
-      throw new BadRequestException('Sesi pemulihan tidak ditemukan atau telah kedaluwarsa. Silakan minta ulang OTP.');
-    }
+    // 5. Rakit Magic Link URL (Arahkan ke Frontend PWA)
+    const frontendUrl = this.config.get<string>('FRONTEND_URL') || 'https://keuanganku.id';
+    const magicLink = `${frontendUrl}/reset-password?token=${rawToken}`;
 
-    // Validasi Kedaluwarsa Waktu Ter-kunci (TTL)
-    if (tokenRecord.expiresAt < new Date()) {
-      await this.prisma.passwordResetToken.delete({ where: { id: tokenRecord.id } });
-      throw new BadRequestException('Kode OTP telah kedaluwarsa. Silakan ulangi proses pemulihan.');
-    }
+    // 6. Kirim Email (Fail-Fast Method)
+    await this.emailService.sendMagicLinkReset(user.email, user.fullName, magicLink, 15);
 
-    // [SECURITY LAYER] Mekanisme Lockout setelah 3x percobaan salah
-    if (tokenRecord.retryCount >= 3) {
-      await this.prisma.passwordResetToken.delete({ where: { id: tokenRecord.id } });
-      this.logger.warn(`[Brute-Force Blocked] Sesi reset sandi dikunci untuk user ${user.email}`);
-      throw new ForbiddenException('Terlalu banyak percobaan gagal. Sesi pemulihan dibatalkan demi keamanan. Silakan ulangi proses dari awal.');
-    }
-
-    // Validasi Integritas Hash
-    const isOtpValid = await bcrypt.compare(dto.otp, tokenRecord.hashedOTP);
-
-    if (!isOtpValid) {
-      await this.prisma.passwordResetToken.update({
-        where: { id: tokenRecord.id },
-        data: { retryCount: { increment: 1 } }
-      });
-      throw new BadRequestException('Kode OTP salah.');
-    }
-
-    // Jika valid, hancurkan catatan OTP agar tidak bisa digunakan lagi (Replay Attack Prevention)
-    await this.prisma.passwordResetToken.delete({ where: { id: tokenRecord.id } });
-
-    // Mencetak SCOPED JWT (Berbeda dari Access Token standar)
-    const secret = this.config.get<string>('JWT_SECRET');
-    const scopedToken = await this.jwt.signAsync(
-      { sub: user.id, email: user.email, scope: 'password_reset_only' },
-      { secret, expiresIn: '10m' }
-    );
-
-    return {
-      message: 'Verifikasi berhasil. Silakan buat kata sandi baru Anda.',
-      reset_token: scopedToken
-    };
+    return { message: 'Jika email terdaftar, instruksi pemulihan telah dikirim ke kotak masuk Anda.' };
   }
 
-  // =================================================================
-  // [PHASE 4] EXECUTE RESET PASSWORD & TERMINATE SESSIONS
-  // =================================================================
-  async resetPassword(userId: string, dto: ResetPasswordDto) {
-    const salt = await bcrypt.genSalt();
-    const newPasswordHash = await bcrypt.hash(dto.newPassword, salt);
+  // ====================================================================
+  // [NEW] PRE-FLIGHT CHECK UNTUK MAGIC LINK
+  // ====================================================================
+  async verifyResetTokenHealth(rawToken: string) {
+    // 1. Reproduksi hash SHA-256 yang persis sama dengan yang tersimpan di DB
+    const hashedTarget = crypto.createHash('sha256').update(rawToken).digest('hex');
 
-    // Update sandi baru
-    await this.prisma.user.update({
-      where: { id: userId },
-      data: { passwordHash: newPasswordHash }
-    });
-
-    // [SECURITY LAYER] Sesi Terminasi Global (Zero-Trust)
-    // Mencari semua sesi aktif untuk user ini di seluruh perangkat
-    const activeSessions = await this.prisma.activeSession.findMany({
-      where: { userId: userId }
-    });
-
-    // Menggugurkan koneksi WebSockets & Redis cache untuk setiap sesi yang ditemukan
-    for (const session of activeSessions) {
-      if (session.socketId) {
-        this.notificationGateway.forceDisconnectClient(session.socketId, 'password_changed');
+    // 2. Pencarian O(1) yang super cepat tanpa iterasi manual
+    const validRecord = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        hashedToken: hashedTarget,
+        expiresAt: { gt: new Date() } // Pastikan belum expired
       }
-      // Kita menghapus session dari Redis menggunakan userId 
-      // (asumsi Redis menyimpan session identifier per userId)
-      await this.redisService.deleteSession(userId);
+    });
+
+    if (!validRecord) {
+      throw new BadRequestException('Tautan tidak valid, sudah digunakan, atau telah kedaluwarsa.');
     }
 
-    // Membersihkan tabel database sesi
-    await this.prisma.activeSession.deleteMany({
-      where: { userId: userId }
+    return { valid: true, message: 'Tautan valid. Silakan buat kata sandi baru Anda.' };
+  }
+
+  // ====================================================================
+  // [PHASE 5] EXECUTE RESET PASSWORD (BURN-ON-WRITE & KICK OUT)
+  // ====================================================================
+  async resetPasswordByLink(rawToken: string, dto: ResetPasswordDto) {
+    // 1. Reproduksi Hash & Identifikasi Token (Cepat & Skalabel)
+    const hashedTarget = crypto.createHash('sha256').update(rawToken).digest('hex');
+
+    const validRecord = await this.prisma.passwordResetToken.findFirst({
+      where: {
+        hashedToken: hashedTarget,
+        expiresAt: { gt: new Date() }
+      }
     });
 
-    this.logger.log(`[Security Audit] Kata sandi direset untuk User ID: ${userId}. Semua sesi aktif telah diterminasi.`);
+    if (!validRecord) {
+      throw new BadRequestException('Tautan pemulihan tidak valid, telah digunakan, atau kedaluwarsa.');
+    }
+
+    // 2. Terapkan Sandi Baru (Sandi aktual tetap menggunakan bcrypt)
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 12);
+
+    await this.prisma.$transaction(async (tx) => {
+      // Update Sandi
+      await tx.user.update({
+        where: { id: validRecord.userId },
+        data: { passwordHash: newPasswordHash }
+      });
+
+      // 3. BURN-ON-WRITE: Hancurkan token agar tautan pemulihan hangus seketika
+      await tx.passwordResetToken.delete({
+        where: { id: validRecord.id }
+      });
+    });
+
+    // 4. THE KICK-OUT MECHANISM: Hancurkan semua Active Sessions di Redis & DB
+    // Mencegah peretas yang sudah masuk menggunakan sandi lama tetap berada di dalam sistem
+    await this.redisService.deleteSession(validRecord.userId);
+    await this.prisma.activeSession.deleteMany({
+      where: { userId: validRecord.userId }
+    });
+
+    this.logger.log(`[SECURITY] Sandi diperbarui & sesi diterminasi secara global untuk User: ${validRecord.userId}`);
 
     return {
-      message: 'Kata sandi berhasil diperbarui. Demi keamanan, seluruh sesi Anda pada perangkat lain telah dikeluarkan. Silakan login kembali.'
+      message: 'Kata sandi berhasil diperbarui. Semua sesi di perangkat lain telah ditutup paksa demi keamanan. Silakan masuk kembali.'
     };
   }
 }

@@ -1,28 +1,28 @@
+// File: src/modules/auth/auth.controller.ts
+
 import {
   Body,
   Controller,
   Post,
+  Get,
+  Query,
   HttpCode,
   HttpStatus,
   Headers,
   Ip,
   BadRequestException,
-  UseGuards,
-  Req
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto, RefreshTokenDto, VerifyOtpDto, ResendOtpDto } from './dto/auth.dto';
 
-// [NEW IMPORTS] Modul DTO khusus fase Forgot Password
-import { RequestOtpDto } from './dto/request-otp.dto';
-import { VerifyForgotPasswordOtpDto as VerifyPasswordOtpDto } from './dto/verify-otp.dto';
+// [NEW IMPORTS] Modul DTO khusus fase Forgot Password (Magic Link)
+import { RequestOtpDto as RequestResetDto } from './dto/request-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
-import { ApiTags, ApiOperation, ApiHeader, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiHeader, ApiQuery } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { PasswordResetScopeGuard } from './guards/scoped-jwt.guard';
 
-@ApiTags('Auth') // Label di Swagger
+@ApiTags('Auth')
 @Controller('auth')
 export class AuthController {
   constructor(private authService: AuthService) { }
@@ -30,11 +30,6 @@ export class AuthController {
   // ====================================================================
   // [PHASE 1] REGISTER ENDPOINT (Redis-First Entry Point)
   // ====================================================================
-  /**
-   * Pendaftaran Agen Asuransi (Tahap 1)
-   * Dilindungi limitasi 3 request per menit untuk mencegah spam SMTP 
-   * dan eksploitasi memori Redis dari IP yang sama.
-   */
   @Throttle({ default: { limit: 3, ttl: 60000 } })
   @Post('register')
   @ApiOperation({ summary: 'Mendaftarkan agen baru ke memori sementara & Mengirim OTP' })
@@ -45,11 +40,6 @@ export class AuthController {
   // ====================================================================
   // [PHASE 1] VERIFY OTP ENDPOINT (Database Commit & Auto-Login)
   // ====================================================================
-  /**
-   * Verifikasi OTP (Tahap 2)
-   * Limitasi 5 percobaan per menit. Sangat krusial untuk mencegah serangan
-   * Brute-Force (menebak 6 digit angka secara berulang).
-   */
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('verify-otp')
   @HttpCode(HttpStatus.OK)
@@ -87,11 +77,6 @@ export class AuthController {
   // ====================================================================
   // [PHASE 2] LOGIN INITIATION ENDPOINT (2FA)
   // ====================================================================
-  /**
-   * * [STRATEGY] Tidak lagi mencetak JWT langsung.
-   * Hanya memvalidasi DB, membuat OTP, menyimpannya di Redis, dan menembak SMTP.
-   * Limit 5 percobaan per 5 menit untuk mencegah eksploitasi fitur Lupa Sandi gaya baru.
-   */
   @Throttle({ default: { limit: 5, ttl: 300000 } })
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -116,10 +101,6 @@ export class AuthController {
   // ====================================================================
   // [PHASE 3] VERIFY LOGIN OTP ENDPOINT
   // ====================================================================
-  /**
-   * Limitasi ketat 5x per menit agar hacker yang berhasil mencuri password
-   * tidak bisa melakukan brute-force kode OTP yang masuk ke email asli.
-   */
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('login/verify')
   @HttpCode(HttpStatus.OK)
@@ -181,47 +162,53 @@ export class AuthController {
   // ====================================================================
   // [PHASE 4] FORGOT PASSWORD INITIATION (Mencegah User Enumeration)
   // ====================================================================
-  /**
-   * Limitasi ketat: 3 request per 5 menit untuk mencegah eksploitasi SMTP
-   * dan Brute-Force pencarian email.
-   */
   @Throttle({ default: { limit: 3, ttl: 300000 } })
   @Post('forgot-password')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Meminta OTP untuk pemulihan kata sandi' })
-  async forgotPassword(@Body() dto: RequestOtpDto) {
+  @ApiOperation({ summary: 'Meminta pembuatan tautan Magic Link untuk pemulihan kata sandi' })
+  async forgotPassword(@Body() dto: RequestResetDto) {
+    // Alur OTP dihapus, fungsi ini sekarang memicu pengiriman Magic Link URL
     return this.authService.forgotPassword(dto);
   }
 
   // ====================================================================
-  // [PHASE 4] VERIFY PASSWORD OTP (Mencegah Brute-Force OTP)
+  // [NEW: TAHAP 4 ROADMAP] PRE-FLIGHT CHECK MAGIC LINK URL
   // ====================================================================
   /**
-   * Limitasi: 5 request per menit.
-   * Endpoint ini memvalidasi OTP dan akan me-return Scoped JWT berumur 10 menit.
+   * Endpoint Read-Only (Aman dari Anti-Spam Bots).
+   * Digunakan Frontend saat User pertama kali membuka Magic Link URL dari email, 
+   * untuk memastikan tautan belum expired / hangus.
    */
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @Post('verify-password-otp')
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Validasi OTP dan terbitkan Scoped JWT (Password-Reset-Token)' })
-  async verifyPasswordOtp(@Body() dto: VerifyPasswordOtpDto) {
-    return this.authService.verifyPasswordOtp(dto);
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Get('verify-reset-link')
+  @ApiOperation({ summary: 'Memeriksa status validitas token pada Magic Link' })
+  @ApiQuery({ name: 'token', description: 'Raw token dari parameter URL', required: true })
+  async verifyResetLink(@Query('token') rawToken: string) {
+    if (!rawToken) {
+      throw new BadRequestException('Token pemulihan tidak ditemukan pada URL.');
+    }
+    return this.authService.verifyResetTokenHealth(rawToken);
   }
 
   // ====================================================================
-  // [PHASE 4] EXECUTE RESET PASSWORD (Puncak Keamanan)
+  // [PHASE 5] EXECUTE RESET PASSWORD (Puncak Keamanan)
   // ====================================================================
   /**
-   * Menggunakan Custom Guard untuk memastikan hanya Scoped JWT khusus
-   * yang dapat mengeksekusi endpoint ini. Access Token biasa akan ditolak.
+   * Mengeksekusi pembuatan kata sandi baru menggunakan token dari URL.
+   * Setelah sukses, token di Database dibakar (Burn-on-Write) dan
+   * seluruh Active Session di Redis dihancurkan.
    */
-  @UseGuards(PasswordResetScopeGuard)
-  @ApiBearerAuth()
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
   @Post('reset-password')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Ubah kata sandi dan terminasi semua sesi aktif' })
-  async resetPassword(@Req() req, @Body() dto: ResetPasswordDto) {
-    // req.user di-inject oleh PasswordResetScopeGuard (berisi sub/userId)
-    return this.authService.resetPassword(req.user.sub, dto);
+  async resetPassword(
+    @Query('token') rawToken: string, // Token dikirim via Query URL, bukan Header Auth
+    @Body() dto: ResetPasswordDto
+  ) {
+    if (!rawToken) {
+      throw new BadRequestException('Kredensial keamanan (token) tidak ditemukan pada permintaan ini.');
+    }
+    return this.authService.resetPasswordByLink(rawToken, dto);
   }
 }

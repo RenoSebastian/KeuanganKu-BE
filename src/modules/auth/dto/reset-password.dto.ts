@@ -1,19 +1,19 @@
 import { ApiProperty } from '@nestjs/swagger';
-import { IsNotEmpty, IsString, Matches, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, MinLength } from 'class-validator';
 
 export class ResetPasswordDto {
     @ApiProperty({
-        description: 'Password baru dengan kombinasi keamanan tinggi',
-        example: 'KeuanganKu!2026',
+        description: 'Kata sandi baru untuk akun pengguna (Minimal 8 karakter). Direkomendasikan menggunakan frasa sandi (passphrase).',
+        example: 'kopipagihangat',
     })
     @IsString({ message: 'Password harus berupa string.' })
     @IsNotEmpty({ message: 'Password baru tidak boleh kosong.' })
-    @MinLength(8, { message: 'Password minimal harus 8 karakter.' })
-    @Matches(
-        /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]+$/,
-        {
-            message: 'Password harus mengandung huruf besar, huruf kecil, angka, dan karakter spesial (@$!%*?&).',
-        },
-    )
+
+    // [REFACTORED] Murni mengandalkan batasan panjang minimum (Minimum Length Constraint)
+    @MinLength(8, { message: 'Kata sandi terlalu pendek. Minimal harus 8 karakter demi keamanan.' })
+
+    // [REMOVED] Decorator @Matches() telah dihapus secara permanen untuk 
+    // menghapus kewajiban kombinasi karakter (huruf besar/kecil, angka, simbol) 
+    // demi meningkatkan User Experience (UX) bagi agen senior.
     newPassword: string;
 }

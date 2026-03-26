@@ -186,13 +186,12 @@ export class AdminDashboardService {
     }
 
     // =========================================================================
-    // FASE 4: SECURITY ENFORCEMENT (OTP TRIGGER & AUDIT)
+    // FASE 4: SECURITY ENFORCEMENT (MAGIC LINK TRIGGER & AUDIT)
     // =========================================================================
 
     /**
-     * Memfasilitasi pemicuan email OTP untuk target user.
-     * Mengimplementasikan pola Information Expert: hanya melempar perintah ke AuthService
-     * tanpa pernah menyentuh langsung payload sandi atau logika hashing.
+     * Memfasilitasi pemicuan email Magic Link untuk target user.
+     * Mengimplementasikan pola Information Expert.
      */
     async triggerPasswordReset(adminId: string, targetUserId: string) {
         // 1. Validasi Eksistensi Target User
@@ -208,25 +207,25 @@ export class AdminDashboardService {
         this.logger.warn(`[High-Risk Operation] Admin ${adminId} memicu siklus reset sandi untuk User: ${targetUser.email}`);
 
         // 2. Delegasi ke Domain Pakar (Auth Service)
-        // Kita menggunakan metode request OTP standar yang telah diproteksi Rate Limiter 
-        // di level Controller Auth, sehingga Admin pun tidak bisa menyalahgunakannya.
+        // Memanggil fungsi forgotPassword yang sekarang menghasilkan Magic Link
         await this.authService.forgotPassword({ email: targetUser.email });
 
         // 3. Pencatatan Jejak (Non-Repudiation) secara asinkron
         this.auditService.logAdminAction({
             adminId: adminId,
-            action: 'TRIGGER_PASSWORD_RESET',
+            action: 'TRIGGER_PASSWORD_RESET_LINK',
             targetUserId: targetUser.id,
             details: {
                 entityName: 'USER',
                 before: null,
-                after: { status: 'OTP_SENT_TO_USER' },
-                changes: { reason: 'Admin override password recovery initiated.' }
+                after: { status: 'MAGIC_LINK_SENT_TO_USER' },
+                changes: { reason: 'Admin memicu pengiriman Magic Link pemulihan.' }
             }
-        }).catch(e => this.logger.error(`[CRITICAL] Gagal mencatat Audit Log untuk operasi reset password! ${e.message}`));
+        }).catch(e => this.logger.error(`[CRITICAL] Gagal mencatat Audit Log: ${e.message}`));
 
+        // [REFACTORED] Pesan disesuaikan dengan arsitektur Magic Link
         return {
-            message: `Instruksi pemulihan berhasil dikirimkan ke email target (${targetUser.email}). Administrator tidak memiliki akses lebih lanjut terhadap sandi baru.`
+            message: `Tautan pemulihan aman (Magic Link) berhasil dikirimkan ke email target (${targetUser.email}). Administrator tidak memiliki akses lebih lanjut terhadap sandi baru.`
         };
     }
 }

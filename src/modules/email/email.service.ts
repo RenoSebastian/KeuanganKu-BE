@@ -1,8 +1,10 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, ServiceUnavailableException } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 
-// [NEW] Mengimpor fungsi murni (Pure Function) untuk rendering template OTP
+// Mengimpor fungsi murni (Pure Function) untuk rendering template
 import { getPasswordResetOtpTemplate } from './templates/password-reset.template';
+// [NEW] Impor template Magic Link yang baru kita buat
+import { getMagicLinkTemplate } from './templates/magic-link.template';
 
 /**
  * EmailService
@@ -19,40 +21,44 @@ export class EmailService {
     constructor(private readonly mailerService: MailerService) { }
 
     /**
-     * [NEW] ALUR FORGOT PASSWORD (OTP)
-     * Pattern: Information Expert & Low Coupling
-     * AuthService tidak perlu tahu cara merender HTML. Tanggung jawab pembuatan 
-     * dan perakitan pesan diserahkan sepenuhnya ke domain EmailService.
-     * * @param to Alamat email tujuan
+     * [NEW] ALUR FORGOT PASSWORD (MAGIC LINK)
+     * Pattern: Information Expert
+     * @param to Alamat email tujuan
      * @param userName Nama pengguna untuk personalisasi sapaan
-     * @param otpCode 6-digit kode CSPRNG
-     * @param ttlMinutes Batas waktu kedaluwarsa (default 5 menit)
+     * @param magicLink Tautan utuh yang berisi Secure Token
+     * @param ttlMinutes Batas waktu kedaluwarsa (default 15 menit)
+     */
+    async sendMagicLinkReset(to: string, userName: string, magicLink: string, ttlMinutes: number = 15): Promise<boolean> {
+        this.logger.debug(`Memulai perakitan template Magic Link untuk: ${to}`);
+
+        const htmlContent = getMagicLinkTemplate(userName, magicLink, ttlMinutes);
+        const subject = 'Aksi Diperlukan: Atur Ulang Kata Sandi - KeuanganKu';
+
+        return this.sendEmail(to, subject, htmlContent);
+    }
+
+    /**
+     * [LEGACY] ALUR FORGOT PASSWORD (OTP)
+     * Dipertahankan untuk backward compatibility jika klien lama masih menggunakan alur OTP manual.
      */
     async sendPasswordResetOTP(to: string, userName: string, otpCode: string, ttlMinutes: number = 5): Promise<boolean> {
         this.logger.debug(`Memulai perakitan template OTP Reset Password untuk: ${to}`);
-
-        // 1. Rendering UI Email secara terisolasi
         const htmlContent = getPasswordResetOtpTemplate(userName, otpCode, ttlMinutes);
         const subject = 'Kode Pemulihan Kata Sandi - KeuanganKu';
 
-        // 2. Delegasi ke fungsi utama pengiriman yang sudah memiliki Fault Tolerance
         return this.sendEmail(to, subject, htmlContent);
     }
 
     /**
      * Mengeksekusi pengiriman email secara asinkronus.
-     * Menerapkan prinsip Fire-and-Forget safety: Exception ditelan (swallowed) dan dicatat, 
-     * memastikan caller tidak mengalami unhandled rejection.
-     * * @param to Alamat email tujuan (penerima)
-     * @param subject Subjek email
-     * @param htmlContent Isi email dalam format HTML yang sudah di-render
-     * @returns boolean Mengembalikan true jika berhasil dikirim, false jika gagal
+     * [REFACTORED] Menerapkan pola Fail-Fast. Exception dilempar secara eksplisit 
+     * agar Controller dapat membatalkan transaksi dan merespon dengan status HTTP yang tepat (503/400).
      */
     async sendEmail(to: string, subject: string, htmlContent: string): Promise<boolean> {
         // 1. Defensive Programming: Cegah eksekusi I/O TCP jika input tidak valid
         if (!to || !subject || !htmlContent) {
             this.logger.warn(`[ABORTED] Pengiriman dibatalkan. Parameter tidak lengkap. (To: ${!!to})`);
-            return false;
+            throw new ServiceUnavailableException('Parameter pengiriman email tidak lengkap atau tidak valid.');
         }
 
         this.logger.debug(`Mempersiapkan pengiriman email ke: ${to} dengan subjek: "${subject}"`);
@@ -69,8 +75,7 @@ export class EmailService {
             return true;
 
         } catch (error: any) {
-            // 3. Stabilisasi: Penangkapan error granular tanpa melakukan 'throw' ulang
-            // Menggunakan 'any' dan optional chaining untuk keamanan jika tipe error bukan instance dari Error
+            // 3. Stabilisasi Log: Penangkapan error granular
             const errorMessage = error?.message || 'Unknown SMTP Error';
             const errorCode = error?.code || 'NO_CODE';
             const errorStack = error?.stack || '';
@@ -80,17 +85,16 @@ export class EmailService {
                 errorStack
             );
 
-            // Graceful degradation: Kembalikan boolean false, biarkan proses bisnis utama di Controller tetap berjalan
-            return false;
+            // [REFACTORED] Melemparkan HttpException secara eksplisit untuk mencegah Silent Failure
+            throw new ServiceUnavailableException(
+                `Gagal berkomunikasi dengan server email (${errorCode}). Silakan coba beberapa saat lagi.`
+            );
         }
     }
 
     /**
      * Mengeksekusi pengiriman email massal (Bulk Email) dengan Fault Tolerance.
      * Menggunakan Promise.allSettled untuk mencegah cascading failure pada iterasi.
-     * * @param to Array dari alamat email tujuan
-     * @param subject Subjek email
-     * @param htmlContent Isi email dalam format HTML
      */
     async sendBulkEmail(to: string[], subject: string, htmlContent: string): Promise<void> {
         if (!Array.isArray(to) || to.length === 0) {
@@ -100,8 +104,15 @@ export class EmailService {
 
         this.logger.debug(`Mempersiapkan pengiriman bulk email ke ${to.length} penerima.`);
 
-        // Eksekusi paralel dengan toleransi kesalahan (satu gagal tidak membatalkan sisa antrean yang lain)
-        const promises = to.map(email => this.sendEmail(email, subject, htmlContent));
+        // Menangkap exception individual agar kegagalan satu email tidak membatalkan batch lainnya
+        const promises = to.map(email =>
+            this.sendEmail(email, subject, htmlContent)
+                .catch(err => {
+                    this.logger.warn(`Bulk send fail untuk ${email}: ${err.message}`);
+                    return false;
+                })
+        );
+
         const results = await Promise.allSettled(promises);
 
         const failedCount = results.filter(
