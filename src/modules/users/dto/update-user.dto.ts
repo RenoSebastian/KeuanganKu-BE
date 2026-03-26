@@ -1,10 +1,18 @@
-import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Transform } from 'class-transformer';
 import { IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 import { CreateUserDto } from './create-user.dto';
 import { formatToWhatsAppNumber } from '../../../common/utils/phone-formatter.util';
 
-export class UpdateUserDto extends PartialType(CreateUserDto) {
+/**
+ * [IMMUTABILITY ENFORCEMENT]
+ * Menggunakan OmitType untuk memastikan atribut 'email' diamputasi dari skema Update.
+ * Jika User mengirimkan payload { "email": "hacker@mail.com" }, ValidationPipe 
+ * akan otomatis membuangnya (whitelist: true) atau menolaknya (forbidNonWhitelisted: true).
+ */
+export class UpdateUserDto extends PartialType(
+    OmitType(CreateUserDto, ['email'] as const)
+) {
     // =================================================================
     // SAAS ARCHITECTURE: AGENCY RELATIONSHIP
     // Mengubah string kosong "" (dari form frontend) menjadi null

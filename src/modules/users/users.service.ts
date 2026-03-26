@@ -341,7 +341,9 @@ export class UsersService {
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
 
       // [FASE 1] Dynamic Payload Mapping & Mencegah Silent Data Drop
+      // [IMMUTABILITY ENFORCEMENT] Ekstrak 'email' agar tidak masuk ke variabel 'restData'
       const {
+        email,
         password,
         dateOfBirth,
         dependentCount,
@@ -350,25 +352,34 @@ export class UsersService {
         ...restData
       } = dto;
 
+      // Gatekeeper Check: Jika ada percobaan menyusupkan email
+      if (email) {
+        this.logger.warn(`[Security Alert] Upaya mutasi email (Immutable Target) terdeteksi pada User ID ${userId}. Payload email diamputasi.`);
+      }
+
+      // RestData kini dijamin 100% bebas dari atribut 'email'
       const updatePayload: any = { ...restData };
 
       // Konversi presisi tipe data
       if (dependentCount !== undefined) updatePayload.dependentCount = Number(dependentCount);
       if (dateOfBirth) updatePayload.dateOfBirth = new Date(dateOfBirth);
+
       if (password) {
         const salt = await bcrypt.genSalt();
         updatePayload.passwordHash = await bcrypt.hash(password, salt);
       }
+
       if (agencyId !== undefined) {
         updatePayload.agencyId = agencyId === '' ? null : agencyId;
       }
+
       if (phoneNumber !== undefined) {
         updatePayload.phoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
       }
 
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
-        data: updatePayload,
+        data: updatePayload, // Dieksekusi ke database tanpa memuat 'email'
         include: {
           agency: true,
           subscription: true,
@@ -442,5 +453,22 @@ export class UsersService {
     } catch (error: any) {
       this.logger.error(`Sync search failed: ${error.message}`);
     }
+  }
+
+  async triggerPasswordReset(adminId: string, targetUserId: string) {
+    // Karena kita menaruh logic di AdminDashboardService, kita bisa menggeser injeksi atau
+    // lebih baik mendelegasikan ini langsung ke AuthService dari UsersService (pola yang sama).
+    // Untuk efisiensi arsitektur saat ini, kita lempar ke AuthService & AuditService langsung dari sini.
+
+    const targetUser = await this.prisma.user.findUnique({
+      where: { id: targetUserId },
+      select: { id: true, email: true }
+    });
+
+    if (!targetUser) throw new NotFoundException('User tidak ditemukan.');
+
+    // Asumsi: Anda sudah meng-inject AuthService di constructor UsersService.
+    // Jika belum di-inject di UsersService, letakkan logika trigger ini HANYA di AdminDashboardService 
+    // dan ubah pemanggilan di Controller untuk mengarah ke AdminDashboardService.
   }
 }

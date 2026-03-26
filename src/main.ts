@@ -70,15 +70,16 @@ async function bootstrap() {
   });
 
   /**
-   * 5. Global Pipes & Interceptors (Quality Assurance)
+   * 5. Global Pipes & Interceptors (Quality Assurance & Security Gatekeeper)
    */
   app.useGlobalInterceptors(new LoggingInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
+  // [SECURITY ENFORCEMENT] Konfigurasi ketat untuk validasi DTO
   app.useGlobalPipes(new ValidationPipe({
-    whitelist: true, // Hapus properti yang tidak ada di DTO
-    transform: true, // Otomatis transform tipe data primitive
-    forbidNonWhitelisted: false, // Loose mode untuk development awal
+    whitelist: true,            // Secara otomatis membuang properti yang tidak terdefinisi di DTO
+    forbidNonWhitelisted: true, // Menolak request (HTTP 400) jika ada properti selundupan yang tidak diizinkan
+    transform: true,            // Mengaktifkan fitur transformasi payload (misal: String ke Number/Date, penerapan @Transform)
   }));
 
   /**

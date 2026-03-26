@@ -149,16 +149,19 @@ model GlobalMarketSettings {
 }
 
 // =========================================================
-// USER MANAGEMENT
+// USER MANAGEMENT & SECURITY
 // =========================================================
 
 model User {
-  id           String  @id @default(uuid())
-  agencyId     String? @map("agency_id")
-  nip          String? @unique // Bisa digunakan sebagai Agent ID
-  email        String  @unique
-  passwordHash String  @map("password_hash")
-  fullName     String  @map("full_name")
+  id       String  @id @default(uuid())
+  agencyId String? @map("agency_id")
+  nip      String? @unique // Bisa digunakan sebagai Agent ID
+
+  // [IMMUTABILITY CONSTRAINT] Email dikunci. DTO/Update tidak boleh menyentuh field ini.
+  email String @unique
+
+  passwordHash String @map("password_hash")
+  fullName     String @map("full_name")
 
   // [NEW] Phone Number - Opsional agar tidak merusak data lama
   phoneNumber String? @map("phone_number") @db.VarChar(20)
@@ -191,12 +194,13 @@ model User {
 
   educationProgress UserEducationProgress[]
 
-  // Audit Relations
-  actionsPerformed AccessLog[]        @relation("ActorRelation")
-  actionsTargeted  AccessLog[]        @relation("TargetRelation")
-  adminActivities  AdminActivityLog[] @relation("AdminActor")
-  RetentionLog     RetentionLog[]
-  simulationLogs   SimulationLog[]
+  // Audit & Security Relations
+  actionsPerformed   AccessLog[]          @relation("ActorRelation")
+  actionsTargeted    AccessLog[]          @relation("TargetRelation")
+  adminActivities    AdminActivityLog[]   @relation("AdminActor")
+  RetentionLog       RetentionLog[]
+  simulationLogs     SimulationLog[]
+  passwordResetToken PasswordResetToken[]
 
   // Subscription & Usage Relations
   subscription       UserSubscription?
@@ -213,6 +217,22 @@ model User {
   @@index([email])
   @@index([deletedAt]) // Index untuk optimasi filter soft delete
   @@map("users")
+}
+
+// [NEW] Entitas Sesi Pemulihan Sandi Berbasis OTP (High Cohesion)
+model PasswordResetToken {
+  id         String   @id @default(uuid())
+  userId     String   @map("user_id")
+  hashedOTP  String   @map("hashed_otp") // Zero-Trust: OTP tidak disimpan plaintext
+  retryCount Int      @default(0) @map("retry_count") // Proteksi Brute-force
+  expiresAt  DateTime @map("expires_at") // TTL Management
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt]) // Optimasi untuk query garbage collection
+  @@map("password_reset_tokens")
 }
 
 // =========================================================

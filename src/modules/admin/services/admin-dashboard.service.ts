@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { VerificationStatus } from '@prisma/client';
 
@@ -6,7 +6,10 @@ import { VerificationStatus } from '@prisma/client';
 import { RedisService } from '../../redis/redis.service';
 import { AdminAnalyticsService } from './admin-analytics.service';
 import { DashboardMetricsResponseDto } from '../dto/dashboard-metrics-response.dto';
-import { CashflowLedgerItemDto, CashflowLedgerResponseDto, CashflowStatus } from '../dto/cashflow-ledger.dto';
+
+// [NEW IMPORTS] Untuk orkestrasi Password Reset & Audit
+import { AuthService } from '../../auth/auth.service';
+import { AuditService } from '../../audit/audit.service';
 
 @Injectable()
 export class AdminDashboardService {
@@ -16,7 +19,11 @@ export class AdminDashboardService {
     constructor(
         private readonly prisma: PrismaService,
         private readonly redisService: RedisService,
-        private readonly analyticsService: AdminAnalyticsService
+        private readonly analyticsService: AdminAnalyticsService,
+
+        // [NEW DEPENDENCIES] Injeksi layanan untuk Security Event
+        private readonly authService: AuthService,
+        private readonly auditService: AuditService
     ) { }
 
     // =========================================================================
@@ -120,7 +127,7 @@ export class AdminDashboardService {
             throw error;
         }
     }
-    
+
     async getDashboardStats() {
         // [FASE 3 OPTIMIZATION] Hitung User Online langsung dari SCAN Redis (In-Memory)
         // Menghindari query COUNT ke MySQL tabel ActiveSession yang berat
@@ -176,5 +183,50 @@ export class AdminDashboardService {
                 agency: null
             }
         })).sort((a, b) => b.lastActivityAt.getTime() - a.lastActivityAt.getTime());
+    }
+
+    // =========================================================================
+    // FASE 4: SECURITY ENFORCEMENT (OTP TRIGGER & AUDIT)
+    // =========================================================================
+
+    /**
+     * Memfasilitasi pemicuan email OTP untuk target user.
+     * Mengimplementasikan pola Information Expert: hanya melempar perintah ke AuthService
+     * tanpa pernah menyentuh langsung payload sandi atau logika hashing.
+     */
+    async triggerPasswordReset(adminId: string, targetUserId: string) {
+        // 1. Validasi Eksistensi Target User
+        const targetUser = await this.prisma.user.findUnique({
+            where: { id: targetUserId },
+            select: { id: true, email: true, fullName: true, role: true }
+        });
+
+        if (!targetUser) {
+            throw new NotFoundException(`User dengan ID ${targetUserId} tidak ditemukan.`);
+        }
+
+        this.logger.warn(`[High-Risk Operation] Admin ${adminId} memicu siklus reset sandi untuk User: ${targetUser.email}`);
+
+        // 2. Delegasi ke Domain Pakar (Auth Service)
+        // Kita menggunakan metode request OTP standar yang telah diproteksi Rate Limiter 
+        // di level Controller Auth, sehingga Admin pun tidak bisa menyalahgunakannya.
+        await this.authService.forgotPassword({ email: targetUser.email });
+
+        // 3. Pencatatan Jejak (Non-Repudiation) secara asinkron
+        this.auditService.logAdminAction({
+            adminId: adminId,
+            action: 'TRIGGER_PASSWORD_RESET',
+            targetUserId: targetUser.id,
+            details: {
+                entityName: 'USER',
+                before: null,
+                after: { status: 'OTP_SENT_TO_USER' },
+                changes: { reason: 'Admin override password recovery initiated.' }
+            }
+        }).catch(e => this.logger.error(`[CRITICAL] Gagal mencatat Audit Log untuk operasi reset password! ${e.message}`));
+
+        return {
+            message: `Instruksi pemulihan berhasil dikirimkan ke email target (${targetUser.email}). Administrator tidak memiliki akses lebih lanjut terhadap sandi baru.`
+        };
     }
 }

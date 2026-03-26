@@ -13,6 +13,7 @@ import {
     DefaultValuePipe,
     ParseIntPipe,
     ParseEnumPipe,
+    HttpCode,
 } from '@nestjs/common';
 import { Role } from '@prisma/client';
 import {
@@ -114,6 +115,27 @@ export class AdminUsersController {
         @Body() updateUserDto: UpdateUserDto,
     ) {
         return this.usersService.updateUser(adminId, id, updateUserDto);
+    }
+
+    /**
+     * Endpoint: POST /admin/users/:id/trigger-reset
+     * [SECURITY ENFORCEMENT: ZERO-KNOWLEDGE & NON-REPUDIATION]
+     * Endpoint ini tidak menerima payload rahasia. Sepenuhnya mendelegasikan 
+     * pembuatan OTP dan pengiriman email ke lapisan layanan untuk dikirim ke email target.
+     */
+    @Post(':id/trigger-reset')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Trigger Password Reset OTP for User (Admin Override)' })
+    @ApiResponse({
+        status: 200,
+        description: 'Sinyal reset berhasil dipicu. Instruksi OTP telah dikirimkan ke email agent yang terdaftar.'
+    })
+    async triggerPasswordReset(
+        @GetUser('id') adminId: string,
+        @Param('id', ParseUUIDPipe) targetUserId: string
+    ) {
+        // Kita meneruskan adminId untuk keperluan Audit Trail wajib di layer Service
+        return this.usersService.triggerPasswordReset(adminId, targetUserId);
     }
 
     /**

@@ -1,4 +1,4 @@
-import { ApiPropertyOptional, PartialType } from '@nestjs/swagger';
+import { ApiPropertyOptional, OmitType, PartialType } from '@nestjs/swagger';
 import { Role } from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
@@ -6,13 +6,19 @@ import {
     IsOptional,
     IsString,
     IsUUID,
-    MinLength,
     Matches
 } from 'class-validator';
 import { CreateUserDto } from './create-user.dto';
 import { formatToWhatsAppNumber } from '../../../common/utils/phone-formatter.util';
 
-export class AdminUpdateUserDto extends PartialType(CreateUserDto) {
+/**
+ * [SECURITY ENFORCEMENT: ZERO-KNOWLEDGE PRINCIPLE]
+ * Mengamputasi atribut 'email' (Immutabilitas) dan 'password' (Information Expert)
+ * dari pewarisan CreateUserDto. Admin tidak boleh bisa mengganti sandi pengguna secara manual.
+ */
+export class AdminUpdateUserDto extends PartialType(
+    OmitType(CreateUserDto, ['email', 'password'] as const)
+) {
     // =================================================================
     // OVERRIDE PRIVILEGES
     // =================================================================
@@ -22,14 +28,8 @@ export class AdminUpdateUserDto extends PartialType(CreateUserDto) {
     @IsEnum(Role)
     role?: Role;
 
-    @ApiPropertyOptional({
-        example: 'NewPassword123!',
-        description: 'Password baru (Biarkan kosong jika tidak ingin mereset password user)',
-    })
-    @IsOptional()
-    @IsString()
-    @MinLength(6)
-    password?: string;
+    // [DELETED] Atribut 'password' telah dihapus secara permanen dari kelas ini.
+    // Reset sandi harus melalui alur /trigger-reset (OTP Email) demi Non-Repudiation.
 
     // Transformasi khusus untuk Agency ID:
     @ApiPropertyOptional({

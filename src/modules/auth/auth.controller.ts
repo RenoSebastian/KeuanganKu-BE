@@ -6,12 +6,21 @@ import {
   HttpStatus,
   Headers,
   Ip,
-  BadRequestException
+  BadRequestException,
+  UseGuards,
+  Req
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { RegisterDto, LoginDto, RefreshTokenDto, VerifyOtpDto, ResendOtpDto } from './dto/auth.dto';
-import { ApiTags, ApiOperation, ApiHeader } from '@nestjs/swagger';
+
+// [NEW IMPORTS] Modul DTO khusus fase Forgot Password
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpDto as VerifyPasswordOtpDto } from './dto/verify-otp.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
+
+import { ApiTags, ApiOperation, ApiHeader, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { PasswordResetScopeGuard } from './guards/scoped-jwt.guard';
 
 @ApiTags('Auth') // Label di Swagger
 @Controller('auth')
@@ -167,5 +176,52 @@ export class AuthController {
     }
     dto.deviceId = finalDeviceId;
     return this.authService.refreshTokens(dto);
+  }
+
+  // ====================================================================
+  // [PHASE 4] FORGOT PASSWORD INITIATION (Mencegah User Enumeration)
+  // ====================================================================
+  /**
+   * Limitasi ketat: 3 request per 5 menit untuk mencegah eksploitasi SMTP
+   * dan Brute-Force pencarian email.
+   */
+  @Throttle({ default: { limit: 3, ttl: 300000 } })
+  @Post('forgot-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Meminta OTP untuk pemulihan kata sandi' })
+  async forgotPassword(@Body() dto: RequestOtpDto) {
+    return this.authService.forgotPassword(dto);
+  }
+
+  // ====================================================================
+  // [PHASE 4] VERIFY PASSWORD OTP (Mencegah Brute-Force OTP)
+  // ====================================================================
+  /**
+   * Limitasi: 5 request per menit.
+   * Endpoint ini memvalidasi OTP dan akan me-return Scoped JWT berumur 10 menit.
+   */
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Post('verify-password-otp')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Validasi OTP dan terbitkan Scoped JWT (Password-Reset-Token)' })
+  async verifyPasswordOtp(@Body() dto: VerifyPasswordOtpDto) {
+    return this.authService.verifyPasswordOtp(dto);
+  }
+
+  // ====================================================================
+  // [PHASE 4] EXECUTE RESET PASSWORD (Puncak Keamanan)
+  // ====================================================================
+  /**
+   * Menggunakan Custom Guard untuk memastikan hanya Scoped JWT khusus
+   * yang dapat mengeksekusi endpoint ini. Access Token biasa akan ditolak.
+   */
+  @UseGuards(PasswordResetScopeGuard)
+  @ApiBearerAuth()
+  @Post('reset-password')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Ubah kata sandi dan terminasi semua sesi aktif' })
+  async resetPassword(@Req() req, @Body() dto: ResetPasswordDto) {
+    // req.user di-inject oleh PasswordResetScopeGuard (berisi sub/userId)
+    return this.authService.resetPassword(req.user.sub, dto);
   }
 }

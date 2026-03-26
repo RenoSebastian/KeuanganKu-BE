@@ -7,8 +7,18 @@ import {
   Logger
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service';
-import { RegisterDto, LoginDto, RefreshTokenDto, VerifyOtpDto, ResendOtpDto } from './dto/auth.dto';
+import {
+  RegisterDto,
+  LoginDto,
+  RefreshTokenDto,
+  VerifyOtpDto as VerifyLoginOtpDto, // Alias untuk OTP Auth Umum
+  ResendOtpDto
+} from './dto/auth.dto';
+import { RequestOtpDto } from './dto/request-otp.dto';
+import { VerifyOtpDto as VerifyPasswordOtpDto } from './dto/verify-otp.dto'; // Alias untuk OTP Reset Password
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 import { PrismaClientKnownRequestError } from '@prisma/client/runtime/library';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -18,8 +28,7 @@ import { RedisService } from '../redis/redis.service';
 import { NotificationGateway } from '../notification/notification.gateway';
 import { EmailService } from '../email/email.service';
 import { generateOtpEmailTemplate } from '../email/templates/otp-email.template';
-
-// [NEW] PHASE 4: Integrasi Sanitizer (Sebagai lapis ganda / safety net)
+import { getPasswordResetOtpTemplate } from '../email/templates/password-reset.template';
 import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
 
 @Injectable()
@@ -51,21 +60,19 @@ export class AuthService {
     const hash = await bcrypt.hash(dto.password, salt);
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // [NEW] Memastikan data nomor telepon (jika ada) steril sebelum masuk Redis
+    // Memastikan data nomor telepon (jika ada) steril sebelum masuk Redis
     const cleanPhoneNumber = dto.phoneNumber ? formatToWhatsAppNumber(dto.phoneNumber) : null;
 
     const otpData = {
       email: dto.email,
       fullName: dto.fullName,
       passwordHash: hash,
-      // [NEW] Menambahkan phoneNumber ke payload Redis (Sesi Pendaftaran)
       phoneNumber: cleanPhoneNumber,
       otpCode: otpCode,
       resendCount: 0,
       lastSentAt: Date.now(),
     };
 
-    // Pendaftaran biasa menggunakan format standar
     await this.redisService.setOtp(dto.email, otpData, 300);
 
     const htmlTemplate = generateOtpEmailTemplate(dto.fullName, otpCode, false, 'REGISTER');
@@ -82,7 +89,7 @@ export class AuthService {
   // =================================================================
   // [PHASE 1] VERIFY OTP: SYSTEM OF RECORD COMMIT
   // =================================================================
-  async verifyOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
+  async verifyOtp(dto: VerifyLoginOtpDto, meta: { ipAddress: string; userAgent: string }) {
     const otpData = await this.redisService.getOtp(dto.email);
 
     if (!otpData) {
@@ -99,8 +106,6 @@ export class AuthService {
           email: otpData.email,
           fullName: otpData.fullName,
           passwordHash: otpData.passwordHash,
-          // [NEW] Menarik data phoneNumber dari Redis dan menyimpannya ke Prisma
-          // Menggunakan 'any' assertion jika DTO getOtp dari RedisService belum diupdate tipe datanya
           phoneNumber: (otpData as any).phoneNumber || null,
           role: 'USER',
           usage: {
@@ -169,13 +174,12 @@ export class AuthService {
 
     const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
 
-    // Kita meminjam struktur data RedisOtpData
     const loginData = {
       email: user.email,
       fullName: user.fullName,
       otpCode: otpCode,
       passwordHash: '',
-      phoneNumber: user.phoneNumber, // [NEW] Optional passing existing phone number (aman meski null)
+      phoneNumber: user.phoneNumber,
       resendCount: 0,
       lastSentAt: Date.now(),
     };
@@ -206,7 +210,7 @@ export class AuthService {
   // =================================================================
   // [PHASE 3] VERIFY LOGIN OTP (2FA RESOLUTION)
   // =================================================================
-  async verifyLoginOtp(dto: VerifyOtpDto, meta: { ipAddress: string; userAgent: string }) {
+  async verifyLoginOtp(dto: VerifyLoginOtpDto, meta: { ipAddress: string; userAgent: string }) {
     const loginIdentifier = `login:${dto.email}`;
     const loginData = await this.redisService.getOtp(loginIdentifier);
 
@@ -407,6 +411,153 @@ export class AuthService {
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
+    };
+  }
+
+  // =================================================================
+  // [PHASE 4] FORGOT PASSWORD INITIATION
+  // =================================================================
+  async forgotPassword(dto: RequestOtpDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email },
+      select: { id: true, email: true, fullName: true }
+    });
+
+    // [SECURITY LAYER] Indistinguishable Response (Mencegah enumerasi akun)
+    const standardResponse = {
+      message: 'Jika email yang Anda masukkan terdaftar di sistem kami, instruksi pemulihan telah dikirimkan.'
+    };
+
+    if (!user) {
+      // Log silent agar analis keamanan tahu ada upaya terhadap email tak terdaftar
+      this.logger.warn(`[Suspicious] Upaya forgot password pada email tak terdaftar: ${dto.email}`);
+      return standardResponse;
+    }
+
+    // [CORE LOGIC] Menggunakan CSPRNG untuk keamanan absolut (menghindari tebakan pseudo-random)
+    const otpCode = crypto.randomInt(100000, 999999).toString();
+    const hashedOTP = await bcrypt.hash(otpCode, 10);
+
+    // Menghapus token pemulihan lama (jika user meminta ulang sebelum expired) untuk menghindari spam/race-condition
+    await this.prisma.passwordResetToken.deleteMany({
+      where: { userId: user.id }
+    });
+
+    // Menyimpan token baru ke database dengan TTL 5 menit
+    await this.prisma.passwordResetToken.create({
+      data: {
+        userId: user.id,
+        hashedOTP: hashedOTP,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+        retryCount: 0
+      }
+    });
+
+    const htmlTemplate = getPasswordResetOtpTemplate(user.fullName, otpCode, 5);
+
+    this.emailService.sendEmail(user.email, 'Pemulihan Kata Sandi KeuanganKu', htmlTemplate)
+      .catch(err => this.logger.error(`[SILENT FAIL] Gagal mengirim OTP Reset ke ${user.email}`, err));
+
+    return standardResponse;
+  }
+
+  // =================================================================
+  // [PHASE 4] VERIFY PASSWORD OTP & MINT SCOPED JWT
+  // =================================================================
+  async verifyPasswordOtp(dto: VerifyPasswordOtpDto) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: dto.email }
+    });
+
+    // Indistinguishable error untuk menjaga privasi eksistensi email
+    if (!user) throw new BadRequestException('Email atau Kode OTP tidak valid.');
+
+    const tokenRecord = await this.prisma.passwordResetToken.findFirst({
+      where: { userId: user.id }
+    });
+
+    if (!tokenRecord) {
+      throw new BadRequestException('Sesi pemulihan tidak ditemukan atau telah kedaluwarsa. Silakan minta ulang OTP.');
+    }
+
+    // Validasi Kedaluwarsa Waktu Ter-kunci (TTL)
+    if (tokenRecord.expiresAt < new Date()) {
+      await this.prisma.passwordResetToken.delete({ where: { id: tokenRecord.id } });
+      throw new BadRequestException('Kode OTP telah kedaluwarsa. Silakan ulangi proses pemulihan.');
+    }
+
+    // [SECURITY LAYER] Mekanisme Lockout setelah 3x percobaan salah
+    if (tokenRecord.retryCount >= 3) {
+      await this.prisma.passwordResetToken.delete({ where: { id: tokenRecord.id } });
+      this.logger.warn(`[Brute-Force Blocked] Sesi reset sandi dikunci untuk user ${user.email}`);
+      throw new ForbiddenException('Terlalu banyak percobaan gagal. Sesi pemulihan dibatalkan demi keamanan. Silakan ulangi proses dari awal.');
+    }
+
+    // Validasi Integritas Hash
+    const isOtpValid = await bcrypt.compare(dto.otp, tokenRecord.hashedOTP);
+
+    if (!isOtpValid) {
+      await this.prisma.passwordResetToken.update({
+        where: { id: tokenRecord.id },
+        data: { retryCount: { increment: 1 } }
+      });
+      throw new BadRequestException('Kode OTP salah.');
+    }
+
+    // Jika valid, hancurkan catatan OTP agar tidak bisa digunakan lagi (Replay Attack Prevention)
+    await this.prisma.passwordResetToken.delete({ where: { id: tokenRecord.id } });
+
+    // Mencetak SCOPED JWT (Berbeda dari Access Token standar)
+    const secret = this.config.get<string>('JWT_SECRET');
+    const scopedToken = await this.jwt.signAsync(
+      { sub: user.id, email: user.email, scope: 'password_reset_only' },
+      { secret, expiresIn: '10m' }
+    );
+
+    return {
+      message: 'Verifikasi berhasil. Silakan buat kata sandi baru Anda.',
+      reset_token: scopedToken
+    };
+  }
+
+  // =================================================================
+  // [PHASE 4] EXECUTE RESET PASSWORD & TERMINATE SESSIONS
+  // =================================================================
+  async resetPassword(userId: string, dto: ResetPasswordDto) {
+    const salt = await bcrypt.genSalt();
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, salt);
+
+    // Update sandi baru
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: { passwordHash: newPasswordHash }
+    });
+
+    // [SECURITY LAYER] Sesi Terminasi Global (Zero-Trust)
+    // Mencari semua sesi aktif untuk user ini di seluruh perangkat
+    const activeSessions = await this.prisma.activeSession.findMany({
+      where: { userId: userId }
+    });
+
+    // Menggugurkan koneksi WebSockets & Redis cache untuk setiap sesi yang ditemukan
+    for (const session of activeSessions) {
+      if (session.socketId) {
+        this.notificationGateway.forceDisconnectClient(session.socketId, 'password_changed');
+      }
+      // Kita menghapus session dari Redis menggunakan userId 
+      // (asumsi Redis menyimpan session identifier per userId)
+      await this.redisService.deleteSession(userId);
+    }
+
+    // Membersihkan tabel database sesi
+    await this.prisma.activeSession.deleteMany({
+      where: { userId: userId }
+    });
+
+    this.logger.log(`[Security Audit] Kata sandi direset untuk User ID: ${userId}. Semua sesi aktif telah diterminasi.`);
+
+    return {
+      message: 'Kata sandi berhasil diperbarui. Demi keamanan, seluruh sesi Anda pada perangkat lain telah dikeluarkan. Silakan login kembali.'
     };
   }
 }

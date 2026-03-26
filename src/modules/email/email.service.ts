@@ -1,6 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { MailerService } from '@nestjs-modules/mailer';
 
+// [NEW] Mengimpor fungsi murni (Pure Function) untuk rendering template OTP
+import { getPasswordResetOtpTemplate } from './templates/password-reset.template';
+
 /**
  * EmailService
  * Pattern: Pure Fabrication & Indirection (GRASP)
@@ -14,6 +17,27 @@ export class EmailService {
 
     // Dependency Injection untuk MailerService
     constructor(private readonly mailerService: MailerService) { }
+
+    /**
+     * [NEW] ALUR FORGOT PASSWORD (OTP)
+     * Pattern: Information Expert & Low Coupling
+     * AuthService tidak perlu tahu cara merender HTML. Tanggung jawab pembuatan 
+     * dan perakitan pesan diserahkan sepenuhnya ke domain EmailService.
+     * * @param to Alamat email tujuan
+     * @param userName Nama pengguna untuk personalisasi sapaan
+     * @param otpCode 6-digit kode CSPRNG
+     * @param ttlMinutes Batas waktu kedaluwarsa (default 5 menit)
+     */
+    async sendPasswordResetOTP(to: string, userName: string, otpCode: string, ttlMinutes: number = 5): Promise<boolean> {
+        this.logger.debug(`Memulai perakitan template OTP Reset Password untuk: ${to}`);
+
+        // 1. Rendering UI Email secara terisolasi
+        const htmlContent = getPasswordResetOtpTemplate(userName, otpCode, ttlMinutes);
+        const subject = 'Kode Pemulihan Kata Sandi - KeuanganKu';
+
+        // 2. Delegasi ke fungsi utama pengiriman yang sudah memiliki Fault Tolerance
+        return this.sendEmail(to, subject, htmlContent);
+    }
 
     /**
      * Mengeksekusi pengiriman email secara asinkronus.
