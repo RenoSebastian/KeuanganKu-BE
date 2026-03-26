@@ -4,76 +4,88 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
-import { PrismaService } from '../../../prisma/prisma.service'; // Sesuaikan path jika perlu
-import { RedisService } from '../redis/redis.service'; // [NEW] Injeksi In-Memory Storage
+import { PrismaService } from '../../../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(
     config: ConfigService,
     private prisma: PrismaService,
-    private redisService: RedisService, // [NEW] Inject Redis untuk State Management
+    private redisService: RedisService,
   ) {
     super({
-      // Ambil token dari Header: Authorization: Bearer <token>
+      // Ekstraksi token dari header 'Authorization: Bearer <token>'
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
-      ignoreExpiration: false, // Jika JWT expired, otomatis ditolak sebelum masuk ke method validate()
+      ignoreExpiration: false,
       secretOrKey: config.getOrThrow('JWT_SECRET'),
     });
   }
 
-  // Payload yang masuk ke sini sudah di-decode, diverifikasi signature-nya, dan belum expired
-  async validate(payload: {
-    sub: string;
-    email: string;
-    role: string;
-    unitKerjaId?: string;
-    sessionId: string; // [NEW] Hasil dari arsitektur Fase 4
-    type: string;      // [NEW] Indikator ACCESS atau REFRESH
-  }) {
+  /**
+   * Method validate() adalah gerbang utama otorisasi setelah signature JWT terverifikasi.
+   * Objek yang dikembalikan di sini akan menjadi 'req.user'.
+   */
+  async validate(payload: any) {
+    // =================================================================
+    // [PRIORITY] FASE 5: BYPASS LOGIC UNTUK PASSWORD RESET (SCOPED JWT)
+    // =================================================================
+    // Kita melakukan pengecekan scope sebagai prioritas tertinggi.
+    // Jika token ini adalah 'Reset Token', kita tidak boleh mengecek Redis atau DB
+    // karena user belum dalam kondisi login (authenticated session).
+    if (payload.scope === 'password_reset_only') {
+      this.logger.debug(`[AUTH] Scoped Token detected for User ID: ${payload.sub}`);
+
+      return {
+        id: payload.sub,     // Mapping 'sub' dari JWT ke 'id' untuk konsistensi sistem
+        email: payload.email,
+        scope: payload.scope // Wajib dikembalikan agar terbaca oleh PasswordResetScopeGuard
+      };
+    }
 
     // =================================================================
-    // 1. LAYER 1: VALIDASI TIPE TOKEN
+    // 1. LAYER 1: VALIDASI TIPE TOKEN (UNTUK SESI LOGIN)
     // =================================================================
-    // Mencegah eksploitasi jika ada pihak yang mencoba mengirimkan Refresh Token
-    // ke endpoint yang seharusnya dilindungi Access Token.
+    // Menolak jika Refresh Token disalahgunakan untuk akses endpoint regular.
     if (payload.type !== 'ACCESS') {
       throw new UnauthorizedException('Token yang digunakan tidak valid untuk otorisasi rute ini.');
     }
 
     // =================================================================
-    // 2. LAYER 2: VALIDASI SINGLE CONCURRENT SESSION (REDIS STATE)
+    // 2. LAYER 2: VALIDASI SINGLE CONCURRENT SESSION (REDIS)
     // =================================================================
+    // Mengambil state sesi aktif dari memori Redis.
     const activeSession = await this.redisService.getSession(payload.sub);
 
-    // Kasus A: Redis kosong (Sesi sudah expired di memori atau user telah logout manual)
     if (!activeSession) {
       throw new UnauthorizedException('Sesi aktif tidak ditemukan di server. Silakan masuk kembali.');
     }
 
-    // Kasus B: [THE KICK-OUT MECHANISM] 
-    // SessionId di token BEDA dengan SessionId di Redis.
-    // Ini berarti JWT ini adalah sisa-sisa sesi lama sebelum ditimpa oleh login terbaru.
+    // Kick-out Mechanism: Validasi apakah sessionId di JWT masih relevan dengan Redis.
     if (activeSession.sessionId !== payload.sessionId) {
-      throw new UnauthorizedException('Akses ditolak. Akun Anda sedang digunakan di perangkat lain (Concurrent Login Detected).');
+      throw new UnauthorizedException('Akses ditolak. Akun Anda sedang digunakan di perangkat lain.');
     }
 
     // =================================================================
-    // 3. LAYER 3: VALIDASI EKSISTENSI (POSTGRESQL)
+    // 3. LAYER 3: VALIDASI EKSISTENSI PENGGUNA (DB SYNC)
     // =================================================================
-    // Memastikan akun pengguna belum di-banned atau dihapus secara permanen.
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
     });
 
     if (!user) {
-      throw new UnauthorizedException('Entitas pengguna tidak ditemukan di dalam sistem.');
+      throw new UnauthorizedException('Entitas pengguna tidak ditemukan.');
     }
 
-    // Hapus password hash agar tidak terbawa ke Controller (req.user)
+    // Sanitasi: Hapus hash password agar tidak bocor ke lapisan Controller/UI.
     const { passwordHash, ...userWithoutPassword } = user;
 
-    // Object ini akan tersedia di Controller via @GetUser() atau request.user
+    // Return object ini akan disuntikkan ke Request sebagai 'user'.
     return userWithoutPassword;
   }
+
+  // Logger internal untuk mempermudah debugging jika terjadi kegagalan bypass
+  private readonly logger = {
+    debug: (msg: string) => console.log(`[JwtStrategy] ${msg}`),
+  };
 }

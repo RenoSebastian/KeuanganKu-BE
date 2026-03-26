@@ -2,7 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsEmail, IsNotEmpty, IsString, Matches } from 'class-validator';
 import { Transform } from 'class-transformer';
 
-export class VerifyOtpDto {
+export class VerifyForgotPasswordOtpDto {
     @ApiProperty({
         description: 'Email pengguna yang meminta pemulihan',
         example: 'user@perusahaan.com',

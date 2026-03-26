@@ -15,7 +15,7 @@ import {
   ResendOtpDto
 } from './dto/auth.dto';
 import { RequestOtpDto } from './dto/request-otp.dto';
-import { VerifyOtpDto as VerifyPasswordOtpDto } from './dto/verify-otp.dto'; // Alias untuk OTP Reset Password
+import { VerifyForgotPasswordOtpDto } from './dto/verify-otp.dto'; // Alias untuk OTP Reset Password
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
@@ -464,7 +464,7 @@ export class AuthService {
   // =================================================================
   // [PHASE 4] VERIFY PASSWORD OTP & MINT SCOPED JWT
   // =================================================================
-  async verifyPasswordOtp(dto: VerifyPasswordOtpDto) {
+  async verifyPasswordOtp(dto: VerifyForgotPasswordOtpDto) {
     const user = await this.prisma.user.findUnique({
       where: { email: dto.email }
     });

@@ -15,7 +15,7 @@ import { RegisterDto, LoginDto, RefreshTokenDto, VerifyOtpDto, ResendOtpDto } fr
 
 // [NEW IMPORTS] Modul DTO khusus fase Forgot Password
 import { RequestOtpDto } from './dto/request-otp.dto';
-import { VerifyOtpDto as VerifyPasswordOtpDto } from './dto/verify-otp.dto';
+import { VerifyForgotPasswordOtpDto as VerifyPasswordOtpDto } from './dto/verify-otp.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 
 import { ApiTags, ApiOperation, ApiHeader, ApiBearerAuth } from '@nestjs/swagger';

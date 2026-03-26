@@ -11,10 +11,14 @@ import { AdminPdfGeneratorService } from './services/admin-pdf-generator.service
 
 // Modules
 import { MasterDataModule } from '../master-data/master-data.module';
+import { AuthModule } from '../auth/auth.module'; // [TAMBAHKAN INI]
+import { AuditModule } from '../audit/audit.module'; // [TAMBAHKAN INI] Jika tidak global
 
 @Module({
     imports: [
-        MasterDataModule
+        MasterDataModule,
+        AuthModule,
+        AuditModule,
     ],
     controllers: [
         AdminDashboardController,
