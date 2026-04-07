@@ -51,19 +51,9 @@ export class ExportManagerService {
             throw new BadRequestException('No data found to export for the given criteria.');
         }
 
-        // 2. Prepare Response Headers (Fase 1: Backend Optimization)
-        // Mengubah ekstensi menjadi .mgc dan memaksakan oktet-stream untuk meminimalisir OS content-sniffing
-        const filename = `${query.entityType}_${query.cutoffDate}_${Date.now()}.mgc`;
-        res.setHeader('Content-Type', 'application/octet-stream');
-        res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-
-        // [CRITICAL] Mengekspos header agar Frontend Interceptor bisa membaca metadata nama file asli
-        res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition');
-
-        // 3. Generate Security Token
+        // 2. Prepare Security Token & Structure
         const pruneToken = this.generatePruneToken(query.entityType, query.cutoffDate);
 
-        // 4. Construct & Stream Payload
         const exportStructure = {
             _mgc_signature: this.MGC_SIGNATURE, // Disuntikkan di baris pertama untuk Pre-flight Stream Validation
             metadata: {
@@ -80,8 +70,23 @@ export class ExportManagerService {
             data: data,
         };
 
-        // Mengonversi payload menjadi Buffer stream biner untuk memastikan transfer data yang presisi
+        // Mengonversi payload menjadi Buffer biner
         const bufferPayload = Buffer.from(JSON.stringify(exportStructure, null, 2), 'utf-8');
+
+        // 3. Prepare Response Headers (PWA & Mobile Optimized)
+        const filename = `${query.entityType}_${query.cutoffDate}_${Date.now()}.mgc`;
+
+        res.set({
+            // Memaksakan stream biner agar OS Mobile tidak mencoba membukanya sebagai file teks
+            'Content-Type': 'application/octet-stream',
+            // Menambahkan tanda kutip pada filename untuk kompatibilitas PWA & karakter spesial
+            'Content-Disposition': `attachment; filename="${filename}"`,
+            'Content-Length': bufferPayload.length,
+            // Mengekspos header agar interceptor Axios di Frontend bisa membaca metadata
+            'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
+        });
+
+        // 4. Stream Payload
         res.write(bufferPayload);
         res.end();
     }
