@@ -27,7 +27,7 @@ import {
 // Services & DTOs
 import { UsersService } from '../users.service';
 import { CreateUserDto } from '../dto/create-user.dto';
-import { UpdateProfileDto } from '../dto/update-user.dto';
+import { AdminUpdateUserDto } from '../dto/admin-update-user.dto';
 
 // Guards & Decorators
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
@@ -112,7 +112,7 @@ export class AdminUsersController {
     async update(
         @GetUser('id') adminId: string,
         @Param('id', ParseUUIDPipe) id: string,
-        @Body() updateProfileDto: UpdateProfileDto,
+        @Body() updateProfileDto: AdminUpdateUserDto,
     ) {
         return this.usersService.updateUser(adminId, id, updateProfileDto);
     }

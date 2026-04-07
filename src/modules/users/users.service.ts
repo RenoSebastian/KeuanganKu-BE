@@ -42,6 +42,25 @@ export class UsersService {
     if (!user) return user;
     const { passwordHash, ...sanitized } = user;
 
+    // ===============================================================
+    // [FIX] SERIALIZATION DATES
+    // Paksa semua object Date menjadi format String agar tidak jadi {}
+    // ===============================================================
+    if (sanitized.dateOfBirth instanceof Date) {
+      // Diubah ke format YYYY-MM-DD agar Frontend gampang ngebacanya
+      sanitized.dateOfBirth = sanitized.dateOfBirth.toISOString().split('T')[0];
+    }
+    if (sanitized.createdAt instanceof Date) {
+      sanitized.createdAt = sanitized.createdAt.toISOString();
+    }
+    if (sanitized.updatedAt instanceof Date) {
+      sanitized.updatedAt = sanitized.updatedAt.toISOString();
+    }
+    if (sanitized.usage && sanitized.usage.updatedAt instanceof Date) {
+      sanitized.usage.updatedAt = sanitized.usage.updatedAt.toISOString();
+    }
+    // ===============================================================
+
     let remainingDays = 0;
     let isPro = false;
     let subStatus = 'INACTIVE';
@@ -67,17 +86,14 @@ export class UsersService {
       const limit = sanitized.usage.simulationQuota || 0;
 
       if (isPro) {
-        // Mode Analytics untuk PRO (Tidak ada Hard Limit, tapi dipantau kesehatannya)
         if (used > 5000) healthStatus = 'CRITICAL';
         else if (used > 2000) healthStatus = 'WARNING';
       } else {
-        // Mode Hard Limit untuk User Basic/Free
         if (limit <= 0) healthStatus = 'DEPLETED';
         else if (limit <= 2) healthStatus = 'WARNING';
       }
     }
 
-    // Menginjeksikan object 'computed' sebagai API Contract baru ke FE
     return {
       ...sanitized,
       computed: {
@@ -340,20 +356,21 @@ export class UsersService {
 
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
 
-      // [REFACTORED] Defensive Payload Construction
-      // Ekstrak secara eksplisit atribut yang TIDAK ADA atau BUKAN KOLOM di Prisma schema
-      // untuk mencegah Invalid Invocation Error dari Prisma.
+      // =================================================================
+      // [REFACTORED] DEFENSIVE PAYLOAD CONSTRUCTION (THE GATEKEEPER)
+      // =================================================================
+      // Kita mengekstrak 'agencyName' secara spesifik agar diamputasi dan 
+      // TIDAK MASUK ke dalam variabel 'validPrismaFields'.
       const {
-        email,             // Immutable Target
-        agencyName,        // Not in DB (Frontend/DTO metadata only)
-        role,              // Ditangani khusus jika perlu (untuk Admin)
-        password,          // Hash transformation
-        dateOfBirth,       // Date transformation
-        dependentCount,    // Number transformation
-        agencyId,          // Relational cleanup
-        phoneNumber,       // Format transformation
-        nip,               // Ditangani jika dikirim Admin
-        ...validPrismaFields // Ini berisi data yang AMAN untuk di-update (fullName, agentLevel, companyName, goals, avatar)
+        email,             // Immutable (Diamputasi)
+        role,              // Diekstrak untuk validasi Admin
+        password,          // Diekstrak untuk Hashing
+        dateOfBirth,       // Diekstrak untuk konversi Date
+        dependentCount,    // Diekstrak untuk konversi Number
+        agencyId,          // Diekstrak untuk konversi Relasi
+        phoneNumber,       // Diekstrak untuk sanitasi Format WA
+        nip,               // Diekstrak khusus
+        ...validPrismaFields // Berisi data AMAN: fullName, agentLevel, companyName, goals, avatar
       } = dto;
 
       // Gatekeeper Check: Jika ada percobaan menyusupkan email
@@ -361,15 +378,23 @@ export class UsersService {
         this.logger.warn(`[Security Alert] Upaya mutasi email (Immutable Target) terdeteksi pada User ID ${userId}. Payload email diamputasi.`);
       }
 
-      // Konstruksi payload update final
+      // Konstruksi payload update final (Hanya memuat field yang diakui Prisma)
       const updatePayload: Prisma.UserUpdateInput = { ...validPrismaFields };
 
       // Konversi dan injeksi field dengan transformasi spesifik
       if (dependentCount !== undefined) updatePayload.dependentCount = Number(dependentCount);
-      if (dateOfBirth) updatePayload.dateOfBirth = new Date(dateOfBirth);
+
+      // TANGANI TANGGAL LAHIR
+      if (dateOfBirth) {
+        // Pastikan formatnya benar agar Prisma tidak menolak
+        updatePayload.dateOfBirth = new Date(dateOfBirth);
+      } else if (dateOfBirth === null || dateOfBirth === '') {
+        updatePayload.dateOfBirth = null; // Izinkan user menghapus tanggal lahir
+      }
+
       if (nip) updatePayload.nip = nip;
 
-      // Izinkan pembaruan role jika ini dijalankan oleh Admin (punya adminId)
+      // Izinkan pembaruan role jika ini dijalankan oleh Admin
       if (role && adminId) {
         updatePayload.role = role as Role;
       }
@@ -389,10 +414,12 @@ export class UsersService {
         updatePayload.phoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
       }
 
-      // Eksekusi pembaruan ke Database
+      // =================================================================
+      // DATABASE PERSISTENCE (Safe Execution)
+      // =================================================================
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
-        data: updatePayload,
+        data: updatePayload, // Kini 100% bersih dari 'agencyName'
         include: {
           agency: true,
           subscription: true,
@@ -421,7 +448,7 @@ export class UsersService {
         }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
       }
 
-      // [FASE 2] Event-Driven State Sync (Publisher)
+      // Event-Driven State Sync (Publisher)
       try {
         this.notificationGateway.server.to(userId).emit('USER_PROFILE_MUTATED', {
           triggerBy: adminId ? 'ADMIN' : 'SELF',
