@@ -19,7 +19,10 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../common/guards/roles.guard';
 import { RedisService } from '../redis/redis.service';
 import { UsersService } from './users.service';
-import { EditUserDto } from './dto/edit-user.dto';
+
+// [REFACTORED] Menggunakan UpdateProfileDto sebagai Single Source of Truth
+// menggantikan EditUserDto yang tertinggal dari Domain Model (Prisma Schema).
+import { UpdateProfileDto } from './dto/update-user.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth()
@@ -59,8 +62,9 @@ export class UsersController {
     status: HttpStatus.OK,
     description: 'Profil berhasil diperbarui.',
   })
-  editUser(@GetUser('id') userId: string, @Body() dto: EditUserDto) {
+  editUser(@GetUser('id') userId: string, @Body() dto: UpdateProfileDto) {
     // [FASE 3] Keamanan: ID User murni diambil dari Token (Decoded JWT), bukan dari body request klien.
+    // [REFACTORED] DTO kini selaras dengan payload Frontend yang mengirim phoneNumber, agencyId, dll.
     return this.userService.editUser(userId, dto);
   }
 

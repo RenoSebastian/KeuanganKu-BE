@@ -10,7 +10,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { SearchService } from '../search/search.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { EditUserDto } from './dto/edit-user.dto';
-import { UpdateUserDto } from './dto/update-user.dto';
+import { UpdateProfileDto } from './dto/update-user.dto'; // Disesuaikan ke file DTO baru
 import { AuditService } from '../audit/audit.service';
 import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
 
@@ -119,7 +119,7 @@ export class UsersService {
     return this.attachComputedMetrics(user);
   }
 
-  async editUser(userId: string, dto: EditUserDto) {
+  async editUser(userId: string, dto: UpdateProfileDto) { // Menggunakan UpdateProfileDto
     this.logger.log(`User ${userId} editing self. Fields: ${Object.keys(dto).join(', ')}`);
     return this.processUpdate(userId, dto);
   }
@@ -297,7 +297,7 @@ export class UsersService {
     return this.attachComputedMetrics(user);
   }
 
-  async updateUser(adminId: string, id: string, dto: UpdateUserDto) {
+  async updateUser(adminId: string, id: string, dto: UpdateProfileDto) {
     return this.processUpdate(id, dto, adminId);
   }
 
@@ -340,16 +340,20 @@ export class UsersService {
 
       const { passwordHash: oldHash, ...oldSanitized } = oldUser;
 
-      // [FASE 1] Dynamic Payload Mapping & Mencegah Silent Data Drop
-      // [IMMUTABILITY ENFORCEMENT] Ekstrak 'email' agar tidak masuk ke variabel 'restData'
+      // [REFACTORED] Defensive Payload Construction
+      // Ekstrak secara eksplisit atribut yang TIDAK ADA atau BUKAN KOLOM di Prisma schema
+      // untuk mencegah Invalid Invocation Error dari Prisma.
       const {
-        email,
-        password,
-        dateOfBirth,
-        dependentCount,
-        agencyId,
-        phoneNumber,
-        ...restData
+        email,             // Immutable Target
+        agencyName,        // Not in DB (Frontend/DTO metadata only)
+        role,              // Ditangani khusus jika perlu (untuk Admin)
+        password,          // Hash transformation
+        dateOfBirth,       // Date transformation
+        dependentCount,    // Number transformation
+        agencyId,          // Relational cleanup
+        phoneNumber,       // Format transformation
+        nip,               // Ditangani jika dikirim Admin
+        ...validPrismaFields // Ini berisi data yang AMAN untuk di-update (fullName, agentLevel, companyName, goals, avatar)
       } = dto;
 
       // Gatekeeper Check: Jika ada percobaan menyusupkan email
@@ -357,12 +361,18 @@ export class UsersService {
         this.logger.warn(`[Security Alert] Upaya mutasi email (Immutable Target) terdeteksi pada User ID ${userId}. Payload email diamputasi.`);
       }
 
-      // RestData kini dijamin 100% bebas dari atribut 'email'
-      const updatePayload: any = { ...restData };
+      // Konstruksi payload update final
+      const updatePayload: Prisma.UserUpdateInput = { ...validPrismaFields };
 
-      // Konversi presisi tipe data
+      // Konversi dan injeksi field dengan transformasi spesifik
       if (dependentCount !== undefined) updatePayload.dependentCount = Number(dependentCount);
       if (dateOfBirth) updatePayload.dateOfBirth = new Date(dateOfBirth);
+      if (nip) updatePayload.nip = nip;
+
+      // Izinkan pembaruan role jika ini dijalankan oleh Admin (punya adminId)
+      if (role && adminId) {
+        updatePayload.role = role as Role;
+      }
 
       if (password) {
         const salt = await bcrypt.genSalt();
@@ -370,16 +380,19 @@ export class UsersService {
       }
 
       if (agencyId !== undefined) {
-        updatePayload.agencyId = agencyId === '' ? null : agencyId;
+        updatePayload.agency = agencyId === null || agencyId === ''
+          ? { disconnect: true }
+          : { connect: { id: agencyId } };
       }
 
       if (phoneNumber !== undefined) {
         updatePayload.phoneNumber = phoneNumber ? formatToWhatsAppNumber(phoneNumber) : null;
       }
 
+      // Eksekusi pembaruan ke Database
       const updatedUser = await this.prisma.user.update({
         where: { id: userId },
-        data: updatePayload, // Dieksekusi ke database tanpa memuat 'email'
+        data: updatePayload,
         include: {
           agency: true,
           subscription: true,
