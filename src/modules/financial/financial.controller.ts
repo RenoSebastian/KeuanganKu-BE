@@ -110,6 +110,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Financial-Checkup-${id}.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
 
     res.end(buffer);
@@ -132,6 +133,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Budget-Report-${id}.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
     res.end(buffer);
   }
@@ -153,6 +155,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Pension-Plan-${id}.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
     res.end(buffer);
   }
@@ -174,6 +177,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Insurance-Plan-${id}.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
     res.end(buffer);
   }
@@ -248,6 +252,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Goal-Plan-${id}.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
     res.end(buffer);
   }
@@ -310,6 +315,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Education-Family-Plan.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
     res.end(buffer);
   }
@@ -328,6 +334,7 @@ export class FinancialController {
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename=Checkup-Report-${id}.pdf`,
       'Content-Length': buffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
     res.end(buffer);
   }
@@ -369,7 +376,7 @@ export class FinancialController {
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
       'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
     });
 
     res.end(result.pdfBuffer);
@@ -390,10 +397,12 @@ export class FinancialController {
     const cleanName = data.clientName.replace(/[^a-zA-Z0-9]/g, '_');
     const filename = `RiskProfile_${cleanName}_${new Date().getTime()}.pdf`;
 
+    // Pastikan StreamableFile di NestJS mengadopsi Content-Length yang presisi
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Content-Length': pdfBuffer.length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
 
     await this.auditService.logActivity({
@@ -436,7 +445,7 @@ export class FinancialController {
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
       'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
     });
 
     res.end(result.pdfBuffer);
@@ -486,7 +495,7 @@ export class FinancialController {
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
       'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
     });
 
     res.end(result.pdfBuffer);
@@ -521,7 +530,7 @@ export class FinancialController {
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
       'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
     });
 
     res.end(result.pdfBuffer);
@@ -556,7 +565,7 @@ export class FinancialController {
       'Content-Disposition': `attachment; filename="${result.filename}"`,
       'Content-Length': result.pdfBuffer.length,
       'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition',
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
     });
 
     res.end(result.pdfBuffer);
@@ -575,7 +584,6 @@ export class FinancialController {
   ) {
     const result = await this.financialService.calculateCheckupSimulation(user, dto);
 
-    // [FIX] Injeksi Magic Token ke root object sesuai dengan interface di Frontend
     const mgcToken = this.simulationTokenService.generateMgcToken(dto);
 
     await this.auditService.logActivity({
@@ -602,10 +610,8 @@ export class FinancialController {
     @GetUser() user: client.User,
     @Res() res: express.Response,
   ) {
-    // 1. Service Call (Generate PDF from persisted state)
     const pdfBuffer = await this.financialService.downloadCheckupPdfById(id, user);
 
-    // 2. Audit Log (Download Event)
     await this.auditService.logActivity({
       userId: user.id,
       action: 'DOWNLOAD_SIMULATION_PDF',
@@ -614,11 +620,11 @@ export class FinancialController {
       details: `Agent ${user.fullName} downloaded checkup PDF ${id}`,
     });
 
-    // 3. Return Stream
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Checkup_Simulation_${id}.pdf"`,
       'Content-Length': (pdfBuffer as Buffer).length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
 
     res.end(pdfBuffer);
@@ -637,7 +643,6 @@ export class FinancialController {
   ) {
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
-    // [FIX] Injeksi Magic Token agar behavior seragam dengan endpoint Decoupled lainnya
     const mgcToken = this.simulationTokenService.generateMgcToken(dto);
 
     await this.auditService.logActivity({
@@ -664,10 +669,8 @@ export class FinancialController {
     @GetUser() user: client.User,
     @Res() res: express.Response,
   ) {
-    // 1. Service Call (Generate PDF on-demand)
     const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
 
-    // 2. Audit Log (Download Event)
     await this.auditService.logActivity({
       userId: user.id,
       action: 'DOWNLOAD_SIMULATION_PDF',
@@ -676,11 +679,11 @@ export class FinancialController {
       details: `Agent ${user.fullName} downloaded education PDF ${id}`,
     });
 
-    // 3. Return Stream
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Education_Plan_${id}.pdf"`,
       'Content-Length': (pdfBuffer as Buffer).length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
 
     res.end(pdfBuffer);
