@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsUUID, IsNumber, Min } from 'class-validator';
+import { IsNotEmpty, IsUUID, IsNumber, Min, IsOptional } from 'class-validator'; // <-- 1. Import IsOptional
 import { Type } from 'class-transformer';
 import { ApiProperty } from '@nestjs/swagger';
 
@@ -26,5 +26,6 @@ export class CreateSubscriptionOrderDto {
         format: 'binary',
         description: 'Bukti transfer (Gambar/PDF)',
     })
-    proofFile: any; // Property ini hanya untuk dokumentasi Swagger, validasi real ada di FileInterceptor
+    @IsOptional() // <-- 2. TAMBAHKAN INI AGAR TIDAK DITOLAK VALIDATION PIPE
+    proofFile: any;
 }

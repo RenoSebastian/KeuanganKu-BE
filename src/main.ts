@@ -88,7 +88,7 @@ async function bootstrap() {
    */
   const config = new DocumentBuilder()
     .setTitle('Keuanganku API')
-    .setDescription('API Dokumentasi Portal Belajar & Perencanaan Keuangan PAM Jaya')
+    .setDescription('API Dokumentasi Portal Belajar & Perencanaan Keuangan')
     .setVersion('1.0')
     .addBearerAuth()
     .addServer('http://localhost:4000', 'Local Development')
