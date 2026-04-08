@@ -389,4 +389,8 @@ export class CreateCheckupSimulationDto {
     @ApiProperty({ description: 'Gaya Hidup (Nonton/Cafe) per Bulan', default: 0 })
     @IsOptional() @TransformEmptyToZero @IsNumber() @Min(0)
     expenseLifestyle: number;
+
+    @ApiProperty({ description: 'Pengeluaran gaya hidup / kebutuhan lainnya per Bulan', default: 0 })
+    @IsOptional() @TransformEmptyToZero @IsNumber() @Min(0)
+    expenseOther: number;
 }
