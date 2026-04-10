@@ -12,10 +12,12 @@ import {
   Header,
   StreamableFile,
   ParseUUIDPipe,
+  HttpCode,
 } from '@nestjs/common';
 import * as express from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { Readable } from 'stream';
 
 // Services
 import { FinancialService } from './financial.service';
@@ -631,64 +633,73 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (UNIFIED STATELESS STREAMING)
+  // MODULE 13: AGENT EDUCATION SIMULATION (SCENARIO B: SPLIT ENDPOINTS)
   // ===========================================================================
 
-  @Post('simulation/education')
-  @ApiOperation({ summary: 'Simulasi Pendidikan & Download PDF Langsung' })
+  @Post('simulation/education/calculate')
+  @ApiOperation({ summary: 'Simulasi Pendidikan - Hitung (JSON Data)' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async createEducationSimulationUnified(
+  async calculateEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
-    @Res() res: express.Response,
   ) {
-    try {
-      // 1. Eksekusi kalkulasi dan dapatkan referensi data
-      const simulationState = await this.financialService.simulateAgentEducation(user, dto);
-      const simulationId = simulationState.simulationId || simulationState['id'];
+    // 1. Eksekusi kalkulasi matematis (Return JSON State)
+    const result = await this.financialService.simulateAgentEducation(user, dto);
 
-      if (!simulationId) {
-        throw new Error('Gagal mendapatkan ID Simulasi dari service.');
-      }
+    // 2. Generate token retensi
+    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
 
-      // 2. Langsung generate PDF Buffer menggunakan ID yang baru saja digenerate
-      const pdfBuffer = await this.financialService.downloadEducationPdfById(simulationId, user);
+    // 3. Catat aktivitas kalkulasi
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'CALCULATE_EDUCATION_SIMULATION',
+      entity: 'SimulationLog',
+      entityId: result.simulationId || 'UNKNOWN',
+      details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
+      ip: '0.0.0.0',
+      userAgent: 'AgentSystem'
+    });
 
-      // 3. Generate MGC Token untuk post-action Frontend (Save Offline / Retensi)
-      const mgcToken = this.simulationTokenService.generateMgcToken(dto);
+    // 4. Kembalikan data utuh ke Frontend agar bisa di-save ke state UI
+    return {
+      ...result,
+      mgcToken
+    };
+  }
 
-      // 4. Format penamaan file yang rapi
-      const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
-      const filename = `Rencana_Pendidikan_${cleanName}.pdf`;
+  @Get('simulation/education/:id/pdf')
+  @ApiOperation({ summary: 'Simulasi Pendidikan - Download PDF (Stream)' })
+  @HttpCode(200)
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async downloadEducationPdfById(
+    @Param('id') id: string,
+    @GetUser() user: client.User,
+    @Res({ passthrough: true }) res: express.Response,
+  ): Promise<StreamableFile> {
 
-      // 5. Catat ke sistem Audit
-      await this.auditService.logActivity({
-        userId: user.id,
-        action: 'SIMULATE_EDUCATION_UNIFIED',
-        entity: 'SimulationLog',
-        entityId: simulationId,
-        details: `Agent ${user.fullName} generated education PDF for client ${dto.clientName}`,
-        ip: '0.0.0.0',
-        userAgent: 'AgentSystem'
-      });
+    // 1. Dapatkan buffer PDF
+    const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
 
-      // 6. Tembak Header & Stream Binary ke Axios Frontend
-      res.set({
-        'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="${filename}"`,
-        'Content-Length': (pdfBuffer as Buffer).length,
-        'X-MGC-Token': mgcToken,
-        'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
-      });
+    // 2. Audit Log
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'DOWNLOAD_SIMULATION_PDF',
+      entity: 'SimulationLog',
+      entityId: id,
+      details: `Agent ${user.fullName} downloaded education PDF ${id}`,
+    });
 
-      res.end(pdfBuffer);
+    // 3. Set Header
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="Rencana_Pendidikan_${id}.pdf"`,
+      'Content-Length': (pdfBuffer as Buffer).length,
+      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
+    });
 
-    } catch (error) {
-      res.status(500).json({
-        statusCode: 500,
-        message: 'Gagal meng-generate PDF Simulasi Pendidikan',
-        error: error.message
-      });
-    }
+    // [BEST PRACTICE FIX] Ubah Buffer statis menjadi stream yang mengalir (Readable)
+    // Ini menjamin file tidak terpotong (0 bytes) atau corrupt di sisi klien
+    const stream = Readable.from(pdfBuffer as Buffer);
+    return new StreamableFile(stream);
   }
 }

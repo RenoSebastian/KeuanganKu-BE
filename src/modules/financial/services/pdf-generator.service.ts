@@ -1412,129 +1412,61 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * generateEducationSimulationPdf
-     * ------------------------------
-     * Membuat PDF simulasi Pendidikan (Agent Mode).
-     * Menerima DTO input langsung dari Frontend dan merender PDF tanpa simpan DB.
-     * * Logic Update: 
-     * - Support Multi-Anak (Array)
-     * - Support Multi-Jenjang Dinamis (TK/SD/SMP/SMA/S1/S2)
-     * - Menghitung Grand Total Summary untuk Header Laporan
-     */
     async generateEducationSimulationPdf(
         dto: CreateEducationSimulationDto,
         agent: User
     ): Promise<Buffer> {
-        const fmt = (n: number) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(n);
-        const fmtRaw = (n: number) => new Intl.NumberFormat('id-ID').format(n);
+        try {
+            this.logger.log(`Mapping Stateless Education PDF data for: ${dto.clientName}`);
 
-        // A. Calculate Summaries (Akumulasi dari semua anak)
-        let grandTotalFutureCost = 0;
-        let grandTotalMonthlySaving = 0;
+            // [BEST PRACTICE FIX] Adapter Pattern
+            // Mengubah format DTO Agen menjadi format yang dipahami oleh template HTML lama Anda
+            const mappedDataArray = dto.childrenPlans.map(child => {
 
-        // B. Process Children Data (Mapping DTO -> Template Context)
-        const processedChildren = dto.childrenPlans.map((child, index) => {
-            // Hitung Umur Anak
-            const dob = new Date(child.childDob);
-            const age = new Date().getFullYear() - dob.getFullYear();
+                // Hitung total nilai per anak
+                const totalFutureCost = child.stages.reduce((sum, s) => sum + (s.calculatedFutureValue || 0), 0);
+                const totalMonthlySaving = child.stages.reduce((sum, s) => sum + (s.calculatedMonthlySaving || 0), 0);
 
-            // Aggregate Stages Cost per Child
-            let childTotalFV = 0;
-            let childTotalMonthly = 0;
+                // Format ulang stages ke bentuk yang dimengerti oleh this.mapEducationData()
+                const stagesBreakdown = child.stages.map(stage => {
+                    // Kalkulasi PV (Present Value)
+                    let currentTotal = (stage.costEntry || 0);
+                    if (stage.costMonthly) currentTotal += (stage.costMonthly * 12 * stage.duration);
+                    if (stage.costSemester) currentTotal += (stage.costSemester * 2 * stage.duration);
+                    if (stage.costFull) currentTotal += stage.costFull;
 
-            const stages = child.stages.map(stage => {
-                // Ambil hasil hitungan FE (jika ada) atau default 0
-                const fv = stage.calculatedFutureValue || 0;
-                const pmt = stage.calculatedMonthlySaving || 0;
-
-                childTotalFV += fv;
-                childTotalMonthly += pmt;
-
-                // Hitung PV (Total Biaya Sekarang) untuk display perbandingan di tabel
-                // Logic: Entry + (Monthly * 12 * Duration) + (Semester * 2 * Duration) + Full
-                let totalPv = (stage.costEntry || 0);
-                if (stage.costMonthly) totalPv += (stage.costMonthly * 12 * stage.duration);
-                if (stage.costSemester) totalPv += (stage.costSemester * 2 * stage.duration); // Asumsi 2 semester/tahun
-                if (stage.costFull) totalPv += (stage.costFull);
+                    return {
+                        level: stage.level,
+                        costType: 'ENTRY', // Menyesuaikan logic pemetaan di mapEducationData
+                        yearsToStart: stage.startYear - new Date().getFullYear(),
+                        currentCost: currentTotal,
+                        futureCost: stage.calculatedFutureValue || 0,
+                        monthlySaving: stage.calculatedMonthlySaving || 0
+                    };
+                });
 
                 return {
-                    level: stage.level,
-                    startYear: stage.startYear,
-                    duration: stage.duration,
-
-                    // Conditional Rendering Fields for Template (Hanya tampilkan yang ada nilainya)
-                    costEntry: stage.costEntry ? fmtRaw(stage.costEntry) : null,
-                    costMonthly: stage.costMonthly ? fmtRaw(stage.costMonthly) : null,
-                    costSemester: stage.costSemester ? fmtRaw(stage.costSemester) : null,
-                    costFull: stage.costFull ? fmtRaw(stage.costFull) : null,
-
-                    totalPv: fmt(totalPv),
-                    totalFv: fmt(fv)
+                    plan: {
+                        childName: child.childName,
+                        childDob: child.childDob,
+                        inflationRate: dto.inflationRate,
+                        returnRate: dto.returnRate,
+                        method: 'GEOMETRIC' // Default as per original requirement
+                    },
+                    calculation: {
+                        totalFutureCost,
+                        monthlySaving: totalMonthlySaving,
+                        stagesBreakdown
+                    }
                 };
             });
 
-            // Update Grand Total
-            grandTotalFutureCost += childTotalFV;
-            grandTotalMonthlySaving += childTotalMonthly;
+            // Lempar ke engine utama yang SUDAH TERBUKTI berhasil merender template HTML
+            const pdfBuffer = await this.generateEducationPdf(mappedDataArray);
 
-            return {
-                index: index + 1,
-                name: child.childName,
-                currentAge: age,
-                stages: stages, // Array of stages
-                monthlySaving: fmt(childTotalMonthly) // Total PMT per anak
-            };
-        });
-
-        // C. Construct Context for Handlebars
-        const context = {
-            generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
-            simulationId: `EDU-${Math.random().toString(36).substring(7).toUpperCase()}`,
-
-            // Header Info
-            agent: {
-                name: agent.fullName,
-                agency: agent.companyName || 'MaxiPro Agency',
-                level: agent.agentLevel || 'Financial Consultant'
-            },
-            client: {
-                name: dto.clientName,
-                city: dto.clientCity,
-                job: dto.clientJob || '-',
-                phone: dto.clientPhone || '-',
-                dob: dto.clientDob ? new Date(dto.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
-                age: dto.clientDob ? new Date().getFullYear() - new Date(dto.clientDob).getFullYear() : '-',
-            },
-
-            // Global Assumptions
-            financial: {
-                inflationRate: dto.inflationRate,
-                returnRate: dto.returnRate
-            },
-
-            // Executive Summary (Kotak Atas Laporan)
-            summary: {
-                totalChildren: dto.childrenPlans.length,
-                totalFutureCost: fmt(grandTotalFutureCost),
-                totalMonthlyInvestment: fmt(grandTotalMonthlySaving),
-                shortfall: fmt(grandTotalFutureCost) // Asumsi belum ada dana tersedia (Fully Funded by Investment)
-            },
-
-            // Loop Content
-            children: processedChildren
-        };
-
-        // D. Generate PDF Core
-        try {
-            const template = handlebars.compile(educationReportTemplate);
-            const html = template(context);
-
-            // Menggunakan method generatePdfCore dengan 'networkidle0' agar style rapi
-            const pdfBuffer = await this.generatePdfCore(html, context);
-
-            this.logger.log(`Stateless Education PDF generated for: ${dto.clientName}`);
+            this.logger.log(`Successfully generated Education PDF for: ${dto.clientName}`);
             return pdfBuffer;
+
         } catch (error: any) {
             this.logger.error(`Failed to generate Education PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF Pendidikan.');
