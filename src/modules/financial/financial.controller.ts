@@ -631,107 +631,64 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (SCENARIO B: SPLIT ENDPOINTS)
-  // ===========================================================================
-
-  @Post('simulation/education/calculate')
-  @ApiOperation({ summary: 'Simulasi Pendidikan - Hitung (JSON Only)' })
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async calculateEducationSimulation(
-    @GetUser() user: client.User,
-    @Body() dto: CreateEducationSimulationDto,
-  ) {
-    const result = await this.financialService.simulateAgentEducation(user, dto);
-
-    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
-
-    await this.auditService.logActivity({
-      userId: user.id,
-      action: 'SIMULATE_EDUCATION',
-      entity: 'SimulationLog',
-      entityId: result.simulationId || 'UNKNOWN',
-      details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
-      ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
-    });
-
-    return {
-      ...result,
-      mgcToken
-    };
-  }
-
-  @Get('simulation/education/:id/pdf')
-  @ApiOperation({ summary: 'Simulasi Pendidikan - Download PDF (Stream)' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async downloadEducationPdfById(
-    @Param('id') id: string,
-    @GetUser() user: client.User,
-    @Res() res: express.Response,
-  ) {
-    const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
-
-    await this.auditService.logActivity({
-      userId: user.id,
-      action: 'DOWNLOAD_SIMULATION_PDF',
-      entity: 'SimulationLog',
-      entityId: id,
-      details: `Agent ${user.fullName} downloaded education PDF ${id}`,
-    });
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="Education_Plan_${id}.pdf"`,
-      'Content-Length': (pdfBuffer as Buffer).length,
-      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
-    });
-
-    res.end(pdfBuffer);
-  }
-
-  // ===========================================================================
-  // MODULE 13.1: AGENT EDUCATION SIMULATION (STATELESS STREAMING - UNIFIED)
+  // MODULE 13: AGENT EDUCATION SIMULATION (UNIFIED STATELESS STREAMING)
   // ===========================================================================
 
   @Post('simulation/education')
-  @ApiOperation({ summary: 'Simulasi Pendidikan & Download PDF Langsung (Stateless)' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async createEducationSimulation(
+  @ApiOperation({ summary: 'Simulasi Pendidikan & Download PDF Langsung' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async createEducationSimulationUnified(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
     @Res() res: express.Response,
   ) {
-    // 1. Eksekusi PDF Generator dari service yang sudah Anda siapkan
-    const pdfBuffer = await this.pdfGeneratorService.generateEducationSimulationPdf(dto, user);
+    try {
+      // 1. Eksekusi kalkulasi dan dapatkan referensi data
+      const simulationState = await this.financialService.simulateAgentEducation(user, dto);
+      const simulationId = simulationState.simulationId || simulationState['id'];
 
-    // 2. Buat Token MGC (Optional: jika dibutuhkan untuk save ke device)
-    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
+      if (!simulationId) {
+        throw new Error('Gagal mendapatkan ID Simulasi dari service.');
+      }
 
-    // 3. Nama file dinamis
-    const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
-    const filename = `Simulasi_Pendidikan_${cleanName}.pdf`;
+      // 2. Langsung generate PDF Buffer menggunakan ID yang baru saja digenerate
+      const pdfBuffer = await this.financialService.downloadEducationPdfById(simulationId, user);
 
-    // 4. Catat riwayat audit
-    await this.auditService.logActivity({
-      userId: user.id,
-      action: 'SIMULATE_EDUCATION',
-      entity: 'SimulationLog',
-      entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated stateless education simulation for client ${dto.clientName}`,
-      ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
-    });
+      // 3. Generate MGC Token untuk post-action Frontend (Save Offline / Retensi)
+      const mgcToken = this.simulationTokenService.generateMgcToken(dto);
 
-    // 5. Inject Headers (Sangat krusial untuk useSimulationDownload di FE)
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${filename}"`,
-      'Content-Length': pdfBuffer.length,
-      'X-MGC-Token': mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
-    });
+      // 4. Format penamaan file yang rapi
+      const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+      const filename = `Rencana_Pendidikan_${cleanName}.pdf`;
 
-    // 6. Return response sebagai binary stream
-    res.end(pdfBuffer);
+      // 5. Catat ke sistem Audit
+      await this.auditService.logActivity({
+        userId: user.id,
+        action: 'SIMULATE_EDUCATION_UNIFIED',
+        entity: 'SimulationLog',
+        entityId: simulationId,
+        details: `Agent ${user.fullName} generated education PDF for client ${dto.clientName}`,
+        ip: '0.0.0.0',
+        userAgent: 'AgentSystem'
+      });
+
+      // 6. Tembak Header & Stream Binary ke Axios Frontend
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${filename}"`,
+        'Content-Length': (pdfBuffer as Buffer).length,
+        'X-MGC-Token': mgcToken,
+        'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
+      });
+
+      res.end(pdfBuffer);
+
+    } catch (error) {
+      res.status(500).json({
+        statusCode: 500,
+        message: 'Gagal meng-generate PDF Simulasi Pendidikan',
+        error: error.message
+      });
+    }
   }
 }
