@@ -688,4 +688,50 @@ export class FinancialController {
 
     res.end(pdfBuffer);
   }
+
+  // ===========================================================================
+  // MODULE 13.1: AGENT EDUCATION SIMULATION (STATELESS STREAMING - UNIFIED)
+  // ===========================================================================
+
+  @Post('simulation/education')
+  @ApiOperation({ summary: 'Simulasi Pendidikan & Download PDF Langsung (Stateless)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async createEducationSimulation(
+    @GetUser() user: client.User,
+    @Body() dto: CreateEducationSimulationDto,
+    @Res() res: express.Response,
+  ) {
+    // 1. Eksekusi PDF Generator dari service yang sudah Anda siapkan
+    const pdfBuffer = await this.pdfGeneratorService.generateEducationSimulationPdf(dto, user);
+
+    // 2. Buat Token MGC (Optional: jika dibutuhkan untuk save ke device)
+    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
+
+    // 3. Nama file dinamis
+    const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+    const filename = `Simulasi_Pendidikan_${cleanName}.pdf`;
+
+    // 4. Catat riwayat audit
+    await this.auditService.logActivity({
+      userId: user.id,
+      action: 'SIMULATE_EDUCATION',
+      entity: 'SimulationLog',
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated stateless education simulation for client ${dto.clientName}`,
+      ip: '0.0.0.0',
+      userAgent: 'AgentSystem'
+    });
+
+    // 5. Inject Headers (Sangat krusial untuk useSimulationDownload di FE)
+    res.set({
+      'Content-Type': 'application/pdf',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Content-Length': pdfBuffer.length,
+      'X-MGC-Token': mgcToken,
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
+    });
+
+    // 6. Return response sebagai binary stream
+    res.end(pdfBuffer);
+  }
 }
