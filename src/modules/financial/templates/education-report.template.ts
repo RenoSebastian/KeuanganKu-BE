@@ -289,49 +289,51 @@ export const educationReportTemplate = `
     </div>
   </div>
 
-  {{#each children}}
+  {{#each plans}}
   <div class="child-section">
     <div class="child-header">
-      <div class="child-title">{{inc @index}}. {{this.name}}</div>
-      <div class="child-meta">Usia Saat Ini: {{this.currentAge}} Tahun</div>
+      <div class="child-title">{{inc @index}}. {{this.childName}}</div>
+      <div class="child-meta">Usia: {{this.childAge}} Tahun | Target Universitas: {{this.uniYear}}</div>
     </div>
     <div class="child-body">
       <table class="stages-table">
         <thead>
           <tr>
-            <th width="15%">Jenjang</th>
-            <th width="20%">Waktu (Tahun)</th>
-            <th width="25%">Detail Biaya</th>
-            <th width="20%" class="col-right">Biaya Sekarang (PV)</th>
-            <th width="20%" class="col-right">Biaya Nanti (FV)</th>
+            <th width="12%">Jenjang</th>
+            <th width="10%">Mulai</th>
+            <th width="8%">Durasi</th>
+            <th width="22%">Rincian Biaya</th>
+            <th width="18%" class="col-right">Biaya Sekarang</th>
+            <th width="18%" class="col-right">Biaya Masa Depan</th>
+            <th width="12%" class="col-right">Nabung/Bln</th>
           </tr>
         </thead>
         <tbody>
-          {{#each this.stages}}
+          {{#each this.groupedStages}}
+          {{#each this.items}}
           <tr>
-            <td><span class="badge-stage">{{this.level}}</span></td>
-            <td>
-               Start: <strong>{{this.startYear}}</strong><br/>
-               Durasi: {{this.duration}} Thn
-            </td>
-            <td>
-              <div style="font-size: 9px; color: #64748b;">
-                {{#if this.costEntry}}Entry: {{this.costEntry}}<br/>{{/if}}
-                {{#if this.costMonthly}}SPP: {{this.costMonthly}}/bln{{/if}}
-                {{#if this.costSemester}}UKT: {{this.costSemester}}/smt{{/if}}
-                {{#if this.costFull}}Full: {{this.costFull}}{{/if}}
-              </div>
-            </td>
-            <td class="col-right text-mono" style="opacity: 0.7;">{{this.totalPv}}</td>
-            <td class="col-right text-mono text-total">{{this.totalFv}}</td>
+            <td><span class="badge-stage">{{../levelName}}</span></td>
+            <td class="col-right"><strong>{{this.yearsToStart}}</strong></td>
+            <td class="col-right">-</td>
+            <td style="font-size: 9px; color: #64748b;">{{this.costType}}</td>
+            <td class="col-right text-mono" style="opacity: 0.7; font-size: 10px;">{{this.currentCost}}</td>
+            <td class="col-right text-mono text-total">{{this.futureCost}}</td>
+            <td class="col-right text-mono" style="color: var(--primary);">{{this.monthlySaving}}</td>
           </tr>
+          {{/each}}
           {{/each}}
         </tbody>
       </table>
       
-      <div class="child-footer">
-        <div class="cf-label">Alokasi Tabungan Untuk {{this.name}}</div>
-        <div class="cf-value">{{this.monthlySaving}} / Bulan</div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;">
+        <div style="padding: 8px; background: #f0fdf4; border-radius: 6px; border-left: 3px solid #22c55e;">
+          <div class="cf-label" style="color: #16a34a;">Total Dana Dibutuhkan</div>
+          <div class="cf-value" style="color: #16a34a;">{{this.totalFutureCost}}</div>
+        </div>
+        <div style="padding: 8px; background: #eff6ff; border-radius: 6px; border-left: 3px solid var(--primary);">
+          <div class="cf-label">Investasi Rutin</div>
+          <div class="cf-value">{{this.monthlySaving}}/Bulan</div>
+        </div>
       </div>
     </div>
   </div>

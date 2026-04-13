@@ -674,9 +674,8 @@ export class FinancialController {
   async downloadEducationPdfById(
     @Param('id') id: string,
     @GetUser() user: client.User,
-    @Res({ passthrough: true }) res: express.Response,
-  ): Promise<StreamableFile> {
-
+    @Res() res: express.Response,
+  ) {
     // 1. Dapatkan buffer PDF
     const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
 
@@ -689,17 +688,34 @@ export class FinancialController {
       details: `Agent ${user.fullName} downloaded education PDF ${id}`,
     });
 
-    // 3. Set Header
+    // 3. Generate dynamic filename dengan Prisma lookup (dengan fallback)
+    let dynamicFilename = 'Simulasi_Pendidikan.pdf';
+    try {
+      const simulationLog = await this.prisma.simulationLog.findUnique({ where: { id } });
+      if (simulationLog?.clientName) {
+        const sanitizedName = simulationLog.clientName.replace(/[^a-zA-Z0-9]/g, '').substring(0, 20);
+        const today = new Date();
+        const day = String(today.getDate()).padStart(2, '0');
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const year = String(today.getFullYear()).slice(-2);
+        dynamicFilename = `Simulasi_Pendidikan_${sanitizedName}_${day}${month}${year}.pdf`;
+      }
+    } catch (error) {
+      // Fallback ke default filename jika Prisma lookup gagal
+    }
+
+    // 4. Set response headers dengan filename dinamis
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="Rencana_Pendidikan_${id}.pdf"`,
+      'Content-Disposition': `attachment; filename="${dynamicFilename}"`,
       'Content-Length': (pdfBuffer as Buffer).length,
       'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
     });
 
-    // [BEST PRACTICE FIX] Ubah Buffer statis menjadi stream yang mengalir (Readable)
-    // Ini menjamin file tidak terpotong (0 bytes) atau corrupt di sisi klien
-    const stream = Readable.from(pdfBuffer as Buffer);
-    return new StreamableFile(stream);
+    // 5. Stream binary PDF response
+    res.end(pdfBuffer);
   }
 }

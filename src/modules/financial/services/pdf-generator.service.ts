@@ -1414,31 +1414,26 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
     async generateEducationSimulationPdf(
         dto: CreateEducationSimulationDto,
-        agent: User
+        agent: User,
+        simulationId?: string
     ): Promise<Buffer> {
         try {
             this.logger.log(`Mapping Stateless Education PDF data for: ${dto.clientName}`);
 
-            // [BEST PRACTICE FIX] Adapter Pattern
-            // Mengubah format DTO Agen menjadi format yang dipahami oleh template HTML lama Anda
             const mappedDataArray = dto.childrenPlans.map(child => {
-
-                // Hitung total nilai per anak
                 const totalFutureCost = child.stages.reduce((sum, s) => sum + (s.calculatedFutureValue || 0), 0);
                 const totalMonthlySaving = child.stages.reduce((sum, s) => sum + (s.calculatedMonthlySaving || 0), 0);
 
-                // Format ulang stages ke bentuk yang dimengerti oleh this.mapEducationData()
                 const stagesBreakdown = child.stages.map(stage => {
-                    // Kalkulasi PV (Present Value)
                     let currentTotal = (stage.costEntry || 0);
-                    if (stage.costMonthly) currentTotal += (stage.costMonthly * 12 * stage.duration);
-                    if (stage.costSemester) currentTotal += (stage.costSemester * 2 * stage.duration);
+                    if (stage.costMonthly) currentTotal += (stage.costMonthly * 12 * (stage.duration || 1));
+                    if (stage.costSemester) currentTotal += (stage.costSemester * 2 * (stage.duration || 1));
                     if (stage.costFull) currentTotal += stage.costFull;
 
                     return {
                         level: stage.level,
-                        costType: 'ENTRY', // Menyesuaikan logic pemetaan di mapEducationData
-                        yearsToStart: stage.startYear - new Date().getFullYear(),
+                        costType: 'ENTRY',
+                        yearsToStart: (stage.startYear || new Date().getFullYear()) - new Date().getFullYear(),
                         currentCost: currentTotal,
                         futureCost: stage.calculatedFutureValue || 0,
                         monthlySaving: stage.calculatedMonthlySaving || 0
@@ -1451,7 +1446,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                         childDob: child.childDob,
                         inflationRate: dto.inflationRate,
                         returnRate: dto.returnRate,
-                        method: 'GEOMETRIC' // Default as per original requirement
+                        method: 'GEOMETRIC'
                     },
                     calculation: {
                         totalFutureCost,
@@ -1461,8 +1456,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 };
             });
 
-            // Lempar ke engine utama yang SUDAH TERBUKTI berhasil merender template HTML
-            const pdfBuffer = await this.generateEducationPdf(mappedDataArray);
+            const context = this.mapEducationSimulationContext(mappedDataArray, dto, agent, simulationId);
+            const template = handlebars.compile(educationReportTemplate);
+            const html = template(context);
+            const pdfBuffer = await this.generatePdfCore(html, context);
 
             this.logger.log(`Successfully generated Education PDF for: ${dto.clientName}`);
             return pdfBuffer;
@@ -1471,5 +1468,104 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             this.logger.error(`Failed to generate Education PDF: ${error.message}`);
             throw new Error('Gagal memproses laporan PDF Pendidikan.');
         }
+    }
+
+    private mapEducationSimulationContext(
+        dataArray: any[],
+        dto: CreateEducationSimulationDto,
+        agent: User,
+        simulationId?: string
+    ) {
+        const fmt = (value: any) => new Intl.NumberFormat('id-ID', { style: 'currency', currency: 'IDR', maximumFractionDigits: 0 }).format(Number(value) || 0);
+        const num = (value: any) => Number(value) || 0;
+
+        const clientDob = dto.clientDob ? new Date(dto.clientDob) : null;
+        const clientAge = clientDob ? new Date().getFullYear() - clientDob.getFullYear() : '-';
+        const clientDobFormatted = clientDob ? clientDob.toLocaleDateString('id-ID', { day: '2-digit', month: '2-digit', year: 'numeric' }) : '-';
+
+        const plans = dataArray.map(item => {
+            const plan = item.plan;
+            const calc = item.calculation;
+
+            const dob = plan.childDob ? new Date(plan.childDob) : new Date();
+            const today = new Date();
+            let age = today.getFullYear() - dob.getFullYear();
+            if (today.getMonth() < dob.getMonth() || (today.getMonth() === dob.getMonth() && today.getDate() < dob.getDate())) {
+                age--;
+            }
+
+            const stagesMap = new Map<string, any[]>();
+            (calc.stagesBreakdown || []).forEach((stage: any) => {
+                const level = stage.level;
+                if (!stagesMap.has(level)) {
+                    stagesMap.set(level, []);
+                }
+                stagesMap.get(level)?.push({
+                    costType: stage.costType === 'ENTRY' ? 'Uang Pangkal' : 'SPP Tahunan',
+                    yearsToStart: stage.yearsToStart,
+                    currentCost: fmt(stage.currentCost),
+                    futureCost: fmt(stage.futureCost),
+                    monthlySaving: fmt(stage.monthlySaving),
+                    rawFutureCost: num(stage.futureCost)
+                });
+            });
+
+            const groupedStages = Array.from(stagesMap.entries())
+                .map(([levelName, items]) => {
+                    const subTotalRaw = items.reduce((sum, i) => sum + i.rawFutureCost, 0);
+                    const minYears = Math.min(...items.map(i => i.yearsToStart));
+                    return {
+                        levelName,
+                        items,
+                        subTotalCost: fmt(subTotalRaw),
+                        startIn: minYears
+                    };
+                });
+
+            return {
+                childName: plan.childName,
+                childAge: age,
+                childDob: plan.childDob,
+                uniYear: dob.getFullYear() + 18,
+                inflationRate: plan.inflationRate,
+                returnRate: plan.returnRate,
+                method: plan.method === 'GEOMETRIC' ? 'Geometrik (Bertahap)' : 'Statik',
+                totalFutureCost: fmt(calc.totalFutureCost),
+                monthlySaving: fmt(calc.monthlySaving),
+                groupedStages
+            };
+        });
+
+        const totalFutureCost = dataArray.reduce((sum, item) => sum + num(item.calculation.totalFutureCost), 0);
+        const totalMonthlyInvestment = dataArray.reduce((sum, item) => sum + num(item.calculation.monthlySaving), 0);
+
+        return {
+            client: {
+                name: dto.clientName || '-',
+                dob: clientDobFormatted,
+                age: clientAge,
+                city: dto.clientCity || '-',
+                job: dto.clientJob || '-',
+                phone: dto.clientPhone || '-'
+            },
+            agent: {
+                name: agent.fullName || 'Financial Advisor',
+                agency: agent.companyName || 'KeuanganKu',
+                email: agent.email || '-'
+            },
+            financial: {
+                inflationRate: dto.inflationRate || 0,
+                returnRate: dto.returnRate || 0,
+                method: 'Geometrik (Bertahap)'
+            },
+            summary: {
+                totalChildren: plans.length,
+                totalFutureCost: fmt(totalFutureCost),
+                totalMonthlyInvestment: fmt(totalMonthlyInvestment),
+                generatedAt: new Date().toLocaleString('id-ID', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+            },
+            simulationId: simulationId || dto.sessionId || 'N/A',
+            plans
+        };
     }
 } 
