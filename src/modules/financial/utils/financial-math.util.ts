@@ -26,14 +26,19 @@ export interface RatioDetail {
   id: string;
   label: string;
   value: number;
-  benchmark: string;
+  type: 'PERCENTAGE' | 'MULTIPLIER';
+  idealCondition: string;
   statusColor: 'GREEN_DARK' | 'GREEN_LIGHT' | 'YELLOW' | 'RED';
-  recommendation: string;
+  analysis: string;
+  // Backward compatibility fields
+  recommendation?: string;
+  benchmark?: string;
   status?: string;
 }
 
 export interface HealthAnalysisResult {
   score: number;
+  status: string;
   globalStatus: 'SEHAT' | 'WASPADA' | 'BAHAYA';
   ratios: RatioDetail[];
   netWorth: number; // H. Kekayaan Bersih
@@ -54,7 +59,7 @@ export const calculateFinancialHealth = (
   // --- 1. AGGREGATION (PENGGABUNGAN DATA) ---
 
   // Helper untuk memastikan angka valid (prevent NaN)
-  const val = (n: number) => Number(n) || 0;
+  const val = (n: any) => Number(n) || 0;
 
   // NOTE: Sesuai kesepakatan, SEMUA data arus kas (Flow) dari Frontend
   // dikirim dalam satuan BULANAN. Backend akan mengalikan 12 untuk hitungan tahunan.
@@ -168,325 +173,191 @@ export const calculateFinancialHealth = (
   // Surplus/Defisit (Q)
   const surplusDeficit = (totalAnnualIncome - totalAnnualExpense) / 12; // Return dalam satuan Bulanan
 
-  // --- 2. PERHITUNGAN 8 RASIO (LOGIKA TETAP SAMA) ---
+
+  // =========================================================================
+  // 2. KALKULASI 8 RASIO (Berdasarkan Dokumen Standardisasi Narasi)
+  // =========================================================================
+
   const ratios: RatioDetail[] = [];
+  let totalScore = 0;
 
-  // #1. RASIO DANA DARURAT (A / P)
-  const r1 = monthlyExpense > 0 ? totalLiquid / monthlyExpense : 0;
-  let s1: any = 'RED';
-  let rec1 =
-    'Dana darurat Anda belum ideal. Disarankan mulai membangun dana darurat secara bertahap dari penghasilan bulanan hingga mencapai minimal 3–6 kali pengeluaran.';
-
-  if (r1 >= 3 && r1 <= 6) {
-    s1 = 'GREEN_DARK';
-    rec1 =
-      'Dana darurat Anda berada pada kondisi ideal dan telah memberikan perlindungan keuangan yang memadai.';
-  } else if (r1 > 6 && r1 <= 12) {
-    s1 = 'GREEN_LIGHT';
-    rec1 =
-      'Kondisi dana darurat masih tergolong baik. Apabila Anda belum memiliki investasi, sebagian dana ini dapat mulai dialokasikan ke instrumen investasi berisiko rendah–menengah seperti obligasi atau logam mulia.';
-  } else if (r1 > 12) {
-    s1 = 'YELLOW';
-    rec1 =
-      'Dana darurat Anda sangat memadai. Apabila belum memiliki investasi, disarankan mengalokasikan sebagian dana ke instrumen investasi jangka menengah–panjang seperti reksa dana atau saham.';
-  } else {
-    s1 = 'RED'; // < 3
-  }
-
-  ratios.push({
-    id: 'emergency_fund',
-    label: 'Rasio Dana Darurat',
-    value: parseFloat(r1.toFixed(1)),
-    benchmark: '3 - 6 kali',
-    statusColor: s1,
-    recommendation: rec1,
-  });
-
-  // #2. RASIO LIKUIDITAS vs KEKAYAAN BERSIH (A / H)
-  const r2 = netWorth > 0 ? (totalLiquid / netWorth) * 100 : 0;
-  let s2: any = 'RED';
-  let rec2 =
-    'Likuiditas Anda kurang ideal. Disarankan meningkatkan aset likuid agar keuangan lebih fleksibel dan aman terhadap kondisi darurat.';
-
-  if (r2 > 50) {
-    s2 = 'GREEN_DARK'; // Logic disesuaikan agar >50% hijau tua (sangat likuid)
-    rec2 =
-      'Likuiditas Anda sangat tinggi. Kondisi ini aman, namun dapat menjadi kurang optimal apabila dana terlalu banyak mengendap dan belum dimanfaatkan untuk investasi.';
-  } else if (r2 >= 15) {
-    // Benchmark Min 15%
-    s2 = 'GREEN_LIGHT';
-    rec2 =
-      'Kondisi likuiditas tergolong sangat baik dan seimbang antara keamanan dan potensi pertumbuhan.';
-  } else if (r2 >= 10) {
-    s2 = 'YELLOW';
-    rec2 =
-      'Likuiditas Anda berada pada batas ideal minimum dan masih dalam kondisi sehat.';
-  } else {
-    s2 = 'RED'; // < 10
-  }
-
-  ratios.push({
-    id: 'liq_networth',
-    label: 'Likuiditas vs Net Worth',
-    value: parseFloat(r2.toFixed(1)),
-    benchmark: 'Min 15%',
-    statusColor: s2,
-    recommendation: rec2,
-  });
-
-  // #3. RASIO TABUNGAN (M / I)
-  const r3 =
-    totalAnnualIncome > 0
-      ? (totalAnnualSaving / totalAnnualIncome) * 100
-      : 0;
-  let s3: any = 'RED';
-  let rec3 =
-    'Rasio tabungan belum ideal. Disarankan meninjau kembali pengeluaran dan mulai meningkatkan porsi tabungan secara bertahap.';
-
-  if (r3 >= 30) {
-    s3 = 'GREEN_DARK';
-    rec3 =
-      'Tingkat menabung sangat baik. Anda memiliki disiplin keuangan yang kuat dan ruang yang besar untuk mencapai tujuan finansial lebih cepat.';
-  } else if (r3 >= 20) {
-    s3 = 'GREEN_LIGHT';
-    rec3 =
-      'Rasio tabungan tergolong baik dan menunjukkan perencanaan keuangan yang matang.';
-  } else if (r3 <= 10) {
-    s3 = 'YELLOW';
-    rec3 =
-      'Rasio tabungan sudah memenuhi standar minimal dan berada pada kondisi sehat.';
-  } else {
-    s3 = 'RED'; // < 10
-  }
-
-  ratios.push({
-    id: 'saving_ratio',
-    label: 'Rasio Tabungan',
-    value: parseFloat(r3.toFixed(1)),
-    benchmark: 'Min 10%',
-    statusColor: s3,
-    recommendation: rec3,
-  });
-
-  // #4. RASIO UTANG vs ASET (G / D)
-  const r4 = totalAssets > 0 ? (totalDebt / totalAssets) * 100 : 0;
-  let s4: any = 'RED';
-  let rec4 = 'Bahaya! Utang > 50% Aset. Risiko kebangkrutan.';
-
-  if (r4 <= 15) {
-    s4 = 'GREEN_DARK';
-    rec4 = 'Struktur utang sangat sehat dan risiko keuangan relatif rendah.';
-  } else if (r4 <= 35) {
-    s4 = 'GREEN_LIGHT';
-    rec4 = 'Struktur utang masih aman dan berada dalam kondisi yang terkontrol.';
-  } else if (r4 <= 50) {
-    s4 = 'YELLOW';
-    rec4 =
-      'Utang mulai mendekati batas ideal. Disarankan berhati-hati dalam menambah utang baru.';
-  } else {
-    s4 = 'RED'; // > 50
-  }
-
-  ratios.push({
-    id: 'debt_asset_ratio',
-    label: 'Rasio Utang vs Aset',
-    value: parseFloat(r4.toFixed(1)),
-    benchmark: 'Maks 50%',
-    statusColor: s4,
-    recommendation: rec4,
-  });
-
-  // #5. RASIO CICILAN UTANG (K / I)
-  const r5 =
-    totalAnnualIncome > 0
-      ? (totalAnnualInstallment / totalAnnualIncome) * 100
-      : 0;
-  let s5: any = 'RED';
-  let rec5 =
-    'Beban cicilan masih dalam batas wajar, namun perlu dikelola dengan disiplin.';
-
-  if (r5 < 10) {
-    s5 = 'GREEN_DARK';
-    rec5 =
-      'Beban cicilan sangat ringan dan memberikan ruang besar untuk menabung dan berinvestasi.';
-  } else if (r5 <= 15) {
-    s5 = 'GREEN_LIGHT';
-    rec5 = 'Beban cicilan masih sangat aman dan sehat.';
-  } else if (r5 <= 35) {
-    s5 = 'YELLOW';
-    rec5 =
-      'Beban cicilan masih dalam batas wajar, namun perlu dikelola dengan disiplin.';
-  } else {
-    s5 = 'RED'; // > 35
-  }
-
-  ratios.push({
-    id: 'debt_service_ratio',
-    label: 'Rasio Cicilan Total',
-    value: parseFloat(r5.toFixed(1)),
-    benchmark: 'Maks 35%',
-    statusColor: s5,
-    recommendation: rec5,
-  });
-
-  // #6. RASIO CICILAN KONSUMTIF (J / I)
-  const r6 =
-    totalAnnualIncome > 0
-      ? (totalConsumptiveInstallment / totalAnnualIncome) * 100
-      : 0;
-  let s6: any = 'RED';
-  let rec6 =
-    'Utang konsumtif terlalu tinggi dan berisiko mengganggu kesehatan keuangan jangka panjang.';
-
-  if (r6 <= 5) {
-    s6 = 'GREEN_DARK';
-    rec6 =
-      'Utang konsumtif sangat terkendali dan menunjukkan perilaku keuangan yang disiplin.';
-  } else if (r6 <= 10) {
-    s6 = 'GREEN_LIGHT';
-    rec6 = 'Utang konsumtif masih dalam kondisi aman.';
-  } else if (r6 <= 15) {
-    s6 = 'YELLOW';
-    rec6 =
-      'Utang konsumtif mendekati batas ideal. Perlu pengendalian agar tidak meningkat.';
-  } else {
-    s6 = 'RED';
-  }
-
-  ratios.push({
-    id: 'consumptive_ratio',
-    label: 'Rasio Utang Konsumtif',
-    value: parseFloat(r6.toFixed(1)),
-    benchmark: 'Maks 15%',
-    statusColor: s6,
-    recommendation: rec6,
-  });
-
-  // #7. RASIO ASET INVESTASI vs KEKAYAAN BERSIH (C / H)
-  const r7 = netWorth > 0 ? (totalInvestment / netWorth) * 100 : 0;
-  let s7: any = 'RED';
-  let rec7 =
-    'Sebagian besar kekayaan belum produktif. Perlu perencanaan investasi yang lebih terstruktur.';
-
-  if (r7 >= 50) {
-    s7 = 'GREEN_DARK';
-    rec7 =
-      'Struktur kekayaan sangat produktif dan mendukung tujuan keuangan jangka panjang.';
-  } else if (r7 >= 25) {
-    s7 = 'GREEN_LIGHT';
-    rec7 =
-      'Kondisi cukup baik, namun masih ada ruang untuk meningkatkan porsi aset produktif.';
-  } else if (r7 >= 10) {
-    s7 = 'YELLOW'; // Warning jika di bawah 50 tapi diatas 25
-    rec7 =
-      'Aset produktif masih relatif kecil. Disarankan mulai meningkatkan investasi secara bertahap.';
-  } else {
-    s7 = 'RED'; // < 25
-  }
-
-  ratios.push({
-    id: 'invest_asset_ratio',
-    label: 'Rasio Aset Investasi',
-    value: parseFloat(r7.toFixed(1)),
-    benchmark: 'Min 50%',
-    statusColor: s7,
-    recommendation: rec7,
-  });
-
-  // #8. RASIO SOLVABILITAS (H / D)
-  const r8 = totalAssets > 0 ? (netWorth / totalAssets) * 100 : 0;
-  let s8: any = 'RED';
-  let rec8 =
-    'Risiko keuangan tinggi. Diperlukan perencanaan keuangan yang lebih serius dan terarah.';
-
-  if (r8 >= 75) {
-    s8 = 'GREEN_DARK';
-    rec8 =
-      'Kondisi solvabilitas sangat kuat dan risiko kebangkrutan sangat rendah.';
-  } else if (r8 >= 50) {
-    s8 = 'GREEN_LIGHT';
-    rec8 = 'Kondisi solvabilitas baik dan masih dalam batas aman.';
-  } else if (r8 >= 25) {
-    s8 = 'YELLOW';
-    rec8 =
-      'Kondisi mulai rentan. Disarankan memperkuat aset atau mengurangi utang.';
-  } else {
-    s8 = 'RED'; // < 30
-  }
-
-  ratios.push({
-    id: 'solvency_ratio',
-    label: 'Rasio Solvabilitas',
-    value: parseFloat(r8.toFixed(1)),
-    benchmark: 'Min 50%',
-    statusColor: s8,
-    recommendation: rec8,
-  });
-
-  // --- 3. LOGIKA PENENTUAN STATUS AKHIR ---
-
-  // =================================================================
-  // 3. HITUNG SKOR KESEHATAN (WEIGHTED DISTRIBUTION LOGIC)
-  // =================================================================
-
-  // A. Definisikan Bobot Nilai (0-100)
-  // Logic: Hijau mengangkat nilai, Merah menjatuhkan nilai secara signifikan
-  const SCORE_WEIGHTS: Record<string, number> = {
-    GREEN_DARK: 100, // Sempurna
-    GREEN_LIGHT: 85, // Sehat
-    YELLOW: 50, // Waspada (Setengah lulus)
-    RED: 15, // Bahaya (Nilai sangat rendah)
+  // Helper untuk Skoring Otomatis
+  const addScore = (status: string) => {
+    if (status.includes('GREEN')) totalScore += 12.5;
+    else if (status === 'YELLOW') totalScore += 6.25;
   };
 
-  // B. Hitung Total Poin dari semua Rasio
-  let totalPoints = 0;
-  const totalRatios = ratios.length;
-
-  // Variabel bantu untuk counting (opsional, untuk debug)
-  let redCount = 0;
-
-  ratios.forEach((r) => {
-    // Ambil bobot berdasarkan warna, default 0 jika error
-    const points = SCORE_WEIGHTS[r.statusColor] || 0;
-    totalPoints += points;
-
-    if (r.statusColor === 'RED') redCount++;
+  // --- 1. Rasio Dana Darurat ---
+  const emergencyFundValue = monthlyExpense > 0 ? (totalLiquid / monthlyExpense) : 0;
+  let efStatus: any = 'RED'; let efAnalysis = '';
+  if (emergencyFundValue > 12) {
+    efStatus = 'GREEN_DARK'; efAnalysis = 'Dana darurat Anda sangat memadai. Apabila belum memiliki investasi, disarankan mengalokasikan sebagian dana ke instrumen investasi jangka menengah–panjang seperti reksa dana atau saham.';
+  } else if (emergencyFundValue >= 7) {
+    efStatus = 'GREEN_LIGHT'; efAnalysis = 'Kondisi dana darurat masih tergolong baik. Apabila Anda belum memiliki investasi, sebagian dana ini dapat mulai dialokasikan ke instrumen investasi berisiko rendah–menengah seperti obligasi atau logam mulia.';
+  } else if (emergencyFundValue >= 3) {
+    efStatus = 'GREEN_LIGHT'; efAnalysis = 'Dana darurat Anda berada pada kondisi ideal dan telah memberikan perlindungan keuangan yang memadai.';
+  } else {
+    efStatus = 'RED'; efAnalysis = 'Dana darurat Anda belum ideal. Disarankan mulai membangun dana darurat secara bertahap dari penghasilan bulanan hingga mencapai minimal 3–6 kali pengeluaran.';
+  }
+  addScore(efStatus);
+  ratios.push({
+    id: 'emergency_fund', label: 'Rasio Dana Darurat', value: emergencyFundValue, type: 'MULTIPLIER', idealCondition: '3 - 6x',
+    statusColor: efStatus, analysis: efAnalysis, recommendation: efAnalysis
   });
 
-  // C. Kalkulasi Final Score (Rata-rata)
-  // Rumus: Total Poin / Jumlah Rasio
-  let score = totalRatios > 0 ? Math.round(totalPoints / totalRatios) : 0;
-
-  // D. Tentukan Status Global berdasarkan Range Nilai
-  let globalStatus: 'SEHAT' | 'WASPADA' | 'BAHAYA';
-
-  if (score >= 80) {
-    // Skor >= 80: SEHAT (Mayoritas Hijau)
-    globalStatus = 'SEHAT';
-  } else if (score >= 50) {
-    // Skor 50 - 79: WASPADA (Campuran Hijau/Kuning atau ada sedikit Merah)
-    globalStatus = 'WASPADA';
+  // --- 2. Rasio Aset Likuid terhadap Kekayaan Bersih ---
+  const liquidToNetWorth = netWorth > 0 ? (totalLiquid / netWorth) * 100 : 0;
+  let liqStatus: any = 'RED'; let liqAnalysis = '';
+  if (liquidToNetWorth > 50) {
+    liqStatus = 'GREEN_DARK'; liqAnalysis = 'Likuiditas Anda sangat tinggi. Kondisi ini aman, namun mungkin kurang optimal karena dana tunai cenderung tergerus inflasi. Pertimbangkan untuk memindahkan sebagian ke aset investasi.';
+  } else if (liquidToNetWorth >= 15) {
+    liqStatus = 'GREEN_LIGHT'; liqAnalysis = 'Porsi aset likuid Anda sudah sangat ideal. Anda memiliki fleksibilitas keuangan yang baik sekaligus ruang untuk mengembangkan kekayaan.';
+  } else if (liquidToNetWorth >= 10) {
+    liqStatus = 'YELLOW'; liqAnalysis = 'Likuiditas Anda mendekati batas aman. Pastikan tidak ada pengeluaran besar dalam waktu dekat yang dapat mengganggu arus kas.';
   } else {
-    // Skor < 50: BAHAYA (Dominan Merah/Kuning)
-    globalStatus = 'BAHAYA';
+    liqStatus = 'RED'; liqAnalysis = 'Likuiditas Anda terlalu rendah. Jika terjadi keadaan darurat, Anda mungkin terpaksa berutang atau mencairkan investasi dengan kerugian. Segera tingkatkan saldo tabungan Anda.';
+  }
+  addScore(liqStatus);
+  ratios.push({
+    id: 'liquid_to_net_worth', label: 'Likuiditas thd Kekayaan', value: liquidToNetWorth, type: 'PERCENTAGE', idealCondition: 'Min 15%',
+    statusColor: liqStatus, analysis: liqAnalysis, recommendation: liqAnalysis
+  });
+
+  // --- 3. Rasio Kemampuan Menabung (Tabungan thd Pendapatan) ---
+  const savingToIncome = totalAnnualIncome > 0 ? (totalAnnualSaving / totalAnnualIncome) * 100 : 0;
+  let savStatus: any = 'RED'; let savAnalysis = '';
+  if (savingToIncome > 20) {
+    savStatus = 'GREEN_DARK'; savAnalysis = 'Kemampuan menabung Anda sangat luar biasa. Anda berada di jalur yang cepat untuk mencapai kemandirian finansial.';
+  } else if (savingToIncome >= 10) {
+    savStatus = 'GREEN_LIGHT'; savAnalysis = 'Porsi tabungan Anda sudah ideal. Pertahankan disiplin ini untuk memastikan tercapainya tujuan keuangan di masa depan.';
+  } else if (savingToIncome >= 5) {
+    savStatus = 'YELLOW'; savAnalysis = 'Anda sudah mulai menabung, namun porsinya masih perlu ditingkatkan agar lebih aman menghadapi inflasi dan kebutuhan masa depan.';
+  } else {
+    savStatus = 'RED'; savAnalysis = 'Tingkat tabungan Anda sangat rendah. Segera evaluasi pengeluaran Anda dan cari pos yang bisa dipangkas agar dapat menabung lebih banyak.';
+  }
+  addScore(savStatus);
+  ratios.push({
+    id: 'saving_to_income', label: 'Kemampuan Menabung', value: savingToIncome, type: 'PERCENTAGE', idealCondition: 'Min 10%',
+    statusColor: savStatus, analysis: savAnalysis, recommendation: savAnalysis
+  });
+
+  // --- 4. Rasio Kemampuan Melunasi Utang (Total Utang thd Aset) ---
+  const debtToAsset = totalAssets > 0 ? (totalDebt / totalAssets) * 100 : 0;
+  let dtaStatus: any = 'RED'; let dtaAnalysis = '';
+  if (debtToAsset < 15) {
+    dtaStatus = 'GREEN_DARK'; dtaAnalysis = 'Kondisi keuangan Anda sangat sehat karena beban utang terhadap aset sangat kecil.';
+  } else if (debtToAsset <= 35) {
+    dtaStatus = 'GREEN_LIGHT'; dtaAnalysis = 'Posisi utang Anda masih dalam batas wajar dan aman.';
+  } else if (debtToAsset <= 50) {
+    dtaStatus = 'YELLOW'; dtaAnalysis = 'Beban utang Anda cukup tinggi. Perlu kewaspadaan ekstra dan hindari menambah utang baru.';
+  } else {
+    dtaStatus = 'RED'; dtaAnalysis = 'Beban utang Anda sudah masuk zona bahaya. Sebagian besar aset Anda dibiayai oleh utang. Prioritaskan pelunasan utang secepatnya.';
+  }
+  addScore(dtaStatus);
+  ratios.push({
+    id: 'debt_to_asset', label: 'Kemampuan Melunasi Utang', value: debtToAsset, type: 'PERCENTAGE', idealCondition: 'Maks 50%',
+    statusColor: dtaStatus, analysis: dtaAnalysis, recommendation: dtaAnalysis
+  });
+
+  // --- 5. Rasio Beban Cicilan Utang (Cicilan thd Pendapatan) ---
+  const debtService = totalAnnualIncome > 0 ? (totalAnnualInstallment / totalAnnualIncome) * 100 : 0;
+  let dsStatus: any = 'RED'; let dsAnalysis = '';
+  if (debtService < 10) {
+    dsStatus = 'GREEN_DARK'; dsAnalysis = 'Beban cicilan Anda sangat ringan, memberikan keleluasaan besar dalam mengatur arus kas harian.';
+  } else if (debtService <= 15) {
+    dsStatus = 'GREEN_LIGHT'; dsAnalysis = 'Beban cicilan masih sangat aman dan tidak membebani kondisi keuangan.';
+  } else if (debtService <= 35) {
+    dsStatus = 'YELLOW'; dsAnalysis = 'Beban cicilan Anda masih dalam batas toleransi. Namun, hindari mengambil kredit baru sebelum ada utang yang lunas.';
+  } else {
+    dsStatus = 'RED'; dsAnalysis = 'Beban cicilan Anda terlalu besar dan berisiko tinggi menyebabkan gagal bayar. Kurangi pengeluaran lain untuk fokus melunasi utang.';
+  }
+  addScore(dsStatus);
+  ratios.push({
+    id: 'debt_service', label: 'Beban Cicilan Utang', value: debtService, type: 'PERCENTAGE', idealCondition: 'Maks 35%',
+    statusColor: dsStatus, analysis: dsAnalysis, recommendation: dsAnalysis
+  });
+
+  // --- 6. Rasio Cicilan Utang Konsumtif ---
+  const consumptiveDebtService = totalAnnualIncome > 0 ? (totalConsumptiveInstallment / totalAnnualIncome) * 100 : 0;
+  let cdsStatus: any = 'RED'; let cdsAnalysis = '';
+  if (consumptiveDebtService < 5) {
+    cdsStatus = 'GREEN_DARK'; cdsAnalysis = 'Utang konsumtif sangat terkendali dan menunjukkan perilaku keuangan yang disiplin.';
+  } else if (consumptiveDebtService <= 10) {
+    cdsStatus = 'GREEN_LIGHT'; cdsAnalysis = 'Utang konsumtif masih dalam kondisi aman.';
+  } else if (consumptiveDebtService <= 15) {
+    cdsStatus = 'YELLOW'; cdsAnalysis = 'Utang konsumtif mendekati batas ideal. Perlu pengendalian agar tidak meningkat.';
+  } else {
+    cdsStatus = 'RED'; cdsAnalysis = 'Utang konsumtif terlalu tinggi dan berisiko mengganggu kesehatan keuangan jangka panjang.';
+  }
+  addScore(cdsStatus);
+  ratios.push({
+    id: 'consumptive_debt_service', label: 'Cicilan Utang Konsumtif', value: consumptiveDebtService, type: 'PERCENTAGE', idealCondition: 'Maks 15%',
+    statusColor: cdsStatus, analysis: cdsAnalysis, recommendation: cdsAnalysis
+  });
+
+  // --- 7. Rasio Aset Investasi thd Kekayaan Bersih ---
+  const investToNetWorth = netWorth > 0 ? (totalInvestment / netWorth) * 100 : 0;
+  let invwStatus: any = 'RED'; let invwAnalysis = '';
+  if (investToNetWorth > 50) {
+    invwStatus = 'GREEN_DARK'; invwAnalysis = 'Struktur kekayaan sangat produktif dan mendukung tujuan keuangan jangka panjang.';
+  } else if (investToNetWorth >= 25) {
+    invwStatus = 'GREEN_LIGHT'; invwAnalysis = 'Kondisi cukup baik, namun masih ada ruang untuk meningkatkan porsi aset produktif.';
+  } else if (investToNetWorth >= 10) {
+    invwStatus = 'YELLOW'; invwAnalysis = 'Aset produktif masih relatif kecil. Disarankan mulai meningkatkan investasi secara bertahap.';
+  } else {
+    invwStatus = 'RED'; invwAnalysis = 'Sebagian besar kekayaan belum produktif. Perlu perencanaan investasi yang lebih terstruktur.';
+  }
+  addScore(invwStatus);
+  ratios.push({
+    id: 'investment_to_net_worth', label: 'Porsi Aset Investasi', value: investToNetWorth, type: 'PERCENTAGE', idealCondition: 'Min 50%',
+    statusColor: invwStatus, analysis: invwAnalysis, recommendation: invwAnalysis
+  });
+
+  // --- 8. Rasio Solvabilitas (Kekayaan Bersih thd Total Aset) ---
+  const solvency = totalAssets > 0 ? (netWorth / totalAssets) * 100 : 0;
+  let solStatus: any = 'RED'; let solAnalysis = '';
+  if (solvency > 75) {
+    solStatus = 'GREEN_DARK'; solAnalysis = 'Kondisi solvabilitas sangat kuat dan risiko kebangkrutan sangat rendah.';
+  } else if (solvency >= 50) {
+    solStatus = 'GREEN_LIGHT'; solAnalysis = 'Kondisi solvabilitas baik dan masih dalam batas aman.';
+  } else if (solvency >= 25) {
+    solStatus = 'YELLOW'; solAnalysis = 'Kondisi mulai rentan. Disarankan memperkuat aset atau mengurangi utang.';
+  } else {
+    solStatus = 'RED'; solAnalysis = 'Risiko keuangan tinggi. Diperlukan perencanaan keuangan yang lebih serius dan restrukturisasi utang.';
+  }
+  addScore(solStatus);
+  ratios.push({
+    id: 'solvency', label: 'Tingkat Solvabilitas', value: solvency, type: 'PERCENTAGE', idealCondition: 'Min 50%',
+    statusColor: solStatus, analysis: solAnalysis, recommendation: solAnalysis
+  });
+
+  // =================================================================
+  // 3. TENTUKAN STATUS GLOBAL
+  // =================================================================
+  let globalStatus: 'SEHAT' | 'WASPADA' | 'BAHAYA' = 'BAHAYA';
+
+  if (totalScore >= 80) {
+    globalStatus = 'SEHAT';
+  } else if (totalScore >= 50) {
+    globalStatus = 'WASPADA';
   }
 
-  // --- LOGIC TAMBAHAN (SAFETY NET) ---
-  // Jika skor masuk kategori "SEHAT" (misal 81), TAPI ada lebih dari 2 indikator MERAH,
-  // kita paksa turun ke "WASPADA" agar user tidak terlena.
+  // Safety Net (Jika masuk kategori SEHAT tapi ada banyak yang bahaya)
+  const redCount = ratios.filter(r => r.statusColor === 'RED').length;
+  let finalScore = Math.round(totalScore);
   if (globalStatus === 'SEHAT' && redCount >= 2) {
     globalStatus = 'WASPADA';
-    score = 79; // Cap di batas atas Waspada
+    finalScore = 79; // Cap di batas atas Waspada
   }
 
   return {
-    score,
-    globalStatus,
+    score: finalScore,
+    status: globalStatus,
+    globalStatus: globalStatus,
     ratios,
     netWorth,
     surplusDeficit,
     generatedAt: new Date().toISOString(),
-    // Feedback data raw untuk Frontend (opsional)
     incomeFixed: val(data.incomeFixed),
     incomeVariable: val(data.incomeVariable),
   };

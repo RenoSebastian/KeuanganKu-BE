@@ -22,7 +22,6 @@ import {
     calculateFinancialHealth,
     calculateBudgetSplit,
     calculateAgentBudgetSimulation,
-    HealthAnalysisResult,
     AgentBudgetSimulationResult,
 } from '../../utils/financial-math.util';
 
@@ -42,10 +41,8 @@ export class CheckupCalculatorService {
     // ===========================================================================
 
     async createCheckup(userId: string, dto: CreateFinancialRecordDto) {
-        // 1. Kalkulasi Kesehatan Finansial
         const analysis = calculateFinancialHealth(dto);
 
-        // 2. Mapping Status ke Enum DB
         let dbStatus: HealthStatus = HealthStatus.BAHAYA;
         if (analysis.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
         else if (analysis.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
@@ -54,7 +51,6 @@ export class CheckupCalculatorService {
             data: {
                 userId,
                 ...dto,
-                // Gunakan casting unknown -> JsonObject untuk mengatasi error overlap tipe data
                 userProfile: dto.userProfile as unknown as Prisma.JsonObject,
                 spouseProfile: dto.spouseProfile
                     ? (dto.spouseProfile as unknown as Prisma.JsonObject)
@@ -78,7 +74,6 @@ export class CheckupCalculatorService {
 
         const val = (n: any) => Number(n) || 0;
 
-        // Mapping ulang data aset & hutang untuk kemudahan frontend
         const assetInvestment =
             val(checkup.assetInvHome) +
             val(checkup.assetInvVehicle) +
@@ -99,7 +94,6 @@ export class CheckupCalculatorService {
 
         const incomeMonthly = val(checkup.incomeFixed) + val(checkup.incomeVariable);
 
-        // Hitung total expense bulanan dari DB record
         const expenseMonthly =
             val(checkup.installmentKPR) +
             val(checkup.installmentKPM) +
@@ -188,7 +182,6 @@ export class CheckupCalculatorService {
         const totalIncome = dto.fixedIncome + dto.variableIncome;
         const isManualInput = dto.livingCost && dto.livingCost > 0;
 
-        // Logic: Auto-Allocation jika user tidak input detail
         let finalAllocation = {
             livingCost: dto.livingCost || 0,
             productiveDebt: dto.productiveDebt || 0,
@@ -215,7 +208,6 @@ export class CheckupCalculatorService {
         if (balance > 0) cashflowStatus = 'SURPLUS';
 
         return this.prisma.$transaction(async (tx) => {
-            // 1. Simpan Budget Plan
             const budget = await tx.budgetPlan.create({
                 data: {
                     userId,
@@ -235,7 +227,6 @@ export class CheckupCalculatorService {
                 },
             });
 
-            // 2. Analisa Kesehatan Budget (Simple Check)
             const analysis = this.analyzeBudgetHealth({
                 ...dto,
                 ...finalAllocation,
@@ -257,15 +248,12 @@ export class CheckupCalculatorService {
     // DOMAIN: AGENT SIMULATION (CHECKUP & BUDGETING)
     // ===========================================================================
 
-    // [UPDATED] Arsitektur Single-Pass Stateless Streaming
     async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
-        // 1. Validasi & Potong Kuota di awal (Fail-fast)
         await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP');
 
         const val = (n: any) => Number(n) || 0;
 
         try {
-            // 2. Kalkulasi Matematika murni
             const calculationInput: any = {
                 ...dto,
                 userProfile: dto.client,
@@ -273,7 +261,7 @@ export class CheckupCalculatorService {
             };
             const analysisResult = calculateFinancialHealth(calculationInput);
 
-            const clientAge = this.calculateAge(dto.client.dob);
+            const clientAge = this.calculateAge(dto.client?.dob);
             let dbStatus: HealthStatus = HealthStatus.BAHAYA;
             if (analysisResult.globalStatus === 'SEHAT') dbStatus = HealthStatus.SEHAT;
             else if (analysisResult.globalStatus === 'WASPADA') dbStatus = HealthStatus.WASPADA;
@@ -282,31 +270,28 @@ export class CheckupCalculatorService {
             const safeSurplusDeficit = val(analysisResult.surplusDeficit) * 12;
             const safeHealthScore = val(analysisResult.score);
 
-            // 3. Log Activity ke Database (Audit)
+            // 1. Simpan ke Database
             await this.prisma.simulationLog.create({
                 data: {
                     agentId: user.id,
-                    clientName: dto.client.name,
+                    clientName: dto.client?.name || 'Klien',
                     clientAge: clientAge,
-                    clientCity: dto.client.city,
-                    clientJob: dto.client.occupation,
+                    clientCity: dto.client?.city,
+                    clientJob: dto.client?.occupation,
                     totalIncome: safeTotalIncome,
                     calculatedSurplus: safeSurplusDeficit,
                     healthScore: safeHealthScore,
                     status: dbStatus,
-                    financialRatios: JSON.parse(
-                        JSON.stringify(analysisResult.ratios),
-                    ) as Prisma.InputJsonValue,
+                    financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
                     moduleType: 'CHECKUP',
                     inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(analysisResult),
-                    ) as Prisma.InputJsonValue,
+                    outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue,
                     sessionId: dto.sessionId,
                 },
             });
 
-            // 4. Generate MGC Token
+            // 2. Generate MGC Token (SLIM PAYLOAD TO PREVENT NGINX 502 BAD GATEWAY)
+            // KITA MENGHAPUS OBJEK 'result' YANG BERISI TEKS PANJANG AGAR HEADER HTTP TIDAK MELEDAK
             const mgcToken = this.tokenService.generateMgcToken({
                 meta: {
                     version: '1.0',
@@ -316,21 +301,19 @@ export class CheckupCalculatorService {
                 client: dto.client,
                 spouse: dto.spouse,
                 financial: dto,
-                result: analysisResult,
             });
 
-            // 5. Generate Buffer PDF secara On-the-fly
+            // 3. Generate Buffer PDF secara On-the-fly
             const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
                 dto,
                 analysisResult,
                 user,
             );
 
-            // 6. Return Payload Stream (Format yang sama dengan Budget, Pension, dsb)
             return {
                 pdfBuffer,
                 mgcToken,
-                filename: `Checkup_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+                filename: `Checkup_${(dto.client?.name || 'Klien').replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
             };
 
         } catch (error: any) {
@@ -348,7 +331,6 @@ export class CheckupCalculatorService {
         const val = (n: any) => Number(n) || 0;
 
         try {
-            // 2. Kalkulasi
             const calculationResult: AgentBudgetSimulationResult = calculateAgentBudgetSimulation(
                 val(dto.fixedIncome),
                 val(dto.variableIncome),
@@ -356,7 +338,6 @@ export class CheckupCalculatorService {
 
             const clientAge = this.calculateAge(dto.clientDob);
 
-            // 3. Log Activity
             await this.prisma.simulationLog.create({
                 data: {
                     agentId: user.id,
@@ -368,26 +349,20 @@ export class CheckupCalculatorService {
                     calculatedSurplus: val(calculationResult.analysis.totalRecommendedSavings),
                     healthScore: 100,
                     status: HealthStatus.SEHAT,
-                    financialRatios: JSON.parse(
-                        JSON.stringify(calculationResult.allocation),
-                    ) as Prisma.InputJsonValue,
+                    financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)) as Prisma.InputJsonValue,
                     moduleType: 'BUDGETING',
                     inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(calculationResult),
-                    ) as Prisma.InputJsonValue,
+                    outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
                     sessionId: dto.sessionId,
                 },
             });
 
-            // 4. PDF
             const pdfBuffer = await this.pdfService.generateSimulationPdfBuffer(
                 dto,
                 calculationResult,
                 user,
             );
 
-            // 5. Token
             const mgcToken = this.tokenService.generateMgcToken({
                 meta: {
                     version: '1.0',
@@ -486,8 +461,10 @@ export class CheckupCalculatorService {
         return { score, status, recommendation };
     }
 
-    private calculateAge(dobString: string): number {
+    private calculateAge(dobString?: string): number {
+        if (!dobString) return 0; // Null safety prevent NaN crash prisma
         const dob = new Date(dobString);
+        if (isNaN(dob.getTime())) return 0;
         const diffMs = Date.now() - dob.getTime();
         const ageDt = new Date(diffMs);
         return Math.abs(ageDt.getUTCFullYear() - 1970);
