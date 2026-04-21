@@ -399,7 +399,6 @@ export class FinancialController {
     const cleanName = data.clientName.replace(/[^a-zA-Z0-9]/g, '_');
     const filename = `RiskProfile_${cleanName}_${new Date().getTime()}.pdf`;
 
-    // Pastikan StreamableFile di NestJS mengadopsi Content-Length yang presisi
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="${filename}"`,
@@ -574,62 +573,38 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (DECOUPLED)
+  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (STATELESS STREAMING)
   // ===========================================================================
 
-  @Post('simulation/checkup/calculate')
-  @ApiOperation({ summary: 'Kalkulasi Financial Checkup (JSON State Return)' })
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async calculateCheckupSimulation(
+  @Post('simulation/checkup')
+  @ApiOperation({ summary: 'Simulasi Financial Checkup & Download PDF Langsung' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async createCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
+    @Res() res: express.Response,
   ) {
-    const result = await this.financialService.calculateCheckupSimulation(user, dto);
-
-    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
+    const result = await this.financialService.simulateAgentCheckup(user, dto);
 
     await this.auditService.logActivity({
       userId: user.id,
-      action: 'CALCULATE_CHECKUP',
+      action: 'SIMULATE_CHECKUP',
       entity: 'SimulationLog',
-      entityId: result.meta?.simulationId || 'UNKNOWN',
-      details: `Agent ${user.fullName} calculated checkup simulation for client ${dto.client.name}`,
+      entityId: 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated checkup simulation for client ${dto.client?.name || 'Unknown'}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
-    return {
-      ...result,
-      mgcToken
-    };
-  }
-
-  @Get('simulation/checkup/:id/pdf')
-  @ApiOperation({ summary: 'Download PDF Simulasi Checkup (On-Demand)' })
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async downloadCheckupPdfById(
-    @Param('id') id: string,
-    @GetUser() user: client.User,
-    @Res() res: express.Response,
-  ) {
-    const pdfBuffer = await this.financialService.downloadCheckupPdfById(id, user);
-
-    await this.auditService.logActivity({
-      userId: user.id,
-      action: 'DOWNLOAD_SIMULATION_PDF',
-      entity: 'SimulationLog',
-      entityId: id,
-      details: `Agent ${user.fullName} downloaded checkup PDF ${id}`,
-    });
-
     res.set({
       'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="Checkup_Simulation_${id}.pdf"`,
-      'Content-Length': (pdfBuffer as Buffer).length,
-      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
+      'Content-Disposition': `attachment; filename="${result.filename}"`,
+      'Content-Length': result.pdfBuffer.length,
+      'X-MGC-Token': result.mgcToken,
+      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
     });
 
-    res.end(pdfBuffer);
+    res.end(result.pdfBuffer);
   }
 
   // ===========================================================================

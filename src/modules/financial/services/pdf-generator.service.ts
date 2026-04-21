@@ -763,10 +763,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    // ===========================================================================
-    // [REVISED - STATELESS] PROFESSIONAL AGENT SIMULATION PDF
-    // ===========================================================================
-
     /**
      * generateSimulationPdfBuffer
      * ---------------------------
@@ -856,10 +852,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // ===========================================================================
-    // [NEW] INSURANCE SIMULATION (STATELESS)
-    // ===========================================================================
-
     /**
      * generateInsurancePdfBuffer
      * --------------------------
@@ -947,10 +939,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             throw new Error('Gagal memproses laporan PDF Asuransi.');
         }
     }
-
-    // ===========================================================================
-    // [NEW] PENSION SIMULATION (STATELESS)
-    // ===========================================================================
 
     /**
      * generatePensionPdfBuffer
@@ -1054,10 +1042,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // ===========================================================================
-    // [NEW] GOAL SIMULATION (STATELESS)
-    // ===========================================================================
-
     /**
      * generateGoalSimulationPdfBuffer
      * -------------------------------
@@ -1160,10 +1144,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // ===========================================================================
-    // [NEW] CHECKUP SIMULATION (STATELESS)
-    // ===========================================================================
-
     /**
      * generateCheckupSimulationPdfBuffer
      * ----------------------------------
@@ -1172,6 +1152,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
      * - Header Dinamis (Profil Agen)
      * - Profil Klien Lengkap (Spouse + Children)
      * - Analisa Kesehatan (Stateless Result)
+     * - [FIXED] Null-Safety (Optional Chaining) untuk mencegah crash rendering PDF
      */
     async generateCheckupSimulationPdfBuffer(
         clientData: CreateCheckupSimulationDto,
@@ -1188,7 +1169,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const num = (n: any) => Number(n) || 0;
 
         // --- 1. PREPARE ASSETS (LOGO) ---
-        // Baca file logo lokal untuk di-embed ke PDF agar dinamis di template
         const logoPath = path.join(process.cwd(), 'src/assets/images', 'logokeuanganku.png');
         let logoUrl = '';
         try {
@@ -1200,17 +1180,18 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn('Failed to load logo for PDF', e);
         }
 
-        // --- 2. CALCULATE AGES ---
+        // --- 2. CALCULATE AGES DENGAN NULL-SAFETY ---
         const calcAge = (dob?: string) => {
             if (!dob) return '-';
             const birthDate = new Date(dob);
+            if (isNaN(birthDate.getTime())) return '-'; // Mencegah Invalid Date
             const ageDifMs = Date.now() - birthDate.getTime();
             const ageDate = new Date(ageDifMs);
             return Math.abs(ageDate.getUTCFullYear() - 1970);
         };
 
         // --- 3. GROUPING FINANCIAL DATA ---
-        const d = clientData; // alias
+        const d = clientData;
 
         // Assets
         const assetLiquid = num(d.assetCash);
@@ -1219,9 +1200,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const totalAsset = assetLiquid + assetPersonal + assetInvest;
 
         // Debts
-        // Jangka Pendek: CC + Koperasi + Konsumtif Lain
         const debtShort = num(d.debtCC) + num(d.debtCoop) + num(d.debtConsumptiveOther);
-        // Jangka Panjang: KPR + KPM + Bisnis
         const debtLong = num(d.debtKPR) + num(d.debtKPM) + num(d.debtBusiness);
         const totalDebt = debtShort + debtLong;
 
@@ -1239,31 +1218,32 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         // --- 4. DATA CONTEXT ---
         const context = {
             checkDate: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-            logoUrl: logoUrl, // Image Base64 passed to template
+            logoUrl: logoUrl,
 
             // PROFIL AGEN (HEADER)
             agent: {
-                name: agent.fullName,
+                name: agent.fullName || 'Agen Finansial',
                 level: agent.agentLevel || 'Financial Advisor',
                 company: agent.companyName || 'KeuanganKu Pratama',
+                // [FIX] Fallback yang lebih logis jika agency tidak ada
                 agency: agent.companyName || 'MaxiPro Group',
             },
 
-            // PROFIL KLIEN
+            // PROFIL KLIEN (NULL-SAFE EXTRACT)
             client: {
-                name: d.client.name,
-                age: calcAge(d.client.dob),
-                dob: d.client.dob,
-                religion: d.client.religion || '-',
-                job: d.client.occupation,
-                city: d.client.city,
-                phone: d.client.phone,
-                maritalStatus: d.client.maritalStatus === 'MARRIED' ? 'Menikah' : d.client.maritalStatus === 'SINGLE' ? 'Lajang' : 'Cerai',
-                childrenCount: d.client.childrenCount || 0,
-                dependentParents: d.client.dependentParents || 0,
+                name: d.client?.name || 'Tanpa Nama',
+                age: calcAge(d.client?.dob),
+                dob: d.client?.dob || '-',
+                religion: d.client?.religion || '-',
+                job: d.client?.occupation || '-',
+                city: d.client?.city || '-',
+                phone: d.client?.phone || '-',
+                maritalStatus: d.client?.maritalStatus === 'MARRIED' ? 'Menikah' : d.client?.maritalStatus === 'SINGLE' ? 'Lajang' : 'Cerai',
+                childrenCount: d.client?.childrenCount || 0,
+                dependentParents: d.client?.dependentParents || 0,
             },
 
-            // DATA PASANGAN
+            // DATA PASANGAN (NULL-SAFE EXTRACT)
             spouse: {
                 hasSpouse: !!d.spouse,
                 name: d.spouse?.name || '-',
@@ -1273,22 +1253,18 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
             // FINANCIAL SUMMARY
             fin: {
-                // Aset
                 assetCash: fmt(assetLiquid),
                 assetPersonal: fmt(assetPersonal),
                 assetInvest: fmt(assetInvest),
                 totalAsset: fmt(totalAsset),
 
-                // Utang (Grouped)
                 debtShort: fmt(debtShort),
                 debtLong: fmt(debtLong),
                 totalDebt: fmt(totalDebt),
 
-                // Net Worth
-                netWorth: fmt(analysisResult.netWorth),
-                netWorthColor: analysisResult.netWorth >= 0 ? 'val-green' : 'val-red',
+                netWorth: fmt(analysisResult?.netWorth || 0),
+                netWorthColor: (analysisResult?.netWorth || 0) >= 0 ? 'val-green' : 'val-red',
 
-                // Arus Kas
                 incomeFixed: fmt(incomeFixed),
                 incomeVariable: fmt(incomeVariable),
                 totalIncome: fmt(totalIncome),
@@ -1299,37 +1275,37 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 expenseLiving: fmt(expenseLiving),
                 totalExpense: fmt(totalExpense),
 
-                surplusDeficit: fmt(analysisResult.surplusDeficit),
-                surplusColor: analysisResult.surplusDeficit >= 0 ? 'val-green' : 'val-red',
+                surplusDeficit: fmt(analysisResult?.surplusDeficit || 0),
+                surplusColor: (analysisResult?.surplusDeficit || 0) >= 0 ? 'val-green' : 'val-red',
             },
 
             // DIAGNOSA & SCORING
-            globalStatus: analysisResult.globalStatus,
-            score: analysisResult.score,
-            scoreColor: analysisResult.score >= 80 ? '#22c55e' : analysisResult.score >= 50 ? '#eab308' : '#ef4444',
+            globalStatus: analysisResult?.globalStatus || 'BAHAYA',
+            score: analysisResult?.score || 0,
+            scoreColor: (analysisResult?.score || 0) >= 80 ? '#22c55e' : (analysisResult?.score || 0) >= 50 ? '#eab308' : '#ef4444',
 
             // INDIKATOR / RATIOS
-            healthyCount: analysisResult.ratios.filter(r => r.statusColor.includes('GREEN')).length,
-            warningCount: analysisResult.ratios.filter(r => !r.statusColor.includes('GREEN')).length,
+            healthyCount: (analysisResult?.ratios || []).filter(r => r.statusColor?.includes('GREEN')).length,
+            warningCount: (analysisResult?.ratios || []).filter(r => !r.statusColor?.includes('GREEN')).length,
 
-            ratios: analysisResult.ratios.map(r => ({
-                label: r.label,
-                statusLabel: r.statusColor.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
-                cssClass: r.statusColor.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red',
+            ratios: (analysisResult?.ratios || []).map(r => ({
+                label: r.label || '-',
+                statusLabel: r.statusColor?.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
+                cssClass: r.statusColor?.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red',
                 valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
-                benchmark: r.benchmark,
-                recommendation: r.recommendation
+                benchmark: r.benchmark || '-',
+                recommendation: r.recommendation || '-'
             }))
         };
 
         try {
-            // Compile Template (Menggunakan checkup-report.template.ts yang baru)
+            // Compile Template
             const template = handlebars.compile(checkupReportTemplate);
             const html = template(context);
 
             // Render PDF
             const pdfBuffer = await this.generatePdfCore(html, context);
-            this.logger.log(`Stateless Checkup PDF generated for: ${d.client.name}`);
+            this.logger.log(`Stateless Checkup PDF generated for: ${context.client.name}`);
 
             return pdfBuffer;
 
@@ -1338,10 +1314,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             throw new Error('Gagal memproses laporan PDF Financial Checkup.');
         }
     }
-
-    // ===========================================================================
-    // [NEW] RISK PROFILE SIMULATION (STATELESS)
-    // ===========================================================================
 
     /**
      * generateRiskProfileSimulationPdfBuffer

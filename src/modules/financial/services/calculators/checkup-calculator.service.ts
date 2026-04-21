@@ -257,12 +257,15 @@ export class CheckupCalculatorService {
     // DOMAIN: AGENT SIMULATION (CHECKUP & BUDGETING)
     // ===========================================================================
 
-    async calculateCheckupSimulation(user: User, dto: CreateCheckupSimulationDto) {
-        // [STEP 2] Guard clause helper
+    // [UPDATED] Arsitektur Single-Pass Stateless Streaming
+    async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
+        // 1. Validasi & Potong Kuota di awal (Fail-fast)
+        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP');
+
         const val = (n: any) => Number(n) || 0;
 
         try {
-            // 1. Kalkulasi Matematika murni (CPU Bound)
+            // 2. Kalkulasi Matematika murni
             const calculationInput: any = {
                 ...dto,
                 userProfile: dto.client,
@@ -279,122 +282,63 @@ export class CheckupCalculatorService {
             const safeSurplusDeficit = val(analysisResult.surplusDeficit) * 12;
             const safeHealthScore = val(analysisResult.score);
 
-            // ====================================================================
-            // [STEP 3] ATOMIC TRANSACTION START
-            // ====================================================================
-            return await this.prisma.$transaction(async (tx) => {
-
-                // 2. Check & Deduct Quota
-                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP', tx);
-
-                // 3. Log Activity
-                const simulationLog = await tx.simulationLog.create({
-                    data: {
-                        agentId: user.id,
-                        clientName: dto.client.name,
-                        clientAge: clientAge,
-                        clientCity: dto.client.city,
-                        clientJob: dto.client.occupation,
-                        totalIncome: safeTotalIncome,
-                        calculatedSurplus: safeSurplusDeficit,
-                        healthScore: safeHealthScore,
-                        status: dbStatus,
-                        financialRatios: JSON.parse(
-                            JSON.stringify(analysisResult.ratios),
-                        ) as Prisma.InputJsonValue,
-                        moduleType: 'CHECKUP',
-                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                        outputResult: JSON.parse(
-                            JSON.stringify(analysisResult),
-                        ) as Prisma.InputJsonValue,
-                        sessionId: dto.sessionId,
-                    },
-                });
-
-                // 4. Generate MGC Token dengan Konteks Eksplisit
-                const mgcToken = this.tokenService.generateMgcToken({
-                    meta: {
-                        version: '1.0',
-                        generatedAt: new Date().toISOString(),
-                        agentId: user.id,
-                        simulationId: simulationLog.id,
-                    },
-                    client: dto.client,
-                    spouse: dto.spouse,
-                    financial: dto,
-                    result: analysisResult,
-                });
-
-                // ====================================================================
-                // [STEP 5] HARMONISASI PAYLOAD RESPONSE
-                // Penempatan mgcToken pada root level untuk diproses UI Component
-                // ====================================================================
-                return {
-                    mgcToken: mgcToken,
-                    filename: `Checkup_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.mgc`,
-                    data: {
-                        client: dto.client,
-                        spouse: dto.spouse,
-                        financial: dto,
-                        result: {
-                            score: safeHealthScore,
-                            status: analysisResult.globalStatus,
-                            globalStatus: analysisResult.globalStatus,
-                            netWorth: val(analysisResult.netWorth),
-                            surplusDeficit: val(analysisResult.surplusDeficit),
-                            ratios: analysisResult.ratios,
-                            generatedAt: analysisResult.generatedAt
-                        }
-                    },
-                    meta: {
-                        simulationId: simulationLog.id,
-                    }
-                };
-            });
-
-        } catch (error: any) {
-            this.logger.error(
-                `Calculate Checkup Simulation Error: ${error.message}`,
-                error.stack,
-            );
-            if (error instanceof ForbiddenException) throw error;
-            throw new InternalServerErrorException(
-                'Gagal memproses kalkulasi Financial Checkup.',
-            );
-        }
-    }
-
-    async downloadCheckupPdfById(simulationId: string, user: User) {
-        try {
-            // 1. Retrieve the existing Run
-            const simulation = await this.prisma.simulationLog.findFirst({
-                where: {
-                    id: simulationId,
+            // 3. Log Activity ke Database (Audit)
+            await this.prisma.simulationLog.create({
+                data: {
                     agentId: user.id,
+                    clientName: dto.client.name,
+                    clientAge: clientAge,
+                    clientCity: dto.client.city,
+                    clientJob: dto.client.occupation,
+                    totalIncome: safeTotalIncome,
+                    calculatedSurplus: safeSurplusDeficit,
+                    healthScore: safeHealthScore,
+                    status: dbStatus,
+                    financialRatios: JSON.parse(
+                        JSON.stringify(analysisResult.ratios),
+                    ) as Prisma.InputJsonValue,
                     moduleType: 'CHECKUP',
+                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                    outputResult: JSON.parse(
+                        JSON.stringify(analysisResult),
+                    ) as Prisma.InputJsonValue,
+                    sessionId: dto.sessionId,
                 },
             });
 
-            if (!simulation) {
-                throw new NotFoundException('Data simulasi tidak ditemukan atau Anda tidak memiliki akses.');
-            }
+            // 4. Generate MGC Token
+            const mgcToken = this.tokenService.generateMgcToken({
+                meta: {
+                    version: '1.0',
+                    generatedAt: new Date().toISOString(),
+                    agentId: user.id,
+                },
+                client: dto.client,
+                spouse: dto.spouse,
+                financial: dto,
+                result: analysisResult,
+            });
 
-            // 2. Rehydrate Data
-            const inputDto = simulation.inputPayload as any;
-            const analysisResult = simulation.outputResult as any;
-
-            // 3. Generate PDF precisely from the saved state
+            // 5. Generate Buffer PDF secara On-the-fly
             const pdfBuffer = await this.pdfService.generateCheckupSimulationPdfBuffer(
-                inputDto,
+                dto,
                 analysisResult,
                 user,
             );
 
-            return pdfBuffer;
+            // 6. Return Payload Stream (Format yang sama dengan Budget, Pension, dsb)
+            return {
+                pdfBuffer,
+                mgcToken,
+                filename: `Checkup_${dto.client.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+            };
+
         } catch (error: any) {
-            this.logger.error(`Download Checkup PDF Error: ${error.message}`, error.stack);
-            if (error instanceof NotFoundException) throw error;
-            throw new InternalServerErrorException('Gagal menghasilkan dokumen PDF Checkup.');
+            this.logger.error(`Calculate Checkup Simulation Error: ${error.message}`, error.stack);
+            if (error instanceof ForbiddenException) throw error;
+            throw new InternalServerErrorException(
+                'Gagal memproses simulasi Financial Checkup.',
+            );
         }
     }
 
