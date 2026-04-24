@@ -6,16 +6,16 @@ import {
   Delete,
   Param,
   UseGuards,
+  Req,
   Res,
   NotFoundException,
   Header,
-  StreamableFile,
+  ParseUUIDPipe,
   HttpCode,
 } from '@nestjs/common';
 import * as express from 'express';
 import { ApiBearerAuth, ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { Readable } from 'stream';
 
 // Services
 import { FinancialService } from './financial.service';
@@ -385,13 +385,12 @@ export class FinancialController {
   @Post('export/risk-profile-pdf')
   @ApiOperation({ summary: 'Generate PDF Laporan Profil Risiko (Legacy)' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
-  @Header('Content-Type', 'application/pdf')
-  @Header('Content-Disposition', 'attachment; filename="Risk_Profile_Report.pdf"')
   async exportRiskProfilePdf(
     @GetUser('id') userId: string,
     @Body() data: RiskProfileResponseDto,
-    @Res({ passthrough: true }) res: express.Response,
-  ): Promise<StreamableFile> {
+    @Res() res: express.Response,
+  ) {
+    // [CRITICAL FIX] Disesuaikan agar tidak memanggil 'StreamableFile' 
     const pdfBuffer = await this.pdfGeneratorService.generateRiskProfilePdf(data);
 
     const cleanName = data.clientName.replace(/[^a-zA-Z0-9]/g, '_');
@@ -412,7 +411,7 @@ export class FinancialController {
       details: `Agent generated Risk Profile PDF for client: ${data.clientName}`,
     });
 
-    return new StreamableFile(pdfBuffer);
+    res.end(pdfBuffer);
   }
 
   // ===========================================================================
@@ -581,10 +580,8 @@ export class FinancialController {
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
   ) {
-    // 1. Eksekusi Kalkulasi
     const result = await this.financialService.simulateAgentCheckup(user, dto);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_CHECKUP',
@@ -595,12 +592,11 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 3. Kembalikan JSON (Bypass 502 Bad Gateway Nginx Header Limit)
     return {
       pdfBase64: result.pdfBuffer.toString('base64'),
       mgcToken: result.mgcToken,
       filename: result.filename,
-      analysisResult: result.analysisResult // Menyertakan kembali rasio ke Frontend
+      analysisResult: result.analysisResult
     };
   }
 
@@ -642,9 +638,10 @@ export class FinancialController {
   async downloadEducationPdfById(
     @Param('id') id: string,
     @GetUser() user: client.User,
-    @Res({ passthrough: true }) res: express.Response,
-  ): Promise<StreamableFile> {
-
+    @Res() res: express.Response,
+  ) {
+    // [CRITICAL FIX] Menggunakan res.end() agar aliran file binary 
+    // bebas dari pencegatan/serialization NestJS Interceptor.
     const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
 
     await this.auditService.logActivity({
@@ -662,7 +659,6 @@ export class FinancialController {
       'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
 
-    const stream = Readable.from(pdfBuffer as Buffer);
-    return new StreamableFile(stream);
+    res.end(pdfBuffer);
   }
 }
