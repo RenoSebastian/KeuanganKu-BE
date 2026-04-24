@@ -13,7 +13,7 @@ import { goalReportTemplate } from '../templates/goals-report.template';
 import { educationReportTemplate } from '../templates/education-report.template';
 import { historyCheckupReportTemplate } from '../templates/history-checkup-report.template';
 
-// [NEW] Template untuk Risk Profile & Agent Budget
+// Template untuk Risk Profile & Agent Budget
 import { riskProfileReportTemplate } from '../templates/risk-profile-report.template';
 import { agentBudgetReportTemplate } from '../templates/agent-budget-report.template';
 
@@ -37,15 +37,11 @@ import { User } from '@prisma/client';
 export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     private browser: puppeteer.Browser | null = null;
     private readonly logger = new Logger(PdfGeneratorService.name);
-
-    // [NEW] Tambahkan ini untuk mendefinisikan folder upload
     private readonly uploadDir = path.join(process.cwd(), 'uploads');
-
-    // --- LIFECYCLE ---
 
     async onModuleInit() {
         await this.initBrowser();
-        this.registerHandlebarsHelpers(); // [FIX] Panggil registrasi helper disini
+        this.registerHandlebarsHelpers();
     }
 
     async onModuleDestroy() {
@@ -53,12 +49,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     }
 
     private registerHandlebarsHelpers() {
-        // Helper 'inc' (increment) untuk nomor urut (index + 1)
         handlebars.registerHelper('inc', function (value) {
             return parseInt(value) + 1;
         });
 
-        // Helper formatting rupiah (jika belum ada/ingin konsistensi)
         handlebars.registerHelper('formatRupiah', function (value) {
             return new Intl.NumberFormat('id-ID', {
                 style: 'currency',
@@ -67,21 +61,16 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             }).format(Number(value) || 0);
         });
 
-        // Helper comparison sederhana (opsional, berguna untuk logic if di template)
         handlebars.registerHelper('eq', function (a, b) {
             return a === b;
         });
     }
 
-    // Inisialisasi Browser dengan Config Stabil
     private async initBrowser() {
         if (this.browser) return;
 
         this.logger.log('Initializing Puppeteer Browser...');
         try {
-            // [FIXED] Smart Executable Path Strategy
-            // 1. Cek ENV (Docker/Production).
-            // 2. Jika tidak ada, biarkan undefined (Local Dev) agar Puppeteer pakai bundled Chromium.
             const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
 
             this.browser = await puppeteer.launch({
@@ -104,20 +93,16 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    // Tutup browser dengan aman
     private async closeBrowser() {
         if (this.browser) {
             try {
                 await this.browser.close();
-            } catch (e) {
-                // Ignore error if already closed
-            }
+            } catch (e) { }
             this.browser = null;
             this.logger.log('Puppeteer Browser Closed/Reset.');
         }
     }
 
-    // Helper: Pastikan browser hidup, kalau mati nyalakan lagi
     private async getBrowser() {
         if (!this.browser || !this.browser.isConnected()) {
             this.logger.warn('Browser disconnected. Restarting instance...');
@@ -127,13 +112,8 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         return this.browser;
     }
 
-    // --- CORE GENERATOR DENGAN AUTO-RETRY ---
-
-    // --- CORE GENERATOR DENGAN AUTO-RETRY ---
-
-    // [FIX] data dibuat optional (data?: any)
     private async generatePdfCore(templateHtml: string, data?: any, attempt = 1): Promise<Buffer> {
-        const MAX_RETRIES = 2; // Coba maksimal 2 kali jika crash
+        const MAX_RETRIES = 2;
         let page: puppeteer.Page | null = null;
 
         try {
@@ -142,25 +122,21 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
             page = await browser.newPage();
 
-            // 1. Optimasi Resource: Blokir Gambar/Font Eksternal biar cepat
             await page.setRequestInterception(true);
             page.on('request', (req) => {
                 const type = req.resourceType();
                 if (['font', 'stylesheet', 'media', 'image'].includes(type)) {
-                    // Abort request berat (gambar sudah base64 di template, jadi aman)
                     req.abort();
                 } else {
                     req.continue();
                 }
             });
 
-            // 2. Render HTML
             await page.setContent(templateHtml, {
-                waitUntil: 'domcontentloaded', // Lebih cepat dari networkidle0
-                timeout: 30000 // 30 detik timeout
+                waitUntil: 'domcontentloaded',
+                timeout: 30000
             });
 
-            // 3. Cetak PDF
             const pdfBuffer = await page.pdf({
                 format: 'A4',
                 printBackground: true,
@@ -172,29 +148,23 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         } catch (error: any) {
             this.logger.error(`Error generating PDF (Attempt ${attempt}): ${error.message}`);
 
-            // Deteksi Crash Browser
             const isCrash = error.message.includes('TargetCloseError') ||
                 error.message.includes('Protocol error') ||
                 error.message.includes('Session closed') ||
                 error.message.includes('Connection closed');
 
-            // Jika Crash & masih punya kuota retry -> RESTART BROWSER & COBA LAGI
             if (isCrash && attempt <= MAX_RETRIES) {
                 this.logger.warn(`Browser crashed. Resetting and retrying... (Attempt ${attempt}/${MAX_RETRIES})`);
-                await this.closeBrowser(); // Matikan browser rusak
-                // [FIX] Pass data (bisa undefined) ke recursive call
+                await this.closeBrowser();
                 return this.generatePdfCore(templateHtml, data, attempt + 1);
             }
 
-            throw error; // Lempar error jika bukan crash atau sudah habis retry
+            throw error;
         } finally {
-            // Selalu tutup tab (page) untuk membebaskan RAM
             if (page) {
                 try {
                     await page.close();
-                } catch (e) {
-                    // Swallow error if page is already closed/crashed
-                }
+                } catch (e) { }
             }
         }
     }
@@ -250,9 +220,7 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         return this.generatePdfCore(html, context);
     }
 
-    // [NEW] Method Public untuk Risk Profile PDF (Legacy / DB Based if any)
     async generateRiskProfilePdf(data: RiskProfileResponseDto): Promise<Buffer> {
-        // [SAFETY LOG] Debugging data yang masuk
         this.logger.debug(`Generating Risk Profile PDF for: ${data?.clientName}`);
 
         const template = handlebars.compile(riskProfileReportTemplate);
@@ -397,38 +365,28 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const currentExpense = num(data.currentExpense);
         const currentSaving = num(data.currentSaving);
 
-        // Konversi Rate
         const inflationRate = num(data.inflationRate) / 100;
         const returnRate = num(data.returnRate) / 100;
-
-        // [UPDATE] Hitung Nett Rate (Bunga Bersih)
         const nettRate = returnRate - inflationRate;
 
-        // Hitung Periode Waktu
         const yearsToRetire = retirementAge - currentAge;
         const retirementDuration = lifeExpectancy - retirementAge;
 
-        // [UPDATE] Future Expense (Real Value)
         const futureMonthlyExpense = currentExpense;
-
-        // [UPDATE] FV Existing Fund (Saldo Awal)
         const fvExistingFund = currentSaving * Math.pow(1 + nettRate, yearsToRetire);
 
         let totalFundNeeded = num(data.totalFundNeeded);
 
-        // Fallback calculation (jika data DB corrupt/kosong)
         if (totalFundNeeded <= 0) {
             if (nettRate === 0) {
                 totalFundNeeded = futureMonthlyExpense * 12 * retirementDuration;
             } else {
-                // PVAD Formula
                 const pvadFactor = (1 - Math.pow(1 + nettRate, -retirementDuration)) / nettRate;
                 totalFundNeeded = futureMonthlyExpense * 12 * pvadFactor * (1 + nettRate);
             }
         }
 
         const shortfall = Math.max(0, totalFundNeeded - fvExistingFund);
-
         const userProfile = data.user || {};
 
         return {
@@ -474,13 +432,11 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             finalExpense: finalExpenseVal,
         });
 
-        // Ambil hasil kalkulasi TVM
         const incomeReplacement = calculationResult.incomeReplacementValue;
         const totalNeeded = calculationResult.totalNeeded;
         const gap = calculationResult.coverageGap;
         const calculatedNettRate = calculationResult.nettRatePercentage;
 
-        // Data display dasar
         const monthlyExpense = num(data.monthlyExpense);
         const annualExpense = monthlyExpense * 12;
         const duration = num(data.protectionDuration);
@@ -496,21 +452,18 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 dependentCount: data.dependentCount,
                 monthlyExpense: fmt(monthlyExpense),
                 protectionDuration: duration,
-                existingDebt: fmt(existingDebtVal), // Sisa hutang (baris 1)
+                existingDebt: fmt(existingDebtVal),
                 existingCoverage: fmt(existingCov),
                 recommendation: data.recommendation || '-',
             },
             calc: {
                 annualExpense: fmt(annualExpense),
                 nettRate: calculatedNettRate,
-                incomeReplacementValue: fmt(incomeReplacement), // Pilar A
-
-                // [FIXED] Menjumlahkan Utang + Pemakaman sebelum diformat ke Rupiah
+                incomeReplacementValue: fmt(incomeReplacement),
                 debtClearanceValue: fmt(existingDebtVal + finalExpenseVal),
-
-                finalExpenseValue: fmt(finalExpenseVal),         // Biaya Final (baris 2)
-                totalNeeded: fmt(totalNeeded),                   // Total (A + B)
-                coverageGap: fmt(gap)                            // Shortfall
+                finalExpenseValue: fmt(finalExpenseVal),
+                totalNeeded: fmt(totalNeeded),
+                coverageGap: fmt(gap)
             }
         };
     }
@@ -591,24 +544,25 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                     currentCost: fmt(stage.currentCost),
                     futureCost: fmt(stage.futureCost),
                     monthlySaving: fmt(stage.monthlySaving),
-                    rawFutureCost: Number(stage.futureCost)
+                    rawFutureCost: Number(stage.futureCost) || 0
                 });
             });
 
             const groupedStages = Array.from(stagesMap.entries())
                 .map(([levelName, items]) => {
                     const subTotalRaw = items.reduce((sum, i) => sum + i.rawFutureCost, 0);
-                    const minYears = Math.min(...items.map(i => i.yearsToStart));
+                    // [CRITICAL FIX] Cek array kosong untuk minYears
+                    const minYears = items.length > 0 ? Math.min(...items.map(i => i.yearsToStart || 0)) : 0;
                     return { levelName, items, subTotalCost: fmt(subTotalRaw), startIn: minYears };
                 })
                 .sort((a, b) => levelOrder.indexOf(a.levelName) - levelOrder.indexOf(b.levelName));
 
             return {
-                childName: plan.childName,
-                childAge: age,
-                uniYear: dob.getFullYear() + 18,
-                inflationRate: plan.inflationRate,
-                returnRate: plan.returnRate,
+                childName: plan.childName || '-',
+                childAge: isNaN(age) ? '-' : age,
+                uniYear: isNaN(dob.getFullYear()) ? '-' : dob.getFullYear() + 18,
+                inflationRate: plan.inflationRate || 0,
+                returnRate: plan.returnRate || 0,
                 method: plan.method === 'GEOMETRIC' ? 'Geometrik (Bertahap)' : 'Statik',
                 totalFutureCost: fmt(calc.totalFutureCost),
                 monthlySaving: fmt(calc.monthlySaving),
@@ -723,20 +677,13 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    // [UPDATED] Mapper untuk Risk Profile Data dengan Null Safety
     private mapRiskProfileData(data: RiskProfileResponseDto) {
-        // Data input adalah RiskProfileResponseDto (bisa saja partial/stripped jika validator tidak lolos)
-
-        // Safety Check 1: Pastikan data tidak null/undefined
         const safeData = data || {};
-
-        // Safety Check 2: Pastikan properti allocation ada, jika tidak, gunakan default
         const safeAllocation = safeData.allocation || { lowRisk: 0, mediumRisk: 0, highRisk: 0 };
 
-        // Tentukan warna tema berdasarkan profil
-        let themeColor = '#eab308'; // Default Moderat (Kuning)
-        if (safeData.riskProfile === 'Konservatif') themeColor = '#22c55e'; // Hijau
-        if (safeData.riskProfile === 'Agresif') themeColor = '#ef4444'; // Merah
+        let themeColor = '#eab308';
+        if (safeData.riskProfile === 'Konservatif') themeColor = '#22c55e';
+        if (safeData.riskProfile === 'Agresif') themeColor = '#ef4444';
 
         return {
             generatedAt: safeData.calculatedAt
@@ -745,16 +692,12 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                     month: 'long',
                     day: 'numeric'
                 })
-                : '-', // Fallback date
+                : '-',
             clientName: safeData.clientName || 'Tanpa Nama',
-
-            // Core Results
             score: safeData.totalScore || 0,
-            profile: safeData.riskProfile || 'Unknown', // String: Konservatif/Moderat/Agresif
+            profile: safeData.riskProfile || 'Unknown',
             description: safeData.riskDescription || 'Tidak ada deskripsi tersedia.',
             themeColor: themeColor,
-
-            // Allocation for Chart & Table (Safe Access)
             allocation: {
                 low: safeAllocation.lowRisk || 0,
                 medium: safeAllocation.mediumRisk || 0,
@@ -763,12 +706,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
     }
 
-    /**
-     * generateSimulationPdfBuffer
-     * ---------------------------
-     * Mengembalikan Raw Buffer PDF (tanpa menyimpan ke disk).
-     * Digunakan untuk streaming langsung ke browser user.
-     */
     async generateSimulationPdfBuffer(
         clientData: CreateBudgetSimulationDto,
         simulationResult: AgentBudgetSimulationResult,
@@ -784,12 +721,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const fmtRaw = (n: number) =>
             new Intl.NumberFormat('id-ID').format(n);
 
-        // 1. Data Context untuk Handlebars
         const context = {
             generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
             documentId: `SIM-${Math.random().toString(36).substring(7).toUpperCase()}`,
 
-            // Profil Agen
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
@@ -803,7 +738,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 job: clientData.clientJob
             },
 
-            // Pendapatan: Bulanan vs Tahunan
             financial: {
                 fixedMonthly: fmt(simulationResult.meta.fixedIncome),
                 fixedAnnual: fmt(simulationResult.meta.fixedIncome * 12),
@@ -813,7 +747,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 totalAnnual: fmt(simulationResult.meta.totalIncome * 12)
             },
 
-            // Alokasi: Bulanan vs Tahunan
             allocation: {
                 livingMonthly: fmt(simulationResult.allocation.livingCost),
                 livingAnnual: fmtRaw(simulationResult.allocation.livingCost * 12),
@@ -834,16 +767,13 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
 
         try {
-            // 2. Compile Template
             const template = handlebars.compile(agentBudgetReportTemplate);
             const html = template(context);
 
-            // 3. Render via Puppeteer (In-Memory)
             const pdfBuffer = await this.generatePdfCore(html, context);
 
             this.logger.log(`Stateless PDF Buffer generated for client: ${clientData.clientName}`);
 
-            // 4. Return Buffer Langsung (Tanpa fs.writeFile)
             return pdfBuffer;
 
         } catch (error: any) {
@@ -852,12 +782,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * generateInsurancePdfBuffer
-     * --------------------------
-     * Membuat PDF simulasi asuransi secara on-the-fly (In-Memory).
-     * Menerima hasil kalkulasi dan DTO simulasi, lalu merender PDF tanpa simpan ke disk.
-     */
     async generateInsurancePdfBuffer(
         clientData: CreateInsuranceSimulationDto,
         calculationResult: any,
@@ -870,19 +794,17 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 maximumFractionDigits: 0
             }).format(n);
 
-        // Hitung total dana untuk membersihkan hutang + biaya akhir (Debt Clearance)
         const debtClearanceTotal = Number(clientData.existingDebt) + Number(clientData.finalExpense || 0);
 
-        // Mapping Data Context
         const context = {
-            meta: { // [FIXED] Sesuai struktur di template: data.meta.documentId
+            meta: {
                 generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
                 documentId: `INS-${Math.random().toString(36).substring(7).toUpperCase()}`,
             },
 
             agent: {
                 name: agent.fullName,
-                companyName: agent.companyName || 'KeuanganKu Pratama', // [FIXED] template pakai 'companyName'
+                companyName: agent.companyName || 'KeuanganKu Pratama',
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
@@ -891,16 +813,15 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 city: clientData.clientCity,
                 job: clientData.clientJob,
                 dob: clientData.clientDob ? new Date(clientData.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
-                maritalStatus: 'MARRIED' // Optional jika ada di input
+                maritalStatus: 'MARRIED'
             },
 
             input: {
                 typeLabel: clientData.type === 'LIFE' ? 'Jiwa (Life)' : clientData.type === 'HEALTH' ? 'Kesehatan' : 'Sakit Kritis',
-                dependents: clientData.dependents || 0, // [FIXED] Mapping dependents
+                dependents: clientData.dependents || 0,
                 monthlyExpense: fmt(clientData.monthlyExpense),
                 existingDebt: fmt(clientData.existingDebt),
                 existingCoverage: fmt(clientData.existingCoverage),
-                // Raw value needed for chart calculation in template
                 existingCoverageRaw: clientData.existingCoverage,
                 finalExpense: fmt(clientData.finalExpense || 0),
                 protectionDuration: clientData.protectionDuration,
@@ -909,26 +830,19 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             },
 
             result: {
-                // Raw values needed for chart calculation in template
                 totalNeededRaw: calculationResult.totalNeeded,
-
                 incomeReplacement: fmt(calculationResult.incomeReplacementValue),
                 annualExpense: fmt(clientData.monthlyExpense * 12),
                 debtClearance: fmt(debtClearanceTotal),
                 totalNeeded: fmt(calculationResult.totalNeeded),
                 existing: fmt(clientData.existingCoverage),
                 gap: fmt(calculationResult.coverageGap),
-                recommendation: calculationResult.recommendation // Asumsi service sudah men-generate teks rekomendasi
+                recommendation: calculationResult.recommendation
             }
         };
 
         try {
-            // [FIXED] Panggil function template langsung (ES6 Template Literal)
-            // Tidak perlu Handlebars compile karena kita pakai native JS function
             const htmlContent = generateInsuranceReportHtml(context);
-
-            // Render ke Buffer via Puppeteer (Core Logic)
-            // Pastikan generatePdfCore sudah diadaptasi untuk menerima string HTML langsung
             const pdfBuffer = await this.generatePdfCore(htmlContent);
 
             this.logger.log(`Stateless Insurance PDF generated for: ${clientData.clientName}`);
@@ -940,15 +854,9 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * generatePensionPdfBuffer
-     * ------------------------
-     * Membuat PDF simulasi Dana Pensiun secara on-the-fly (In-Memory).
-     * Fokus pada visualisasi timeline dan shock therapy inflasi.
-     */
     async generatePensionPdfBuffer(
         clientData: CreatePensionSimulationDto,
-        calculationResult: any, // Hasil return dari calculatePensionPlan
+        calculationResult: any,
         agent: User,
     ): Promise<Buffer> {
         const fmt = (n: number) =>
@@ -958,22 +866,16 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 maximumFractionDigits: 0
             }).format(n);
 
-        // --- 1. LOGIC VISUALISASI TIMELINE (CSS WIDTH %) ---
-        // Kita hitung persentase durasi untuk grafik batang di PDF
         const totalTimeline = calculationResult.yearsToRetire + calculationResult.retirementDuration;
-
-        // Hindari pembagian dengan nol
         const safeTotal = totalTimeline > 0 ? totalTimeline : 1;
 
         const workWidth = (calculationResult.yearsToRetire / safeTotal) * 100;
         const retireWidth = (calculationResult.retirementDuration / safeTotal) * 100;
 
-        // --- 2. DATA CONTEXT FOR HANDLEBARS ---
         const context = {
             generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
             documentId: `PEN-${Math.random().toString(36).substring(7).toUpperCase()}`,
 
-            // Profil Agen
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
@@ -981,7 +883,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
-            // Profil Klien
             user: {
                 name: clientData.clientName,
                 city: clientData.clientCity,
@@ -989,47 +890,33 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 dob: clientData.clientDob ? new Date(clientData.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
             },
 
-            // Data Rencana (Input)
             plan: {
                 currentAge: clientData.currentAge,
                 retirementAge: clientData.retirementAge,
                 lifeExpectancy: clientData.lifeExpectancy,
-
-                // Format angka keuangan
                 currentExpense: fmt(clientData.currentExpense),
                 currentSaving: fmt(clientData.currentSaving || 0),
-                monthlySaving: fmt(calculationResult.monthlySaving), // Rekomendasi Tabungan
-
-                // Rate
+                monthlySaving: fmt(calculationResult.monthlySaving),
                 inflationRate: clientData.inflationRate,
                 returnRate: clientData.returnRate
             },
 
-            // Hasil Kalkulasi (Output)
             calc: {
                 yearsToRetire: calculationResult.yearsToRetire,
                 retirementDuration: calculationResult.retirementDuration,
-
-                // Shock Therapy Numbers
                 futureMonthlyExpense: fmt(calculationResult.futureMonthlyExpense),
-
-                // Financial Gap Analysis
                 totalFundNeeded: fmt(calculationResult.totalFundNeeded),
                 fvExistingFund: fmt(calculationResult.fvExistingFund),
                 shortfall: fmt(calculationResult.shortfall),
-
-                // Visual Widths for CSS
                 workingPercentage: workWidth.toFixed(1),
                 retirementPercentage: retireWidth.toFixed(1)
             }
         };
 
         try {
-            // Compile Template (Menggunakan pension-report.template.ts yang baru direvisi)
             const template = handlebars.compile(pensionReportTemplate);
             const html = template(context);
 
-            // Render via Puppeteer
             const pdfBuffer = await this.generatePdfCore(html, context);
 
             this.logger.log(`Stateless Pension PDF generated for: ${clientData.clientName}`);
@@ -1042,15 +929,9 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * generateGoalSimulationPdfBuffer
-     * -------------------------------
-     * Membuat PDF simulasi Tujuan Keuangan secara on-the-fly.
-     * Visualisasi: Reality Check Inflasi & Strategi Investasi.
-     */
     async generateGoalSimulationPdfBuffer(
         clientData: CreateGoalSimulationDto,
-        calculationResult: any, // Hasil dari calculateGoalPlan (Stateless version logic)
+        calculationResult: any,
         agent: User,
     ): Promise<Buffer> {
         const fmt = (n: number) =>
@@ -1060,13 +941,9 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 maximumFractionDigits: 0
             }).format(n);
 
-        // --- 1. DATA MAPPING ---
-        // Hitung durasi detail
         const years = calculationResult.yearsDuration || 0;
         const months = Math.round(years * 12);
 
-        // Hitung persentase bar modal awal vs target
-        // Safe division untuk visualisasi bar chart
         const target = calculationResult.futureTargetAmount || 1;
         const existing = calculationResult.futureExistingFund || 0;
         const existingPercentage = Math.min(100, Math.round((existing / target) * 100));
@@ -1075,7 +952,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
             documentId: `GOAL-${Math.random().toString(36).substring(7).toUpperCase()}`,
 
-            // Profil Agen
             agent: {
                 name: agent.fullName,
                 parentCompany: agent.companyName || 'KeuanganKu Pratama',
@@ -1083,7 +959,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 level: agent.agentLevel || 'Financial Advisor'
             },
 
-            // Profil Klien
             client: {
                 name: clientData.clientName,
                 city: clientData.clientCity,
@@ -1091,48 +966,34 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 phone: clientData.clientPhone || '-'
             },
 
-            // Data Tujuan (Input Snapshot)
             goal: {
                 name: clientData.goalName,
-                targetAmount: fmt(clientData.targetAmount), // Harga Hari Ini (PV)
+                targetAmount: fmt(clientData.targetAmount),
                 targetDate: new Date(clientData.targetDate).toLocaleDateString('id-ID', { month: 'long', year: 'numeric' }),
                 currentSaving: fmt(clientData.currentSaving || 0),
                 inflationRate: clientData.inflationRate,
                 returnRate: clientData.returnRate,
                 years: years.toFixed(1),
-
-                // Inflasi Effect (Beda harga nanti - harga sekarang)
                 inflationEffect: fmt(calculationResult.futureTargetAmount - clientData.targetAmount),
                 currentCost: fmt(clientData.targetAmount)
             },
 
-            // Hasil Kalkulasi (Output)
             calc: {
                 yearsDuration: years.toFixed(1),
                 monthsDuration: months,
-
-                // Future Values (Harga Nanti)
                 futureTargetAmount: fmt(calculationResult.futureTargetAmount),
-                futureValue: fmt(calculationResult.futureTargetAmount), // Alias for template compatibility
-
-                // Existing Fund Projection (Aset Lama tumbuh jadi berapa?)
+                futureValue: fmt(calculationResult.futureTargetAmount),
                 futureExistingFund: fmt(calculationResult.futureExistingFund),
                 existingPercentage: existingPercentage,
-
-                // The Gap (Kekurangan yang harus dikejar)
                 netTarget: fmt(calculationResult.netTarget),
-
-                // The Solution (Tabungan Bulanan)
                 monthlySaving: fmt(calculationResult.monthlySaving)
             }
         };
 
         try {
-            // Compile Template (Menggunakan goals-report.template.ts yang baru direvisi)
             const template = handlebars.compile(goalReportTemplate);
             const html = template(context);
 
-            // Render via Puppeteer
             const pdfBuffer = await this.generatePdfCore(html, context);
 
             this.logger.log(`Stateless Goal PDF generated for: ${clientData.clientName}`);
@@ -1144,16 +1005,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * generateCheckupSimulationPdfBuffer
-     * ----------------------------------
-     * Membuat PDF simulasi Financial Checkup (Agent Mode).
-     * Fitur:
-     * - Header Dinamis (Profil Agen)
-     * - Profil Klien Lengkap (Spouse + Children)
-     * - Analisa Kesehatan (Stateless Result)
-     * - [FIXED] Null-Safety (Optional Chaining) untuk mencegah crash rendering PDF
-     */
     async generateCheckupSimulationPdfBuffer(
         clientData: CreateCheckupSimulationDto,
         analysisResult: HealthAnalysisResult,
@@ -1168,7 +1019,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
         const num = (n: any) => Number(n) || 0;
 
-        // --- 1. PREPARE ASSETS (LOGO) ---
         const logoPath = path.join(process.cwd(), 'src/assets/images', 'logokeuanganku.png');
         let logoUrl = '';
         try {
@@ -1180,31 +1030,26 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             this.logger.warn('Failed to load logo for PDF', e);
         }
 
-        // --- 2. CALCULATE AGES DENGAN NULL-SAFETY ---
         const calcAge = (dob?: string) => {
             if (!dob) return '-';
             const birthDate = new Date(dob);
-            if (isNaN(birthDate.getTime())) return '-'; // Mencegah Invalid Date
+            if (isNaN(birthDate.getTime())) return '-';
             const ageDifMs = Date.now() - birthDate.getTime();
             const ageDate = new Date(ageDifMs);
             return Math.abs(ageDate.getUTCFullYear() - 1970);
         };
 
-        // --- 3. GROUPING FINANCIAL DATA ---
         const d = clientData;
 
-        // Assets
         const assetLiquid = num(d.assetCash);
         const assetPersonal = num(d.assetHome) + num(d.assetVehicle) + num(d.assetJewelry) + num(d.assetAntique) + num(d.assetPersonalOther);
         const assetInvest = num(d.assetInvHome) + num(d.assetInvVehicle) + num(d.assetGold) + num(d.assetInvAntique) + num(d.assetStocks) + num(d.assetMutualFund) + num(d.assetBonds) + num(d.assetDeposit) + num(d.assetInvOther);
         const totalAsset = assetLiquid + assetPersonal + assetInvest;
 
-        // Debts
         const debtShort = num(d.debtCC) + num(d.debtCoop) + num(d.debtConsumptiveOther);
         const debtLong = num(d.debtKPR) + num(d.debtKPM) + num(d.debtBusiness);
         const totalDebt = debtShort + debtLong;
 
-        // Cashflow
         const incomeFixed = num(d.incomeFixed);
         const incomeVariable = num(d.incomeVariable);
         const totalIncome = incomeFixed + incomeVariable;
@@ -1215,21 +1060,17 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         const expenseLiving = num(d.expenseFood) + num(d.expenseSchool) + num(d.expenseTransport) + num(d.expenseCommunication) + num(d.expenseHelpers) + num(d.expenseTax) + num(d.expenseLifestyle);
         const totalExpense = expenseDebt + expenseInsurance + expenseSaving + expenseLiving;
 
-        // --- 4. DATA CONTEXT ---
         const context = {
             checkDate: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
             logoUrl: logoUrl,
 
-            // PROFIL AGEN (HEADER)
             agent: {
                 name: agent.fullName || 'Agen Finansial',
                 level: agent.agentLevel || 'Financial Advisor',
                 company: agent.companyName || 'KeuanganKu Pratama',
-                // [FIX] Fallback yang lebih logis jika agency tidak ada
                 agency: agent.companyName || 'MaxiPro Group',
             },
 
-            // PROFIL KLIEN (NULL-SAFE EXTRACT)
             client: {
                 name: d.client?.name || 'Tanpa Nama',
                 age: calcAge(d.client?.dob),
@@ -1243,7 +1084,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 dependentParents: d.client?.dependentParents || 0,
             },
 
-            // DATA PASANGAN (NULL-SAFE EXTRACT)
             spouse: {
                 hasSpouse: !!d.spouse,
                 name: d.spouse?.name || '-',
@@ -1251,7 +1091,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 job: d.spouse?.occupation || '-',
             },
 
-            // FINANCIAL SUMMARY
             fin: {
                 assetCash: fmt(assetLiquid),
                 assetPersonal: fmt(assetPersonal),
@@ -1279,12 +1118,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 surplusColor: (analysisResult?.surplusDeficit || 0) >= 0 ? 'val-green' : 'val-red',
             },
 
-            // DIAGNOSA & SCORING
             globalStatus: analysisResult?.globalStatus || 'BAHAYA',
             score: analysisResult?.score || 0,
             scoreColor: (analysisResult?.score || 0) >= 80 ? '#22c55e' : (analysisResult?.score || 0) >= 50 ? '#eab308' : '#ef4444',
 
-            // INDIKATOR / RATIOS
             healthyCount: (analysisResult?.ratios || []).filter(r => r.statusColor?.includes('GREEN')).length,
             warningCount: (analysisResult?.ratios || []).filter(r => !r.statusColor?.includes('GREEN')).length,
 
@@ -1299,11 +1136,9 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
 
         try {
-            // Compile Template
             const template = handlebars.compile(checkupReportTemplate);
             const html = template(context);
 
-            // Render PDF
             const pdfBuffer = await this.generatePdfCore(html, context);
             this.logger.log(`Stateless Checkup PDF generated for: ${context.client.name}`);
 
@@ -1315,32 +1150,22 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         }
     }
 
-    /**
-     * generateRiskProfileSimulationPdfBuffer
-     * --------------------------------------
-     * Membuat PDF simulasi Profil Risiko (Agent Mode).
-     * Menerima DTO input dan hasil kalkulasi (RiskProfileResponseDto),
-     * lalu merender PDF via Puppeteer tanpa simpan ke disk.
-     */
     async generateRiskProfileSimulationPdfBuffer(
         clientData: CreateRiskProfileSimulationDto,
         result: RiskProfileResponseDto,
         agent: User
     ): Promise<Buffer> {
 
-        // 1. Prepare Context Data for Handlebars (Mapping strictly matched with View Template)
         const context = {
-            // --- ROOT DATA: Wajib Sama Persis dengan Template HTML ---
             clientName: clientData.clientName,
             generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
             score: result.totalScore,
-            profile: result.riskProfile, // Konservatif / Moderat / Agresif
+            profile: result.riskProfile,
             description: result.riskDescription,
 
-            // Logika pewarnaan tema (Root Level)
-            themeColor: result.riskProfile === 'Konservatif' ? '#10b981' // Emerald
-                : result.riskProfile === 'Moderat' ? '#f59e0b' // Amber
-                    : '#ef4444', // Red
+            themeColor: result.riskProfile === 'Konservatif' ? '#10b981'
+                : result.riskProfile === 'Moderat' ? '#f59e0b'
+                    : '#ef4444',
 
             allocation: {
                 low: result.allocation.lowRisk,
@@ -1348,7 +1173,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 high: result.allocation.highRisk
             },
 
-            // --- EXTRA METADATA: Tidak dipanggil di template saat ini, tapi aman disimpan ---
             documentId: `RISK-${Math.random().toString(36).substring(7).toUpperCase()}`,
             agent: {
                 name: agent.fullName,
@@ -1368,11 +1192,9 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         };
 
         try {
-            // 2. Compile Template
             const template = handlebars.compile(riskProfileReportTemplate);
             const html = template(context);
 
-            // 3. Render PDF
             const pdfBuffer = await this.generatePdfCore(html, context);
 
             this.logger.log(`Stateless Risk Profile PDF generated for: ${clientData.clientName}`);
@@ -1385,23 +1207,18 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     }
 
     async generateEducationSimulationPdf(
-        dto: CreateEducationSimulationDto,
+        dto: CreateEducationSimulationDto & { aggregatedResult?: any }, // [CRITICAL FIX] Type union adapter
         agent: User
     ): Promise<Buffer> {
         try {
             this.logger.log(`Mapping Stateless Education PDF data for: ${dto.clientName}`);
 
-            // [BEST PRACTICE FIX] Adapter Pattern
-            // Mengubah format DTO Agen menjadi format yang dipahami oleh template HTML lama Anda
             const mappedDataArray = dto.childrenPlans.map(child => {
 
-                // Hitung total nilai per anak
                 const totalFutureCost = child.stages.reduce((sum, s) => sum + (s.calculatedFutureValue || 0), 0);
                 const totalMonthlySaving = child.stages.reduce((sum, s) => sum + (s.calculatedMonthlySaving || 0), 0);
 
-                // Format ulang stages ke bentuk yang dimengerti oleh this.mapEducationData()
                 const stagesBreakdown = child.stages.map(stage => {
-                    // Kalkulasi PV (Present Value)
                     let currentTotal = (stage.costEntry || 0);
                     if (stage.costMonthly) currentTotal += (stage.costMonthly * 12 * stage.duration);
                     if (stage.costSemester) currentTotal += (stage.costSemester * 2 * stage.duration);
@@ -1409,8 +1226,8 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
                     return {
                         level: stage.level,
-                        costType: 'ENTRY', // Menyesuaikan logic pemetaan di mapEducationData
-                        yearsToStart: stage.startYear - new Date().getFullYear(),
+                        costType: 'ENTRY',
+                        yearsToStart: Math.max(0, stage.startYear - new Date().getFullYear()), // [CRITICAL FIX] Fallback minus values
                         currentCost: currentTotal,
                         futureCost: stage.calculatedFutureValue || 0,
                         monthlySaving: stage.calculatedMonthlySaving || 0
@@ -1421,9 +1238,9 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                     plan: {
                         childName: child.childName,
                         childDob: child.childDob,
-                        inflationRate: dto.inflationRate,
-                        returnRate: dto.returnRate,
-                        method: 'GEOMETRIC' // Default as per original requirement
+                        inflationRate: dto.inflationRate || 0,
+                        returnRate: dto.returnRate || 0,
+                        method: 'GEOMETRIC'
                     },
                     calculation: {
                         totalFutureCost,
@@ -1433,7 +1250,6 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 };
             });
 
-            // Lempar ke engine utama yang SUDAH TERBUKTI berhasil merender template HTML
             const pdfBuffer = await this.generateEducationPdf(mappedDataArray);
 
             this.logger.log(`Successfully generated Education PDF for: ${dto.clientName}`);
@@ -1444,4 +1260,4 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             throw new Error('Gagal memproses laporan PDF Pendidikan.');
         }
     }
-} 
+}
