@@ -6,12 +6,10 @@ import {
   Delete,
   Param,
   UseGuards,
-  Req,
   Res,
   NotFoundException,
   Header,
   StreamableFile,
-  ParseUUIDPipe,
   HttpCode,
 } from '@nestjs/common';
 import * as express from 'express';
@@ -573,19 +571,20 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (STATELESS STREAMING)
+  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (BASE64 JSON PIPELINE)
   // ===========================================================================
 
   @Post('simulation/checkup')
-  @ApiOperation({ summary: 'Simulasi Financial Checkup & Download PDF Langsung' })
+  @ApiOperation({ summary: 'Simulasi Financial Checkup (JSON + Base64 PDF)' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createCheckupSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateCheckupSimulationDto,
-    @Res() res: express.Response,
   ) {
+    // 1. Eksekusi Kalkulasi
     const result = await this.financialService.simulateAgentCheckup(user, dto);
 
+    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'SIMULATE_CHECKUP',
@@ -596,15 +595,13 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="${result.filename}"`,
-      'Content-Length': result.pdfBuffer.length,
-      'X-MGC-Token': result.mgcToken,
-      'Access-Control-Expose-Headers': 'X-MGC-Token, Content-Disposition, Content-Length',
-    });
-
-    res.end(result.pdfBuffer);
+    // 3. Kembalikan JSON (Bypass 502 Bad Gateway Nginx Header Limit)
+    return {
+      pdfBase64: result.pdfBuffer.toString('base64'),
+      mgcToken: result.mgcToken,
+      filename: result.filename,
+      analysisResult: result.analysisResult // Menyertakan kembali rasio ke Frontend
+    };
   }
 
   // ===========================================================================
@@ -618,13 +615,10 @@ export class FinancialController {
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
   ) {
-    // 1. Eksekusi kalkulasi matematis (Return JSON State)
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
-    // 2. Generate token retensi
     const mgcToken = this.simulationTokenService.generateMgcToken(dto);
 
-    // 3. Catat aktivitas kalkulasi
     await this.auditService.logActivity({
       userId: user.id,
       action: 'CALCULATE_EDUCATION_SIMULATION',
@@ -635,7 +629,6 @@ export class FinancialController {
       userAgent: 'AgentSystem'
     });
 
-    // 4. Kembalikan data utuh ke Frontend agar bisa di-save ke state UI
     return {
       ...result,
       mgcToken
@@ -652,10 +645,8 @@ export class FinancialController {
     @Res({ passthrough: true }) res: express.Response,
   ): Promise<StreamableFile> {
 
-    // 1. Dapatkan buffer PDF
     const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
 
-    // 2. Audit Log
     await this.auditService.logActivity({
       userId: user.id,
       action: 'DOWNLOAD_SIMULATION_PDF',
@@ -664,7 +655,6 @@ export class FinancialController {
       details: `Agent ${user.fullName} downloaded education PDF ${id}`,
     });
 
-    // 3. Set Header
     res.set({
       'Content-Type': 'application/pdf',
       'Content-Disposition': `attachment; filename="Rencana_Pendidikan_${id}.pdf"`,
@@ -672,8 +662,6 @@ export class FinancialController {
       'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
     });
 
-    // [BEST PRACTICE FIX] Ubah Buffer statis menjadi stream yang mengalir (Readable)
-    // Ini menjamin file tidak terpotong (0 bytes) atau corrupt di sisi klien
     const stream = Readable.from(pdfBuffer as Buffer);
     return new StreamableFile(stream);
   }

@@ -314,6 +314,7 @@ export class CheckupCalculatorService {
                 pdfBuffer,
                 mgcToken,
                 filename: `Checkup_${(dto.client?.name || 'Klien').replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
+                analysisResult // [CRITICAL FIX] Sertakan data hasil analisis agar Frontend bisa me-rendernya
             };
 
         } catch (error: any) {
