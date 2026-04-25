@@ -115,6 +115,9 @@ export class EducationCalculatorService {
         return this.prisma.educationPlan.delete({ where: { id: planId } });
     }
 
+    // ===========================================================================
+    // IMPLEMENTASI BARU: SINGLE ENDPOINT - BASE64 PIPELINE 
+    // ===========================================================================
     async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
         await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'EDUCATION');
 
@@ -122,6 +125,7 @@ export class EducationCalculatorService {
             let grandTotalFutureCost = 0;
             let grandTotalMonthlySaving = 0;
 
+            // 1. Kalkulasi Data (Information Expert)
             if (dto.childrenPlans) {
                 dto.childrenPlans.forEach((child) => {
                     child.stages.forEach((stage) => {
@@ -140,6 +144,7 @@ export class EducationCalculatorService {
 
             const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
 
+            // 2. Pencatatan Log Database
             const log = await this.prisma.simulationLog.create({
                 data: {
                     agentId: user.id,
@@ -162,6 +167,7 @@ export class EducationCalculatorService {
                 },
             });
 
+            // 3. Generate MGC Token (Berisi Metadata Utuh)
             const mgcToken = this.tokenService.generateMgcToken({
                 meta: {
                     version: '1.0',
@@ -174,13 +180,24 @@ export class EducationCalculatorService {
             });
 
             const cleanName = dto.clientName.replace(/[^a-zA-Z0-9]/g, '_');
+            const filename = `Education_Plan_${cleanName}_${Date.now()}.pdf`;
 
+            // 4. [CRITICAL FIX] Generate PDF Buffer secara internal sebelum respons dikirim
+            // Kita menggunakan 'dto' orisinal yang tipe datanya masih utuh (bukan stringified dari DB)
+            const payloadToGenerate = {
+                ...dto,
+                aggregatedResult: outputResult
+            };
+            const pdfBuffer = await this.pdfService.generateEducationSimulationPdf(payloadToGenerate as any, user);
+
+            // 5. Kembalikan kontrak operasi utuh ke Controller
             return {
                 status: 'success',
                 data: outputResult,
                 simulationId: log.id,
                 mgcToken: mgcToken,
-                filename: `Education_Plan_${cleanName}_${Date.now()}.pdf`,
+                filename: filename,
+                pdfBuffer: pdfBuffer, // Buffer PDF diserahkan ke Controller untuk di-Base64-kan
             };
 
         } catch (error: any) {
@@ -202,6 +219,7 @@ export class EducationCalculatorService {
         return Math.abs(ageDt.getUTCFullYear() - 1970);
     }
 
+    // Fungsi ini dipertahankan secara selektif untuk mendukung unduhan dari tabel History (Legacy/Historical View)
     async downloadEducationPdfById(simulationId: string, user: User) {
         const log = await this.prisma.simulationLog.findFirst({
             where: {
@@ -214,12 +232,9 @@ export class EducationCalculatorService {
             throw new NotFoundException('Data simulasi tidak ditemukan');
         }
 
-        // [CRITICAL FIX] 
-        // Menggabungkan Payload Input & Output agar Generator punya data kalkulasi
         const originalInput = log.inputPayload as unknown as CreateEducationSimulationDto;
         const outputResult = log.outputResult as any;
 
-        // Injeksi hasil agregat kembali ke DTO agar bisa dirender
         const payloadToGenerate = {
             ...originalInput,
             aggregatedResult: outputResult

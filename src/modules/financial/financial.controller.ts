@@ -22,7 +22,6 @@ import { FinancialService } from './financial.service';
 import { PdfGeneratorService } from './services/pdf-generator.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
-import { SimulationTokenService } from './services/core/simulation-token.service';
 
 // DTOs - Existing Modules
 import { CreateBudgetDto } from './dto/create-budget.dto';
@@ -61,7 +60,6 @@ export class FinancialController {
     private readonly pdfGeneratorService: PdfGeneratorService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
-    private readonly simulationTokenService: SimulationTokenService,
   ) { }
 
   // ===========================================================================
@@ -390,7 +388,6 @@ export class FinancialController {
     @Body() data: RiskProfileResponseDto,
     @Res() res: express.Response,
   ) {
-    // [CRITICAL FIX] Disesuaikan agar tidak memanggil 'StreamableFile' 
     const pdfBuffer = await this.pdfGeneratorService.generateRiskProfilePdf(data);
 
     const cleanName = data.clientName.replace(/[^a-zA-Z0-9]/g, '_');
@@ -601,64 +598,51 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (SCENARIO B: SPLIT ENDPOINTS)
+  // MODULE 13: AGENT EDUCATION SIMULATION (SINGLE ENDPOINT - BASE64 PIPELINE)
   // ===========================================================================
 
-  @Post('simulation/education/calculate')
-  @ApiOperation({ summary: 'Simulasi Pendidikan - Hitung (JSON Data)' })
-  @Throttle({ default: { limit: 10, ttl: 60000 } })
-  async calculateEducationSimulation(
+  @Post('simulation/education')
+  @ApiOperation({ summary: 'Simulasi Pendidikan (JSON + Base64 PDF)' })
+  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  async createEducationSimulation(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
   ) {
     const result = await this.financialService.simulateAgentEducation(user, dto);
 
-    const mgcToken = this.simulationTokenService.generateMgcToken(dto);
-
     await this.auditService.logActivity({
       userId: user.id,
-      action: 'CALCULATE_EDUCATION_SIMULATION',
+      action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
-      entityId: result.simulationId || 'UNKNOWN',
-      details: `Agent ${user.fullName} calculated education plan for client ${dto.clientName}`,
+      entityId: result.simulationId || 'ANONYMOUS',
+      details: `Agent ${user.fullName} generated education simulation for client ${dto.clientName}`,
       ip: '0.0.0.0',
       userAgent: 'AgentSystem'
     });
 
     return {
-      ...result,
-      mgcToken
+      status: result.status,
+      data: result.data,
+      simulationId: result.simulationId,
+      pdfBase64: result.pdfBuffer.toString('base64'),
+      mgcToken: result.mgcToken,
+      filename: result.filename
     };
   }
 
-  @Get('simulation/education/:id/pdf')
-  @ApiOperation({ summary: 'Simulasi Pendidikan - Download PDF (Stream)' })
-  @HttpCode(200)
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
-  async downloadEducationPdfById(
-    @Param('id') id: string,
+  @Post('simulation/education/export-pdf')
+  @ApiOperation({ summary: 'Export PDF Pendidikan (Stateless untuk Sesi Import MGC)' })
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  async exportEducationPdf(
     @GetUser() user: client.User,
-    @Res() res: express.Response,
+    @Body() dto: CreateEducationSimulationDto,
   ) {
-    // [CRITICAL FIX] Menggunakan res.end() agar aliran file binary 
-    // bebas dari pencegatan/serialization NestJS Interceptor.
-    const pdfBuffer = await this.financialService.downloadEducationPdfById(id, user);
+    // Kita by-pass database & kuota, langsung suruh Service menggambar PDF Buffer-nya
+    const pdfBuffer = await this.pdfGeneratorService.generateEducationSimulationPdf(dto as any, user);
 
-    await this.auditService.logActivity({
-      userId: user.id,
-      action: 'DOWNLOAD_SIMULATION_PDF',
-      entity: 'SimulationLog',
-      entityId: id,
-      details: `Agent ${user.fullName} downloaded education PDF ${id}`,
-    });
-
-    res.set({
-      'Content-Type': 'application/pdf',
-      'Content-Disposition': `attachment; filename="Rencana_Pendidikan_${id}.pdf"`,
-      'Content-Length': (pdfBuffer as Buffer).length,
-      'Access-Control-Expose-Headers': 'Content-Disposition, Content-Length',
-    });
-
-    res.end(pdfBuffer);
+    return {
+      pdfBase64: pdfBuffer.toString('base64')
+    };
   }
 }
+

@@ -1213,44 +1213,98 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
         try {
             this.logger.log(`Mapping Stateless Education PDF data for: ${dto.clientName}`);
 
-            const mappedDataArray = dto.childrenPlans.map(child => {
+            // 1. Formatter Mata Uang (Format Rupiah Standar)
+            const fmt = (n: number) =>
+                new Intl.NumberFormat('id-ID', {
+                    style: 'currency',
+                    currency: 'IDR',
+                    maximumFractionDigits: 0
+                }).format(n || 0);
 
-                const totalFutureCost = child.stages.reduce((sum, s) => sum + (s.calculatedFutureValue || 0), 0);
-                const totalMonthlySaving = child.stages.reduce((sum, s) => sum + (s.calculatedMonthlySaving || 0), 0);
+            // 2. Kalkulasi Umur Klien Secara Dinamis
+            const clientAge = dto.clientDob
+                ? new Date().getFullYear() - new Date(dto.clientDob).getFullYear()
+                : '-';
 
-                const stagesBreakdown = child.stages.map(stage => {
-                    let currentTotal = (stage.costEntry || 0);
-                    if (stage.costMonthly) currentTotal += (stage.costMonthly * 12 * stage.duration);
-                    if (stage.costSemester) currentTotal += (stage.costSemester * 2 * stage.duration);
-                    if (stage.costFull) currentTotal += stage.costFull;
+            // 3. Mapping Data Anak dan Agregasi Total secara Komprehensif
+            let grandTotalFutureCost = 0;
+            let grandTotalMonthlySaving = 0;
+
+            const mappedChildren = (dto.childrenPlans || []).map((child) => {
+                const childDob = new Date(child.childDob);
+                const childAge = isNaN(childDob.getTime()) ? '-' : new Date().getFullYear() - childDob.getFullYear();
+
+                let childTotalMonthlySaving = 0;
+
+                const mappedStages = child.stages.map((stage) => {
+                    // Agregasi ke level Anak & Global
+                    childTotalMonthlySaving += stage.calculatedMonthlySaving || 0;
+                    grandTotalFutureCost += stage.calculatedFutureValue || 0;
+                    grandTotalMonthlySaving += stage.calculatedMonthlySaving || 0;
+
+                    // Hitung Present Value Kasar (Biaya Hari Ini Total) berdasarkan durasi
+                    const rawPv = (stage.costEntry || 0) +
+                        ((stage.costMonthly || 0) * 12 * stage.duration) +
+                        ((stage.costSemester || 0) * 2 * stage.duration) +
+                        (stage.costFull || 0);
 
                     return {
                         level: stage.level,
-                        costType: 'ENTRY',
-                        yearsToStart: Math.max(0, stage.startYear - new Date().getFullYear()), // [CRITICAL FIX] Fallback minus values
-                        currentCost: currentTotal,
-                        futureCost: stage.calculatedFutureValue || 0,
-                        monthlySaving: stage.calculatedMonthlySaving || 0
+                        startYear: stage.startYear,
+                        duration: stage.duration,
+                        costEntry: stage.costEntry ? fmt(stage.costEntry) : null,
+                        costMonthly: stage.costMonthly ? fmt(stage.costMonthly) : null,
+                        costSemester: stage.costSemester ? fmt(stage.costSemester) : null,
+                        costFull: stage.costFull ? fmt(stage.costFull) : null,
+                        totalPv: fmt(rawPv),
+                        totalFv: fmt(stage.calculatedFutureValue || 0)
                     };
                 });
 
                 return {
-                    plan: {
-                        childName: child.childName,
-                        childDob: child.childDob,
-                        inflationRate: dto.inflationRate || 0,
-                        returnRate: dto.returnRate || 0,
-                        method: 'GEOMETRIC'
-                    },
-                    calculation: {
-                        totalFutureCost,
-                        monthlySaving: totalMonthlySaving,
-                        stagesBreakdown
-                    }
+                    name: child.childName || '-',
+                    currentAge: childAge,
+                    stages: mappedStages,
+                    monthlySaving: fmt(childTotalMonthlySaving)
                 };
             });
 
-            const pdfBuffer = await this.generateEducationPdf(mappedDataArray);
+            // 4. Susun Context (Information Expert) Sesuai Ekspektasi Template Handlebars
+            const context = {
+                generatedAt: new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' }),
+                simulationId: `EDU-${Math.random().toString(36).substring(7).toUpperCase()}`,
+
+                agent: {
+                    name: agent.fullName || 'Agen Finansial',
+                    agency: agent.companyName || 'KeuanganKu Pratama',
+                },
+
+                client: {
+                    name: dto.clientName || '-',
+                    dob: dto.clientDob ? new Date(dto.clientDob).toLocaleDateString('id-ID', { dateStyle: 'medium' }) : '-',
+                    age: clientAge,
+                    city: dto.clientCity || '-',
+                    job: dto.clientJob || '-'
+                },
+
+                financial: {
+                    inflationRate: dto.inflationRate || 10
+                },
+
+                summary: {
+                    totalChildren: mappedChildren.length,
+                    totalFutureCost: fmt(grandTotalFutureCost),
+                    totalMonthlyInvestment: fmt(grandTotalMonthlySaving)
+                },
+
+                children: mappedChildren
+            };
+
+            // 5. Bypass Legacy Method -> Langsung Compile & Generate Core PDF
+            const template = handlebars.compile(educationReportTemplate);
+            const html = template(context);
+
+            const pdfBuffer = await this.generatePdfCore(html, context);
 
             this.logger.log(`Successfully generated Education PDF for: ${dto.clientName}`);
             return pdfBuffer;
