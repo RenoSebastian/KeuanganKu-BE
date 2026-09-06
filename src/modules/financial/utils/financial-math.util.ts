@@ -201,7 +201,8 @@ export const calculateFinancialHealth = (
   }
   addScore(efStatus);
   ratios.push({
-    id: 'emergency_fund', label: 'Rasio Dana Darurat', value: emergencyFundValue, type: 'MULTIPLIER', idealCondition: '3 - 6x',
+    id: 'emergency_fund', label: 'Rasio Dana Darurat', value: Math.round(emergencyFundValue * 100) / 100, type: 'MULTIPLIER', idealCondition: '3 - 6x',
+    benchmark: '3 - 6x',
     statusColor: efStatus, analysis: efAnalysis, recommendation: efAnalysis
   });
 
@@ -219,7 +220,8 @@ export const calculateFinancialHealth = (
   }
   addScore(liqStatus);
   ratios.push({
-    id: 'liquid_to_net_worth', label: 'Likuiditas thd Kekayaan', value: liquidToNetWorth, type: 'PERCENTAGE', idealCondition: 'Min 15%',
+    id: 'liquid_to_net_worth', label: 'Likuiditas terhadap Kekayaan', value: Math.round(liquidToNetWorth * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Min 15%',
+    benchmark: 'Min 15%',
     statusColor: liqStatus, analysis: liqAnalysis, recommendation: liqAnalysis
   });
 
@@ -237,11 +239,12 @@ export const calculateFinancialHealth = (
   }
   addScore(savStatus);
   ratios.push({
-    id: 'saving_to_income', label: 'Kemampuan Menabung', value: savingToIncome, type: 'PERCENTAGE', idealCondition: 'Min 10%',
+    id: 'saving_to_income', label: 'Kemampuan Menabung', value: Math.round(savingToIncome * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Min 10%',
+    benchmark: 'Min 10%',
     statusColor: savStatus, analysis: savAnalysis, recommendation: savAnalysis
   });
 
-  // --- 4. Rasio Kemampuan Melunasi Utang (Total Utang thd Aset) ---
+  // --- 4. Rasio Hutang terhadap Aset (Total Utang thd Aset) ---
   const debtToAsset = totalAssets > 0 ? (totalDebt / totalAssets) * 100 : 0;
   let dtaStatus: any = 'RED'; let dtaAnalysis = '';
   if (debtToAsset < 15) {
@@ -255,7 +258,8 @@ export const calculateFinancialHealth = (
   }
   addScore(dtaStatus);
   ratios.push({
-    id: 'debt_to_asset', label: 'Kemampuan Melunasi Utang', value: debtToAsset, type: 'PERCENTAGE', idealCondition: 'Maks 50%',
+    id: 'debt_to_asset', label: 'Rasio Hutang terhadap Aset', value: Math.round(debtToAsset * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Maks 50%',
+    benchmark: 'Maks 50%',
     statusColor: dtaStatus, analysis: dtaAnalysis, recommendation: dtaAnalysis
   });
 
@@ -273,7 +277,8 @@ export const calculateFinancialHealth = (
   }
   addScore(dsStatus);
   ratios.push({
-    id: 'debt_service', label: 'Beban Cicilan Utang', value: debtService, type: 'PERCENTAGE', idealCondition: 'Maks 35%',
+    id: 'debt_service', label: 'Beban Cicilan Utang', value: Math.round(debtService * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Maks 35%',
+    benchmark: 'Maks 35%',
     statusColor: dsStatus, analysis: dsAnalysis, recommendation: dsAnalysis
   });
 
@@ -291,7 +296,8 @@ export const calculateFinancialHealth = (
   }
   addScore(cdsStatus);
   ratios.push({
-    id: 'consumptive_debt_service', label: 'Cicilan Utang Konsumtif', value: consumptiveDebtService, type: 'PERCENTAGE', idealCondition: 'Maks 15%',
+    id: 'consumptive_debt_service', label: 'Cicilan Utang Konsumtif', value: Math.round(consumptiveDebtService * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Maks 15%',
+    benchmark: 'Maks 15%',
     statusColor: cdsStatus, analysis: cdsAnalysis, recommendation: cdsAnalysis
   });
 
@@ -309,7 +315,8 @@ export const calculateFinancialHealth = (
   }
   addScore(invwStatus);
   ratios.push({
-    id: 'investment_to_net_worth', label: 'Porsi Aset Investasi', value: investToNetWorth, type: 'PERCENTAGE', idealCondition: 'Min 50%',
+    id: 'investment_to_net_worth', label: 'Porsi Aset Investasi', value: Math.round(investToNetWorth * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Min 50%',
+    benchmark: 'Min 50%',
     statusColor: invwStatus, analysis: invwAnalysis, recommendation: invwAnalysis
   });
 
@@ -327,7 +334,8 @@ export const calculateFinancialHealth = (
   }
   addScore(solStatus);
   ratios.push({
-    id: 'solvency', label: 'Tingkat Solvabilitas', value: solvency, type: 'PERCENTAGE', idealCondition: 'Min 50%',
+    id: 'solvency', label: 'Tingkat Solvabilitas', value: Math.round(solvency * 100) / 100, type: 'PERCENTAGE', idealCondition: 'Min 50%',
+    benchmark: 'Min 50%',
     statusColor: solStatus, analysis: solAnalysis, recommendation: solAnalysis
   });
 

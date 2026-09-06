@@ -33,6 +33,16 @@ import { CreateEducationSimulationDto } from '../dto/create-education-simulation
 
 import { User } from '@prisma/client';
 
+function formatSmartDecimal(value: any, maxDecimals: number = 2): string {
+    const num = Number(value);
+    if (isNaN(num)) return '0';
+    return new Intl.NumberFormat('id-ID', {
+        minimumFractionDigits: 0,
+        maximumFractionDigits: maxDecimals,
+        useGrouping: false,
+    }).format(num);
+}
+
 @Injectable()
 export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
     private browser: puppeteer.Browser | null = null;
@@ -305,9 +315,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
             warningCount: (data.ratiosDetails || []).filter((r: any) => !r.statusColor.includes('GREEN')).length,
             ratios: (data.ratiosDetails || []).map((r: any) => ({
                 ...r,
-                valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
-                statusLabel: r.statusColor.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
-                cssClass: r.statusColor.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red'
+                benchmark: r.benchmark || r.idealCondition || '-',
+                valueDisplay: r.id === 'emergency_fund' ? `${formatSmartDecimal(r.value)}x` : `${formatSmartDecimal(r.value)}%`,
+                statusLabel: r.statusColor?.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
+                cssClass: r.statusColor?.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red'
             }))
         };
     }
@@ -603,9 +614,10 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
 
         const allRatios = (analysis.ratios || []).map((r: any) => ({
             ...r,
-            valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
-            statusLabel: r.statusColor.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
-            cssClass: r.statusColor.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red'
+            benchmark: r.benchmark || r.idealCondition || '-',
+            valueDisplay: r.id === 'emergency_fund' ? `${formatSmartDecimal(r.value)}x` : `${formatSmartDecimal(r.value)}%`,
+            statusLabel: r.statusColor?.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
+            cssClass: r.statusColor?.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red'
         }));
 
         const ratioPages: any[] = [];
@@ -1129,8 +1141,8 @@ export class PdfGeneratorService implements OnModuleInit, OnModuleDestroy {
                 label: r.label || '-',
                 statusLabel: r.statusColor?.includes('GREEN') ? 'Sehat' : r.statusColor === 'YELLOW' ? 'Waspada' : 'Bahaya',
                 cssClass: r.statusColor?.includes('GREEN') ? 'bg-green' : r.statusColor === 'YELLOW' ? 'bg-yellow' : 'bg-red',
-                valueDisplay: r.id === 'emergency_fund' ? `${r.value}x` : `${r.value}%`,
-                benchmark: r.benchmark || '-',
+                valueDisplay: r.id === 'emergency_fund' ? `${formatSmartDecimal(r.value)}x` : `${formatSmartDecimal(r.value)}%`,
+                benchmark: r.benchmark || r.idealCondition || '-',
                 recommendation: r.recommendation || '-'
             }))
         };
