@@ -3,6 +3,7 @@ import {
     Logger,
     InternalServerErrorException,
     ForbiddenException,
+    BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../../prisma/prisma.service';
 import { MarketSettingsService } from '../../../master-data/services/market-settings.service';
@@ -89,7 +90,7 @@ export class PensionCalculatorService {
                 returnRate: returnRate,
             });
 
-            const clientAge = this.calculateAge(dto.clientDob);
+            const clientAge = this.calculateAge(dto.clientDob, dto.currentAge);
 
             // 4. Log Aktivitas Simulasi
             await this.prisma.simulationLog.create({
@@ -154,18 +155,23 @@ export class PensionCalculatorService {
                 `Pension Simulation Error: ${error.message}`,
                 error.stack,
             );
-            if (error instanceof ForbiddenException) throw error;
+            if (error instanceof ForbiddenException || error instanceof BadRequestException) {
+                throw error;
+            }
             throw new InternalServerErrorException(
-                'Gagal memproses simulasi dana pensiun.',
+                error.message || 'Gagal memproses simulasi dana pensiun.',
             );
         }
     }
 
     // Helper Private (Duplikasi kecil untuk kemandirian service)
-    private calculateAge(dobString: string): number {
+    private calculateAge(dobString?: string, fallbackAge?: number): number {
+        if (!dobString) return fallbackAge || 30;
         const dob = new Date(dobString);
+        if (isNaN(dob.getTime())) return fallbackAge || 30;
         const diffMs = Date.now() - dob.getTime();
         const ageDt = new Date(diffMs);
-        return Math.abs(ageDt.getUTCFullYear() - 1970);
+        const age = Math.abs(ageDt.getUTCFullYear() - 1970);
+        return isNaN(age) ? (fallbackAge || 30) : age;
     }
 }
