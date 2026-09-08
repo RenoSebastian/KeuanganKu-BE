@@ -31,15 +31,28 @@ function getImageBase64(filePath: string): string {
   }
 }
 
-// Setup Path Aset
-const ASSET_BASE_PATH = path.join(process.cwd(), 'src/assets/images');
+// Setup Path Aset dengan fallback multi-path agar aman di Local, VPS, dan Docker
+function resolveAssetPath(filename: string): string {
+  const candidates = [
+    path.join(process.cwd(), 'src/assets/images', filename),
+    path.join(process.cwd(), 'dist/assets/images', filename),
+    path.join(process.cwd(), 'assets/images', filename),
+    path.join(__dirname, '../../../assets/images', filename),
+    path.join(__dirname, '../../assets/images', filename),
+    path.join(__dirname, '../assets/images', filename),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return path.join(process.cwd(), 'src/assets/images', filename);
+}
 
 // Load Assets sekali saja saat startup
 const assets = {
-  logoMaxiPro: getImageBase64(path.join(ASSET_BASE_PATH, 'logokeuanganku.png')),
+  logoMaxiPro: getImageBase64(resolveAssetPath('logokeuanganku.png')),
   // Gunakan gambar spesifik pensiun
-  headerImg1: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanaharitua1.webp')),
-  headerImg2: getImageBase64(path.join(ASSET_BASE_PATH, 'rancangdanaharitua2.webp'))
+  headerImg1: getImageBase64(resolveAssetPath('rancangdanaharitua1.webp')),
+  headerImg2: getImageBase64(resolveAssetPath('rancangdanaharitua2.webp'))
 };
 
 // HTML Template String
@@ -277,7 +290,7 @@ export const pensionReportTemplate = `
       <div class="h-image-top"></div>
       <div class="h-image-bottom"></div>
       <div class="h-logo-box">
-        <img src="\${assets.logoMaxiPro}" class="logo-img" alt="Logo">
+        <img src="${assets.logoMaxiPro}" class="logo-img" alt="Logo">
       </div>
     </div>
 

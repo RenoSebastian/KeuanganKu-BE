@@ -11,10 +11,13 @@
 
     /**
      * PENTING: Gambar di email HARUS menggunakan URL absolut (https://...)
-     * Karena file ada di src/assets/images/logokeuanganku.png, pastikan saat deploy
-     * file tersebut bisa diakses secara publik, contoh: https://api.keuanganku.id/static/logokeuanganku.png
+     * Menggunakan domain utama aktif (keuanganku.id) agar tidak terkena HTTP 301 redirect
+     * yang diblokir oleh proxy email (seperti Google Image Proxy).
      */
-    const logoUrl = 'https://keuanganku.geocitra.com/images/logokeuanganku.png';
+    const baseUrl = (process.env.FRONTEND_URL && process.env.FRONTEND_URL.startsWith('http') && !process.env.FRONTEND_URL.includes('localhost'))
+      ? process.env.FRONTEND_URL.replace(/\/$/, '')
+      : 'https://keuanganku.id';
+    const logoUrl = `${baseUrl}/images/logokeuanganku.png`;
     const brandColor = '#2563eb'; // Blue-600 (Selaras dengan UI Dashboard)
     const bgColor = '#f8fafc';   // Slate-50 (Latar belakang yang bersih)
 

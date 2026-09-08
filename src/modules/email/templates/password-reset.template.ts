@@ -9,7 +9,10 @@ export const getPasswordResetOtpTemplate = (
     ttlMinutes: number = 5,
 ): string => {
     const currentYear = new Date().getFullYear();
-    const logoUrl = 'https://keuanganku.geocitra.com/images/logokeuanganku.png';
+    const baseUrl = (process.env.FRONTEND_URL && process.env.FRONTEND_URL.startsWith('http') && !process.env.FRONTEND_URL.includes('localhost'))
+      ? process.env.FRONTEND_URL.replace(/\/$/, '')
+      : 'https://keuanganku.id';
+    const logoUrl = `${baseUrl}/images/logokeuanganku.png`;
     const brandColor = '#2563eb';
     const bgColor = '#f8fafc';
 
