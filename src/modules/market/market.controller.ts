@@ -15,8 +15,8 @@ export class MarketController {
     description: 'Mengambil data harga emas per gram dalam IDR dari riwayat terbaru di database.' 
   })
   async getGoldPrice() {
-    // Memanggil fungsi service yang mengambil data dari tabel GoldPriceHistory
-    const latestPrice = await this.marketService.updateGoldPrice();
+    // Memanggil fungsi service yang mengambil data dari tabel GoldPriceHistory atau fallback database
+    const latestPrice = await this.marketService.getLatestGoldPrice();
     
     return {
       success: true,

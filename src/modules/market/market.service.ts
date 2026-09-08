@@ -23,6 +23,64 @@ export class MarketService {
   }
 
   /**
+   * Mengambil harga emas terbaru dari database dengan mekanisme fallback bertingkat:
+   * 1. Dari tabel riwayat goldPriceHistory (paling mutakhir).
+   * 2. Jika kosong, dari globalMarketSettings.goldPrice (konfigurasi acuan admin).
+   * 3. Jika masih kosong, default nilai aman (Rp 1.350.000).
+   */
+  async getLatestGoldPrice() {
+    try {
+      const latestHistory = await this.prisma.goldPriceHistory.findFirst({
+        orderBy: { fetchedAt: 'desc' },
+      });
+
+      if (latestHistory) {
+        return {
+          id: latestHistory.id,
+          buyPrice: Number(latestHistory.buyPrice),
+          sellPrice: Number(latestHistory.sellPrice),
+          openPrice: latestHistory.openPrice ? Number(latestHistory.openPrice) : null,
+          changeAmount: latestHistory.changeAmount ? Number(latestHistory.changeAmount) : null,
+          currency: latestHistory.currency,
+          unit: latestHistory.unit,
+          source: latestHistory.source,
+          fetchedAt: latestHistory.fetchedAt,
+        };
+      }
+
+      // Fallback 1: Ambil dari GlobalMarketSettings (Admin Configuration)
+      const marketSettings = await this.prisma.globalMarketSettings.findFirst();
+      const goldPrice = marketSettings ? Number(marketSettings.goldPrice) : 1350000;
+
+      return {
+        id: 'settings-fallback',
+        buyPrice: goldPrice,
+        sellPrice: Math.round(goldPrice * 0.95),
+        openPrice: goldPrice,
+        changeAmount: 0,
+        currency: 'IDR',
+        unit: 'GRAM',
+        source: 'GlobalMarketSettings',
+        fetchedAt: marketSettings?.updatedAt || new Date(),
+      };
+    } catch (error: any) {
+      this.logger.error(`Gagal membaca harga emas dari database: ${error.message}`);
+      // Fallback darurat jika database down/error
+      return {
+        id: 'emergency-fallback',
+        buyPrice: 1350000,
+        sellPrice: 1282500,
+        openPrice: 1350000,
+        changeAmount: 0,
+        currency: 'IDR',
+        unit: 'GRAM',
+        source: 'Default Emergency',
+        fetchedAt: new Date(),
+      };
+    }
+  }
+
+  /**
    * Mengambil data dari CoinGecko (PAX Gold) - Open Source & Tanpa API Key
    */
   async updateGoldPrice() {
@@ -33,7 +91,7 @@ export class MarketService {
       const apiUrl = 'https://api.coingecko.com/api/v3/simple/price?ids=pax-gold&vs_currencies=idr&include_24hr_change=true'; 
       
       const response = await firstValueFrom(
-        this.httpService.get(apiUrl) // Tidak memerlukan headers x-access-token
+        this.httpService.get(apiUrl, { timeout: 8000 }) // Batasi timeout 8 detik agar tidak hang
       );
 
       const rawData = response.data['pax-gold'];
@@ -68,10 +126,21 @@ export class MarketService {
       });
 
       this.logger.log(`Update berhasil: ID ${savedData.id} - Harga: Rp${buyPrice.toLocaleString()}/gr`);
-      return savedData;
-    } catch (error) {
-      this.logger.error(`Gagal memperbarui harga emas: ${error.message}`);
-      // Implementasi fallback atau alert system bisa diletakkan di sini
+      return {
+        id: savedData.id,
+        buyPrice: Number(savedData.buyPrice),
+        sellPrice: Number(savedData.sellPrice),
+        openPrice: savedData.openPrice ? Number(savedData.openPrice) : null,
+        changeAmount: savedData.changeAmount ? Number(savedData.changeAmount) : null,
+        currency: savedData.currency,
+        unit: savedData.unit,
+        source: savedData.source,
+        fetchedAt: savedData.fetchedAt,
+      };
+    } catch (error: any) {
+      this.logger.error(`Gagal memperbarui harga emas dari CoinGecko: ${error.message}`);
+      // Fallback ke harga terakhir yang tersimpan di database agar caller tidak menerima undefined
+      return await this.getLatestGoldPrice();
     }
   }
 
