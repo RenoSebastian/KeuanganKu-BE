@@ -200,9 +200,10 @@ export const generateInsuranceReportHtml = (data: any) => {
     .calc-box {
       flex: 1; border: 1px solid var(--border); border-radius: 14px; padding: 18px;
       background: var(--white); position: relative;
+      display: flex; flex-direction: column; justify-content: space-between;
     }
-    .calc-title { font-size: 9px; font-weight: 800; color: var(--secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; }
-    .calc-desc { font-size: 10px; color: var(--secondary); margin-bottom: 12px; height: 45px; line-height: 1.4; }
+    .calc-title { font-size: 9px; font-weight: 800; color: var(--secondary); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px; min-height: 24px; }
+    .calc-desc { font-size: 10px; color: var(--secondary); margin-bottom: 12px; min-height: 48px; line-height: 1.4; }
     .calc-amount { font-size: 16px; font-weight: 800; color: var(--dark); font-family: 'Inter', sans-serif; }
     
     .calc-box.total { 
@@ -298,7 +299,7 @@ export const generateInsuranceReportHtml = (data: any) => {
           <div class="row"><span class="label">Nama Agen</span><span class="val">${agent.name}</span></div>
           <div class="row"><span class="label">Perusahaan</span><span class="val">${agent.companyName}</span></div>
           <div class="row"><span class="label">Level</span><span class="val">${agent.level}</span></div>
-          <div class="row" style="margin-top: 22px;"><span class="label">Metode Analisa</span><span class="val">Income Replacement</span></div>
+          <div class="row" style="margin-top: 22px;"><span class="label">Metode Analisa</span><span class="val">Needs Approach</span></div>
           <div class="row" style="opacity: 0;"><span>Spacer</span><span></span></div>
         </div>
       </div>
@@ -311,11 +312,11 @@ export const generateInsuranceReportHtml = (data: any) => {
         <div class="grid-2">
             <div>
                 <div class="row"><span class="label">Biaya Hidup Bulanan</span><span class="val">${input.monthlyExpense}</span></div>
-                <div class="row"><span class="label">Sisa Hutang Berjalan</span><span class="val">${input.existingDebt}</span></div>
+                <div class="row"><span class="label">Sisa Utang Berjalan</span><span class="val">${input.existingDebt}</span></div>
                 <div class="row"><span class="label">Biaya Akhir Hayat</span><span class="val">${input.finalExpense}</span></div>
             </div>
             <div>
-                <div class="row"><span class="label">UP Saat Ini (Existing)</span><span class="val">${input.existingCoverage}</span></div>
+                <div class="row"><span class="label">Uang Pertanggungan Saat Ini (Existing)</span><span class="val">${input.existingCoverage}</span></div>
                 <div class="row"><span class="label">Durasi Proteksi</span><span class="val">${input.protectionDuration} Tahun</span></div>
                 <div class="row"><span class="label">Asumsi Inflasi / Return</span><span class="val">${input.inflationRate}% / ${input.returnRate}%</span></div>
             </div>
@@ -325,23 +326,23 @@ export const generateInsuranceReportHtml = (data: any) => {
 
     <!-- Calculations -->
     <section>
-      <div class="section-title">04. Detail Kebutuhan Dana Pertanggungan</div>
+      <div class="section-title">04. Detail Kebutuhan Uang Pertanggungan</div>
       <div class="calc-container">
         <div class="calc-box">
-          <div class="calc-title">Income Replacement</div>
+          <div class="calc-title">Kebutuhan Biaya Hidup Keluarga</div>
           <div class="calc-desc">Dana pengganti biaya hidup keluarga agar standar hidup tetap terjaga selama durasi proteksi.</div>
           <div class="calc-amount">${result.incomeReplacement}</div>
         </div>
 
         <div class="calc-box">
-          <div class="calc-title">Debt Clearance</div>
-          <div class="calc-desc">Dana tunai untuk melunasi seluruh kewajiban hutang dan biaya akhir hayat seketika.</div>
+          <div class="calc-title">Kebutuhan Pelunasan Utang & Biaya Segera</div>
+          <div class="calc-desc">Dana likuid untuk melunasi seluruh kewajiban utang dan biaya segera saat peristiwa kepastian.</div>
           <div class="calc-amount">${result.debtClearance}</div>
         </div>
 
         <div class="calc-box total">
-          <div class="calc-title">Total Kebutuhan UP</div>
-          <div class="calc-desc">Total dana ideal yang harus tersedia jika risiko terjadi hari ini (Life Insurance).</div>
+          <div class="calc-title">Total Kebutuhan Uang Pertanggungan</div>
+          <div class="calc-desc">Total dana likuid yang harus tersedia saat peristiwa kepastian terjadi (UP Jiwa).</div>
           <div class="calc-amount">${result.totalNeeded}</div>
         </div>
       </div>
@@ -368,7 +369,7 @@ export const generateInsuranceReportHtml = (data: any) => {
           </div>
           <div class="bar-labels">
             <span>Rp 0</span>
-            <span>Existing UP: ${input.existingCoverage}</span>
+            <span>Uang Pertanggungan Saat Ini: ${input.existingCoverage}</span>
             <span>Kebutuhan Ideal: ${result.totalNeeded}</span>
           </div>
         </div>

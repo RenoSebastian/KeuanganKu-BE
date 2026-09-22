@@ -575,7 +575,7 @@ export const calculateInsurancePlan = (
   let recommendation = '';
   if (coverageGap <= 0) {
     recommendation =
-      'Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Biaya Hidup, Hutang, & Biaya Duka).';
+      'Selamat! Nilai perlindungan asuransi Anda saat ini sudah mencukupi kebutuhan keluarga (Biaya Hidup, Utang, dan Biaya Segera).';
   } else {
     const formattedGap = new Intl.NumberFormat('id-ID', {
       style: 'currency',
@@ -583,7 +583,7 @@ export const calculateInsurancePlan = (
       maximumFractionDigits: 0,
     }).format(coverageGap);
 
-    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk menjaga standar hidup selama ${n} tahun, melunasi hutang, serta mencadangkan biaya akhir hayat jika terjadi risiko.`;
+    recommendation = `Keluarga Anda membutuhkan dana tambahan sebesar ${formattedGap} untuk menjaga standar hidup selama ${n} tahun, melunasi utang, serta mencadangkan biaya segera jika terjadi risiko.`;
   }
 
   return {
