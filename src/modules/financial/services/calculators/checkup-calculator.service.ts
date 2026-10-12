@@ -249,8 +249,6 @@ export class CheckupCalculatorService {
     // ===========================================================================
 
     async simulateAgentCheckup(user: User, dto: CreateCheckupSimulationDto) {
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP');
-
         const val = (n: any) => Number(n) || 0;
 
         try {
@@ -270,28 +268,32 @@ export class CheckupCalculatorService {
             const safeSurplusDeficit = val(analysisResult.surplusDeficit) * 12;
             const safeHealthScore = val(analysisResult.score);
 
-            // 1. Simpan ke Database
-            await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.client?.name || 'Klien',
-                    clientAge: clientAge,
-                    clientCity: dto.client?.city,
-                    clientJob: dto.client?.occupation,
-                    totalIncome: safeTotalIncome,
-                    calculatedSurplus: safeSurplusDeficit,
-                    healthScore: safeHealthScore,
-                    status: dbStatus,
-                    financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
-                    moduleType: 'CHECKUP',
-                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota dipotong dan Log disimpan dalam 1 unit transaksi
+            // Jika salah satu gagal atau input salah, kuota tidak akan berkurang
+            await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'CHECKUP', tx);
+
+                await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.client?.name || 'Klien',
+                        clientAge: clientAge,
+                        clientCity: dto.client?.city,
+                        clientJob: dto.client?.occupation,
+                        totalIncome: safeTotalIncome,
+                        calculatedSurplus: safeSurplusDeficit,
+                        healthScore: safeHealthScore,
+                        status: dbStatus,
+                        financialRatios: JSON.parse(JSON.stringify(analysisResult.ratios)) as Prisma.InputJsonValue,
+                        moduleType: 'CHECKUP',
+                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(JSON.stringify(analysisResult)) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             // 2. Generate MGC Token (SLIM PAYLOAD TO PREVENT NGINX 502 BAD GATEWAY)
-            // KITA MENGHAPUS OBJEK 'result' YANG BERISI TEKS PANJANG AGAR HEADER HTTP TIDAK MELEDAK
             const mgcToken = this.tokenService.generateMgcToken({
                 meta: {
                     version: '1.0',
@@ -314,7 +316,7 @@ export class CheckupCalculatorService {
                 pdfBuffer,
                 mgcToken,
                 filename: `Checkup_${(dto.client?.name || 'Klien').replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.pdf`,
-                analysisResult // [CRITICAL FIX] Sertakan data hasil analisis agar Frontend bisa me-rendernya
+                analysisResult
             };
 
         } catch (error: any) {
@@ -327,8 +329,6 @@ export class CheckupCalculatorService {
     }
 
     async simulateAgentBudget(user: User, dto: CreateBudgetSimulationDto) {
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'BUDGETING');
-
         const val = (n: any) => Number(n) || 0;
 
         try {
@@ -339,23 +339,28 @@ export class CheckupCalculatorService {
 
             const clientAge = this.calculateAge(dto.clientDob);
 
-            await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.clientName,
-                    clientAge: clientAge,
-                    clientCity: dto.clientCity,
-                    clientJob: dto.clientJob,
-                    totalIncome: val(calculationResult.meta.totalIncome),
-                    calculatedSurplus: val(calculationResult.analysis.totalRecommendedSavings),
-                    healthScore: 100,
-                    status: HealthStatus.SEHAT,
-                    financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)) as Prisma.InputJsonValue,
-                    moduleType: 'BUDGETING',
-                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota & Simpan Log dilakukan secara atomik
+            await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'BUDGETING', tx);
+
+                await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.clientName,
+                        clientAge: clientAge,
+                        clientCity: dto.clientCity,
+                        clientJob: dto.clientJob,
+                        totalIncome: val(calculationResult.meta.totalIncome),
+                        calculatedSurplus: val(calculationResult.analysis.totalRecommendedSavings),
+                        healthScore: 100,
+                        status: HealthStatus.SEHAT,
+                        financialRatios: JSON.parse(JSON.stringify(calculationResult.allocation)) as Prisma.InputJsonValue,
+                        moduleType: 'BUDGETING',
+                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(JSON.stringify(calculationResult)) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             const pdfBuffer = await this.pdfService.generateSimulationPdfBuffer(

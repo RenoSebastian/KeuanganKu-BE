@@ -97,6 +97,13 @@ export class UserQuotaService {
                     data: { quota: newBalance },
                 });
 
+                // Sinkronisasi ke user_usages agar SubscriptionGuard dan Kalkulator membaca kuota yang sama
+                await tx.userUsage.upsert({
+                    where: { userId },
+                    update: { simulationQuota: newBalance },
+                    create: { userId, simulationQuota: newBalance, totalUsed: 0 },
+                });
+
                 // 5. Create Ledger Entry (user_quota_ledgers table)
                 const ledger = await tx.userQuotaLedger.create({
                     data: {

@@ -4,6 +4,7 @@ import { MediaModule } from '../media/media.module';
 import { SubscriptionService } from './services/subscription.service';
 import { AdminSubscriptionService } from './services/admin-subscription.service';
 import { SubscriptionCronService } from './services/subscription-cron.service'; // [NEW IMPORT]
+import { VoucherService } from './services/voucher.service';
 import { SubscriptionController } from './controllers/subscription.controller';
 import { AdminSubscriptionController } from './controllers/admin-subscription.controller';
 import { NotificationModule } from '../notification/notification.module';
@@ -26,9 +27,11 @@ import { AuditModule } from '../audit/audit.module'; // [REQUIRED]
         SubscriptionService,
         AdminSubscriptionService,
         SubscriptionCronService, // [NEW REGISTER] Wajib ada agar Cron berjalan
+        VoucherService,
     ],
     exports: [
         SubscriptionService,
+        VoucherService,
     ],
 })
 export class SubscriptionModule { }

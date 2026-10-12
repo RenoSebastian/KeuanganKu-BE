@@ -2,8 +2,9 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { PrismaService } from '../../../../prisma/prisma.service';
 import { MediaStorageService } from '../../media/services/media-storage.service';
 import { CreateSubscriptionOrderDto } from '../dto/create-subscription-order.dto';
-import { SubscriptionStatus, VerificationStatus } from '@prisma/client';
+import { SubscriptionStatus, VerificationStatus, VoucherUsageStatus } from '@prisma/client';
 import { NotificationGateway } from '../../notification/notification.gateway';
+import { VoucherService } from './voucher.service';
 
 @Injectable()
 export class SubscriptionService {
@@ -11,6 +12,7 @@ export class SubscriptionService {
         private readonly prisma: PrismaService,
         private readonly mediaStorageService: MediaStorageService,
         private readonly notificationGateway: NotificationGateway,
+        private readonly voucherService: VoucherService,
     ) { }
 
     /**
@@ -43,12 +45,36 @@ export class SubscriptionService {
     async getMyOrders(userId: string) {
         const orders = await this.prisma.subscriptionOrder.findMany({
             where: { userId },
-            include: { plan: true },
+            include: {
+                plan: true,
+                voucher: true,
+            },
             orderBy: { createdAt: 'desc' }, // Terbaru di atas
         });
 
         // [FIX MUTLAK] Sanitasi Memori
         return JSON.parse(JSON.stringify(orders));
+    }
+
+    /**
+     * [POINT 6] Backend Unique Code Generator
+     * Menghindari kolisi nominal transfer antar user pada antrean PENDING
+     */
+    async generateAvailableUniqueCode(): Promise<number> {
+        const pendingOrders = await this.prisma.subscriptionOrder.findMany({
+            where: { verificationStatus: VerificationStatus.PENDING },
+            select: { uniqueCode: true },
+        });
+
+        const usedCodes = new Set(pendingOrders.map(o => o.uniqueCode));
+
+        for (let i = 0; i < 50; i++) {
+            const candidate = Math.floor(100 + Math.random() * 899);
+            if (!usedCodes.has(candidate)) {
+                return candidate;
+            }
+        }
+        return Math.floor(100 + Math.random() * 899);
     }
 
     /**
@@ -74,11 +100,30 @@ export class SubscriptionService {
             throw new NotFoundException('Paket langganan tidak ditemukan atau tidak aktif');
         }
 
+        // 2.3 Validasi & Alokasi Kode Unik Aman (Zero Collision)
+        let assignedUniqueCode = Number(dto.uniqueCode) || 0;
+        if (!assignedUniqueCode || assignedUniqueCode <= 0) {
+            assignedUniqueCode = await this.generateAvailableUniqueCode();
+        }
+
         // [CORE LOGIC FIX]: Lock harga murni menggunakan Net Price (Harga Promosi)
-        // Kita tidak lagi mengkalikan dengan durationMonths karena plan.price di DB 
-        // sudah merupakan harga total paket bundling (contoh: 12 bulan = Rp 1.350.000).
-        // Kita mengabaikan originalPrice karena itu hanya untuk gimmick UI Frontend.
-        const lockedPrice = Number(plan.price);
+        let lockedPrice = Number(plan.price);
+        let discountAmount = 0;
+        let voucherId: string | null = null;
+        let voucherCodeApplied: string | null = null;
+
+        // 2.5 Validasi Voucher jika dikirimkan
+        if (dto.voucherCode && dto.voucherCode.trim()) {
+            const voucherResult = await this.voucherService.validateVoucher(
+                userId,
+                dto.voucherCode,
+                dto.planId,
+            );
+            discountAmount = voucherResult.discountAmount;
+            lockedPrice = voucherResult.finalPrice;
+            voucherId = voucherResult.voucher.id;
+            voucherCodeApplied = voucherResult.voucher.code;
+        }
 
         // 3. Upload Bukti ke Storage
         const uploadResult = await this.mediaStorageService.uploadFile(
@@ -94,25 +139,47 @@ export class SubscriptionService {
                 data: {
                     userId,
                     planId: plan.id,
-                    uniqueCode: Number(dto.uniqueCode) || 0,
+                    uniqueCode: assignedUniqueCode,
                     proofImageUrl,
-                    snapshotPrice: lockedPrice, // Snapshot dikunci pada harga promo yang berlaku saat checkout
+                    snapshotPrice: lockedPrice, // Snapshot dikunci pada harga setelah diskon voucher
+                    voucherId,
+                    discountAmount,
                     verificationStatus: VerificationStatus.PENDING, // Admin belum cek
-                } as any, // Cast to any because Prisma Client is locked and not fully regenerated
+                },
             });
 
-            // B. Hitung Tanggal Berakhir (EndDate)
-            const startDate = new Date();
-            const endDate = new Date(startDate);
-            // Asumsi durationMonths ada di schema, jika pakai durationDays ganti logicnya
-            if (plan.durationMonths) {
-                endDate.setMonth(endDate.getMonth() + plan.durationMonths);
-            } else {
-                // Fallback default 1 bulan jika data kosong
-                endDate.setMonth(endDate.getMonth() + 1);
+            // B. Catat Pemakaian Voucher (Status PENDING)
+            if (voucherId) {
+                await tx.voucherUsage.create({
+                    data: {
+                        voucherId,
+                        userId,
+                        orderId: order.id,
+                        appliedAmount: discountAmount,
+                        status: VoucherUsageStatus.PENDING,
+                    },
+                });
             }
 
-            // C. UPSERT UserSubscription (Optimistic Activation)
+            // C. Hitung Tanggal Berakhir (EndDate) - [POINT 2: AKUMULATIF JIKA MASIH AKTIF]
+            const currentSub = await tx.userSubscription.findUnique({
+                where: { userId },
+            });
+
+            const now = new Date();
+            const isCurrentActive = currentSub &&
+                currentSub.status === SubscriptionStatus.ACTIVE &&
+                currentSub.endDate &&
+                new Date(currentSub.endDate) > now;
+
+            const baseDate = isCurrentActive ? new Date(currentSub.endDate) : now;
+            const monthsToAdd = plan.durationMonths && plan.durationMonths > 0 ? plan.durationMonths : 1;
+            const endDate = new Date(baseDate);
+            endDate.setMonth(endDate.getMonth() + monthsToAdd);
+
+            const startDate = isCurrentActive ? currentSub.startDate : now;
+
+            // D. UPSERT UserSubscription (Optimistic Activation)
             const subscription = await tx.userSubscription.upsert({
                 where: { userId },
                 update: {
@@ -135,13 +202,15 @@ export class SubscriptionService {
                 },
             });
 
-            // D. Broadcast Real-time Event ke Admin Dashboard
+            // E. Broadcast Real-time Event ke Admin Dashboard
             this.notificationGateway.broadcastToAdmins('NEW_PAYMENT_ORDER', {
                 orderId: order.id,
                 userId: userId,
                 planName: plan.name,
-                snapshotPrice: lockedPrice, // Broadcast nilai mutlak untuk ditampilkan di UI Antrean
-                createdAt: order.createdAt
+                snapshotPrice: lockedPrice,
+                voucherCode: voucherCodeApplied,
+                discountAmount,
+                createdAt: order.createdAt,
             });
 
             return {

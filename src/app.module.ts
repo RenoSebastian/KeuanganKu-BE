@@ -32,7 +32,6 @@ import { UsersModule } from './modules/users/users.module';
 import { FinancialModule } from './modules/financial/financial.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { MarketModule } from './modules/market/market.module';
-import { DirectorModule } from './modules/director/director.module';
 import { SearchModule } from './modules/search/search.module';
 import { MasterDataModule } from './modules/master-data/master-data.module';
 import { RetentionModule } from './modules/retention/retention.module';
@@ -84,6 +83,10 @@ import { AdminModule } from './modules/admin/admin.module';
       serveRoot: '/uploads',
     }),
     ServeStaticModule.forRoot({
+      rootPath: path.join(process.cwd(), 'uploads'),
+      serveRoot: '/api/uploads',
+    }),
+    ServeStaticModule.forRoot({
       rootPath: path.join(process.cwd(), 'public'),
       serveRoot: '/',
     }),
@@ -98,7 +101,7 @@ import { AdminModule } from './modules/admin/admin.module';
     FinancialModule,
     AuditModule,
     MarketModule,
-    DirectorModule,
+    // DirectorModule [DEPRECATED & REMOVED - LEGACY PAM JAYA]
     SearchModule,
     MasterDataModule,
     RetentionModule,

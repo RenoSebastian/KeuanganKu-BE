@@ -11,6 +11,7 @@ import { seedUsers } from './seeds/02_users';
 // import { seedGoalPlans } from './seeds/08_goal_plan';
 // import { educationModulesSeed } from './seeds/09_education_modules';
 import { seedSubscriptionPlans } from './seeds/10_subscription_plans';
+import { seedVouchers } from './seeds/11_vouchers';
 
 const prisma = new PrismaClient();
 
@@ -24,6 +25,7 @@ async function main() {
     console.log('\n[1/4] 🌱 Seeding Foundation (Master Data & Users)...');
     // await seedMasterData(prisma);
     await seedSubscriptionPlans(prisma);
+    await seedVouchers(prisma);
     // await seedUsers(prisma);
     await seedGlobalSettings(prisma);
     await seedUsers(prisma);

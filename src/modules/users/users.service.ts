@@ -156,7 +156,9 @@ export class UsersService {
     const { search, role, page = 1, limit = 10 } = params;
     const skip = (page - 1) * limit;
 
-    const where: Prisma.UserWhereInput = {};
+    const where: Prisma.UserWhereInput = {
+      deletedAt: null,
+    };
 
     if (role) {
       where.role = role;
@@ -167,11 +169,13 @@ export class UsersService {
 
       const matchedRecords = await this.prisma.$queryRaw<{ id: string }[]>`
         SELECT id FROM "users"
-        WHERE "full_name" % ${searchStr}
-           OR "email" ILIKE ${'%' + searchStr + '%'}
-           OR "nip" ILIKE ${'%' + searchStr + '%'}
-           OR "phone_number" ILIKE ${'%' + searchStr + '%'}
-           OR SIMILARITY("full_name", ${searchStr}) > 0.15
+        WHERE "deleted_at" IS NULL AND (
+             "full_name" % ${searchStr}
+          OR "email" ILIKE ${'%' + searchStr + '%'}
+          OR "nip" ILIKE ${'%' + searchStr + '%'}
+          OR "phone_number" ILIKE ${'%' + searchStr + '%'}
+          OR SIMILARITY("full_name", ${searchStr}) > 0.15
+        )
         ORDER BY SIMILARITY("full_name", ${searchStr}) DESC
       `;
 
@@ -291,8 +295,8 @@ export class UsersService {
   }
 
   async findOne(id: string) {
-    const user = await this.prisma.user.findUnique({
-      where: { id },
+    const user = await this.prisma.user.findFirst({
+      where: { id, deletedAt: null },
       include: {
         agency: true,
         usage: true,
@@ -314,14 +318,26 @@ export class UsersService {
   }
 
   async updateUser(adminId: string, id: string, dto: UpdateProfileDto) {
+    if (adminId === id && (dto as any).role && (dto as any).role !== Role.ADMIN) {
+      throw new BadRequestException('Anda tidak dapat menurunkan role akun Anda sendiri untuk mencegah self-lockout.');
+    }
     return this.processUpdate(id, dto, adminId);
   }
 
   async deleteUser(adminId: string, id: string) {
+    if (adminId === id) {
+      throw new BadRequestException('Anda tidak dapat menghapus akun Anda sendiri untuk mencegah self-lockout.');
+    }
+
     const oldData = await this.findOne(id);
 
     try {
-      const deleted = await this.prisma.user.delete({ where: { id } });
+      const deleted = await this.prisma.user.update({
+        where: { id },
+        data: {
+          deletedAt: new Date(),
+        },
+      });
 
       this.searchService
         .removeDocument('global_search', id)
@@ -331,13 +347,13 @@ export class UsersService {
         adminId,
         action: 'DELETE_USER',
         targetUserId: id,
-        details: { entityName: 'USER', before: oldData, after: null }
+        details: { entityName: 'USER', before: oldData, after: { deletedAt: deleted.deletedAt } }
       }).catch(e => this.logger.warn(`Audit logging failed: ${e.message}`));
 
       return { message: 'User deleted successfully', id: deleted.id };
     } catch (error: any) {
       this.logger.error(`Delete user failed: ${error.message}`);
-      throw new BadRequestException('Gagal menghapus user. Pastikan user tidak memiliki data tagihan aktif.');
+      throw new BadRequestException(error.message || 'Gagal menghapus user.');
     }
   }
 
@@ -396,6 +412,9 @@ export class UsersService {
 
       // Izinkan pembaruan role jika ini dijalankan oleh Admin
       if (role && adminId) {
+        if (adminId === userId && role !== Role.ADMIN) {
+          throw new BadRequestException('Anda tidak dapat menurunkan role akun Anda sendiri untuk mencegah self-lockout.');
+        }
         updatePayload.role = role as Role;
       }
 

@@ -59,12 +59,18 @@ class SubscriptionFileValidator extends FileValidator<{}> {
     }
 }
 
+import { VoucherService } from '../services/voucher.service';
+import { ValidateVoucherDto } from '../dto/validate-voucher.dto';
+
 @ApiTags('Subscription (User)')
 @Controller('subscription')
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class SubscriptionController {
-    constructor(private readonly subscriptionService: SubscriptionService) { }
+    constructor(
+        private readonly subscriptionService: SubscriptionService,
+        private readonly voucherService: VoucherService,
+    ) { }
 
     @Get('plans')
     @ApiOperation({ summary: 'Get available subscription plans' })
@@ -82,6 +88,23 @@ export class SubscriptionController {
     @ApiOperation({ summary: 'Get my subscription order history' })
     async getMyOrders(@GetUser() user: User) {
         return this.subscriptionService.getMyOrders(user.id);
+    }
+
+    @Get('unique-code')
+    @ApiOperation({ summary: 'Generate available unique transfer code (100-999) without collision' })
+    async getUniqueCode() {
+        const uniqueCode = await this.subscriptionService.generateAvailableUniqueCode();
+        return { uniqueCode };
+    }
+
+    @Post('vouchers/validate')
+    @HttpCode(HttpStatus.OK)
+    @ApiOperation({ summary: 'Validate discount voucher for a plan' })
+    async validateVoucher(
+        @GetUser() user: User,
+        @Body() dto: ValidateVoucherDto,
+    ) {
+        return this.voucherService.validateVoucher(user.id, dto.code, dto.planId);
     }
 
     @Post('buy')

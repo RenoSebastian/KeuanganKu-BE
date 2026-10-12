@@ -30,13 +30,19 @@ export class FinancialQuotaService {
         // Gunakan transaksi bawaan jika dikirim, atau gunakan instance prisma utama
         const db = txContext || this.prisma;
 
-        // 1. Cek Status PRO (Unlimited Pass)
+        // 1. Cek Status PRO (Unlimited Pass) & Grace Period
         const subscription = await db.userSubscription.findUnique({
             where: { userId },
         });
 
-        if (subscription && subscription.status === 'ACTIVE') {
-            return true; // Bypass untuk User PRO
+        const now = new Date();
+        const isPro = subscription && (
+            (subscription.status === 'ACTIVE' && subscription.endDate && new Date(subscription.endDate) > now) ||
+            (subscription.status === 'GRACE_PERIOD' && subscription.gracePeriodEndDate && new Date(subscription.gracePeriodEndDate) > now)
+        );
+
+        if (isPro) {
+            return true; // Bypass untuk User PRO & Grace Period Aktif
         }
 
         // 2. Cek Riwayat Session (Idempotency Check - Revisi Gratis)
@@ -80,6 +86,12 @@ export class FinancialQuotaService {
                     simulationQuota: { decrement: 1 },
                     totalUsed: { increment: 1 },
                 },
+            });
+
+            // Sinkronisasi ke users.quota (Single Source of Truth)
+            await tx.user.update({
+                where: { id: userId },
+                data: { quota: updatedUsage.simulationQuota },
             });
 
             // [STEP 4: FIXED] Catat transaksi ini ke Buku Besar (Ledger) untuk Akuntansi & Audit

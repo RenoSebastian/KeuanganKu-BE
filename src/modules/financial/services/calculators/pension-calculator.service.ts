@@ -70,16 +70,13 @@ export class PensionCalculatorService {
      * [AGENT] Simulasi Dana Pensiun (PDF + Token + Log)
      */
     async simulateAgentPension(user: User, dto: CreatePensionSimulationDto) {
-        // 1. Validasi Quota & Idempotency (via Core Service)
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'PENSION');
-
         try {
-            // 2. Ambil Dynamic Rates
+            // 1. Ambil Dynamic Rates
             const marketRates = await this.marketSettingsService.getSettings();
             const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
             const returnRate = dto.returnRate ?? 8;
 
-            // 3. Kalkulasi Core
+            // 2. Kalkulasi Core
             const calculationResult = calculatePensionPlan({
                 currentAge: dto.currentAge,
                 retirementAge: dto.retirementAge,
@@ -92,28 +89,32 @@ export class PensionCalculatorService {
 
             const clientAge = this.calculateAge(dto.clientDob, dto.currentAge);
 
-            // 4. Log Aktivitas Simulasi
-            await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.clientName,
-                    clientAge: clientAge,
-                    clientCity: dto.clientCity,
-                    clientJob: dto.clientJob || '-',
-                    totalIncome: dto.currentExpense,
-                    calculatedSurplus: calculationResult.shortfall,
-                    healthScore: 100,
-                    status: HealthStatus.SEHAT,
-                    financialRatios: JSON.parse(
-                        JSON.stringify(calculationResult),
-                    ) as Prisma.InputJsonValue,
-                    moduleType: 'PENSION',
-                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(calculationResult),
-                    ) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota & Simpan Log dilakukan secara atomik
+            await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'PENSION', tx);
+
+                await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.clientName,
+                        clientAge: clientAge,
+                        clientCity: dto.clientCity,
+                        clientJob: dto.clientJob || '-',
+                        totalIncome: dto.currentExpense,
+                        calculatedSurplus: calculationResult.shortfall,
+                        healthScore: 100,
+                        status: HealthStatus.SEHAT,
+                        financialRatios: JSON.parse(
+                            JSON.stringify(calculationResult),
+                        ) as Prisma.InputJsonValue,
+                        moduleType: 'PENSION',
+                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(
+                            JSON.stringify(calculationResult),
+                        ) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             // 5. Generate PDF

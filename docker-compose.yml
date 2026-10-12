@@ -12,6 +12,10 @@ services:
       - "3001:4000"  # Akses API utama via Nginx
       - "5555:5555"  # Akses Prisma Studio (Gunakan SSH Tunneling untuk keamanan)
 
+    # Persistent Storage
+    volumes:
+      - ./uploads:/app/uploads
+
     # Resource Management (Mencegah VM Crash)
     deploy:
       resources:

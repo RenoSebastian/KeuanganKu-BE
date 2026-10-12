@@ -99,19 +99,16 @@ export class GoalCalculatorService {
      * [AGENT] Simulasi Goal dengan PDF & Log
      */
     async simulateAgentGoal(user: User, dto: CreateGoalSimulationDto) {
-        // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'GOALS');
-
         try {
-            // 2. Validasi Target Tanggal (Cegah error math)
+            // 1. Validasi Target Tanggal (Cegah error math)
             this.validateTargetDate(dto.targetDate);
 
-            // 3. Ambil Dynamic Rates
+            // 2. Ambil Dynamic Rates
             const marketRates = await this.marketSettingsService.getSettings();
             const inflationRate = dto.inflationRate ?? Number(marketRates.inflationRate);
             const returnRate = dto.returnRate ?? 6;
 
-            // 4. Kalkulasi Core
+            // 3. Kalkulasi Core
             const calculationResult = calculateGoalPlan({
                 goalName: dto.goalName,
                 targetAmount: dto.targetAmount,
@@ -120,7 +117,7 @@ export class GoalCalculatorService {
                 returnRate,
             });
 
-            // 5. Kalkulasi Tambahan (Existing Fund Growth)
+            // 4. Kalkulasi Tambahan (Existing Fund Growth)
             const yearsDuration = calculationResult.monthsDuration / 12;
             const rRate = returnRate / 100;
 
@@ -156,28 +153,32 @@ export class GoalCalculatorService {
 
             const clientAge = this.calculateAge(dto.clientDob);
 
-            // 6. Log Aktivitas
-            await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.clientName,
-                    clientAge: clientAge,
-                    clientCity: dto.clientCity,
-                    clientJob: dto.clientJob || '-',
-                    totalIncome: dto.targetAmount,
-                    calculatedSurplus: finalResult.monthlySaving,
-                    healthScore: 100,
-                    status: HealthStatus.SEHAT,
-                    financialRatios: JSON.parse(
-                        JSON.stringify(finalResult),
-                    ) as Prisma.InputJsonValue,
-                    moduleType: 'GOAL',
-                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(finalResult),
-                    ) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota & Simpan Log dilakukan secara atomik
+            await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'GOALS', tx);
+
+                await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.clientName,
+                        clientAge: clientAge,
+                        clientCity: dto.clientCity,
+                        clientJob: dto.clientJob || '-',
+                        totalIncome: dto.targetAmount,
+                        calculatedSurplus: finalResult.monthlySaving,
+                        healthScore: 100,
+                        status: HealthStatus.SEHAT,
+                        financialRatios: JSON.parse(
+                            JSON.stringify(finalResult),
+                        ) as Prisma.InputJsonValue,
+                        moduleType: 'GOAL',
+                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(
+                            JSON.stringify(finalResult),
+                        ) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             // 7. Generate PDF

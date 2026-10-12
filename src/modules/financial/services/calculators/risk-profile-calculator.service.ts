@@ -51,39 +51,40 @@ export class RiskProfileCalculatorService {
         user: User,
         dto: CreateRiskProfileSimulationDto,
     ) {
-        // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'RISK_PROFILE');
-
         try {
-            // 2. Kalkulasi
+            // 1. Kalkulasi
             const analysisResult = calculateRiskProfileAnalysis(dto.answers as any);
             const clientAge = this.calculateAge(dto.clientDob);
 
-            // 3. Log Activity
-            await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.clientName,
-                    clientAge: clientAge,
-                    clientCity: dto.clientCity || '-',
-                    clientJob: dto.clientJob || '-',
-                    totalIncome: 0,
-                    calculatedSurplus: 0,
-                    healthScore: analysisResult.totalScore,
-                    status: HealthStatus.SEHAT,
-                    financialRatios: {
-                        profile: analysisResult.profile,
-                        allocation: analysisResult.allocation,
-                    } as unknown as Prisma.InputJsonValue,
-                    moduleType: 'RISK_PROFILE',
-                    inputPayload: JSON.parse(
-                        JSON.stringify(dto),
-                    ) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(analysisResult),
-                    ) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota & Simpan Log dilakukan secara atomik
+            await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'RISK_PROFILE', tx);
+
+                await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.clientName,
+                        clientAge: clientAge,
+                        clientCity: dto.clientCity || '-',
+                        clientJob: dto.clientJob || '-',
+                        totalIncome: 0,
+                        calculatedSurplus: 0,
+                        healthScore: analysisResult.totalScore,
+                        status: HealthStatus.SEHAT,
+                        financialRatios: {
+                            profile: analysisResult.profile,
+                            allocation: analysisResult.allocation,
+                        } as unknown as Prisma.InputJsonValue,
+                        moduleType: 'RISK_PROFILE',
+                        inputPayload: JSON.parse(
+                            JSON.stringify(dto),
+                        ) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(
+                            JSON.stringify(analysisResult),
+                        ) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             // 4. Generate PDF Response DTO

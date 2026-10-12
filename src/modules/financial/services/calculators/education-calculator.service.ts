@@ -119,8 +119,6 @@ export class EducationCalculatorService {
     // IMPLEMENTASI BARU: SINGLE ENDPOINT - BASE64 PIPELINE 
     // ===========================================================================
     async simulateAgentEducation(user: User, dto: CreateEducationSimulationDto) {
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'EDUCATION');
-
         try {
             let grandTotalFutureCost = 0;
             let grandTotalMonthlySaving = 0;
@@ -144,27 +142,31 @@ export class EducationCalculatorService {
 
             const clientAge = dto.clientDob ? this.calculateAge(dto.clientDob) : null;
 
-            // 2. Pencatatan Log Database
-            const log = await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.clientName,
-                    clientAge: clientAge,
-                    clientCity: dto.clientCity,
-                    clientJob: dto.clientJob || '-',
-                    totalIncome: grandTotalFutureCost,
-                    calculatedSurplus: grandTotalMonthlySaving,
-                    healthScore: 100,
-                    status: HealthStatus.SEHAT,
-                    moduleType: 'EDUCATION',
-                    inputPayload: JSON.parse(
-                        JSON.stringify(dto),
-                    ) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(outputResult),
-                    ) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota & Simpan Log dilakukan secara atomik
+            const log = await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'EDUCATION', tx);
+
+                return await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.clientName,
+                        clientAge: clientAge,
+                        clientCity: dto.clientCity,
+                        clientJob: dto.clientJob || '-',
+                        totalIncome: grandTotalFutureCost,
+                        calculatedSurplus: grandTotalMonthlySaving,
+                        healthScore: 100,
+                        status: HealthStatus.SEHAT,
+                        moduleType: 'EDUCATION',
+                        inputPayload: JSON.parse(
+                            JSON.stringify(dto),
+                        ) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(
+                            JSON.stringify(outputResult),
+                        ) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             // 3. Generate MGC Token (Berisi Metadata Utuh)

@@ -67,12 +67,8 @@ export class InsuranceCalculatorService {
      * [AGENT] Simulasi Kebutuhan Asuransi (PDF + Token + Log)
      */
     async simulateAgentInsurance(user: User, dto: CreateInsuranceSimulationDto) {
-        // 1. Validasi Quota
-        await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'INSURANCE');
-
         try {
-            // 2. Kalkulasi Core (Asuransi biasanya tidak pakai market rate dinamis kompleks, 
-            // tapi kita tetap support override jika ada di DTO)
+            // 1. Kalkulasi Core
             const calculationResult = calculateInsurancePlan({
                 type: dto.type,
                 dependentCount: dto.dependents,
@@ -87,28 +83,32 @@ export class InsuranceCalculatorService {
 
             const clientAge = this.calculateAge(dto.clientDob);
 
-            // 3. Log Aktivitas
-            await this.prisma.simulationLog.create({
-                data: {
-                    agentId: user.id,
-                    clientName: dto.clientName,
-                    clientAge: clientAge,
-                    clientCity: dto.clientCity,
-                    clientJob: dto.clientJob,
-                    totalIncome: dto.monthlyExpense * 12, // Proxy: Expense tahunan
-                    calculatedSurplus: calculationResult.coverageGap, // Shortfall UP
-                    healthScore: 100,
-                    status: HealthStatus.SEHAT,
-                    financialRatios: JSON.parse(
-                        JSON.stringify(calculationResult),
-                    ) as Prisma.InputJsonValue,
-                    moduleType: 'INSURANCE',
-                    inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
-                    outputResult: JSON.parse(
-                        JSON.stringify(calculationResult),
-                    ) as Prisma.InputJsonValue,
-                    sessionId: dto.sessionId,
-                },
+            // [ATOMIC TRANSACTION] Kuota & Simpan Log dilakukan secara atomik
+            await this.prisma.$transaction(async (tx) => {
+                await this.quotaService.validateAndDeductQuota(user.id, dto.sessionId, 'INSURANCE', tx);
+
+                await tx.simulationLog.create({
+                    data: {
+                        agentId: user.id,
+                        clientName: dto.clientName,
+                        clientAge: clientAge,
+                        clientCity: dto.clientCity,
+                        clientJob: dto.clientJob,
+                        totalIncome: dto.monthlyExpense * 12,
+                        calculatedSurplus: calculationResult.coverageGap,
+                        healthScore: 100,
+                        status: HealthStatus.SEHAT,
+                        financialRatios: JSON.parse(
+                            JSON.stringify(calculationResult),
+                        ) as Prisma.InputJsonValue,
+                        moduleType: 'INSURANCE',
+                        inputPayload: JSON.parse(JSON.stringify(dto)) as Prisma.InputJsonValue,
+                        outputResult: JSON.parse(
+                            JSON.stringify(calculationResult),
+                        ) as Prisma.InputJsonValue,
+                        sessionId: dto.sessionId,
+                    },
+                });
             });
 
             // 4. Generate PDF

@@ -47,11 +47,12 @@ export class AdminAnalyticsService {
 
                 // 3. [PHASE 4 HARDENING: OOM PREVENTION] 
                 // Kalkulasi MRR menggunakan Database-level Aggregation via $queryRaw.
-                // Ini mencegah Node.js Crash karena kehabisan RAM jika ada jutaan data langganan aktif.
+                // Menggunakan nominal riil pembayaran (snapshot_price) termasuk diskon voucher.
                 this.prisma.$queryRaw<Array<{ mrr: number | null }>>`
-                    SELECT SUM(p.price / p."durationMonths") as mrr
+                    SELECT SUM(COALESCE(so."snapshot_price", p.price) / p."durationMonths") as mrr
                     FROM "user_subscriptions" us
                     INNER JOIN "subscription_plans" p ON us."plan_id" = p.id
+                    LEFT JOIN "subscription_orders" so ON us."last_order_id" = so.id
                     WHERE us.status = 'ACTIVE' 
                     AND us."end_date" > ${now} 
                     AND p."durationMonths" > 0

@@ -41,13 +41,17 @@ export class SubscriptionGuard implements CanActivate {
         }
 
         const now = new Date();
-        const isPro = userData.subscription &&
-            userData.subscription.status === SubscriptionStatus.ACTIVE &&
-            userData.subscription.endDate &&
-            userData.subscription.endDate > now;
+        const isPro = userData.subscription && (
+            (userData.subscription.status === SubscriptionStatus.ACTIVE &&
+             userData.subscription.endDate &&
+             userData.subscription.endDate > now) ||
+            (userData.subscription.status === SubscriptionStatus.GRACE_PERIOD &&
+             userData.subscription.gracePeriodEndDate &&
+             userData.subscription.gracePeriodEndDate > now)
+        );
 
         const totalUsed = userData.usage?.totalUsed || 0;
-        const remainingQuota = userData.usage?.simulationQuota || 0;
+        const remainingQuota = Math.max(userData.usage?.simulationQuota || 0, userData.quota || 0);
 
         // ====================================================
         // LEVEL 1: CEK STATUS PREMIUM & FAIR USAGE POLICY (FUP)

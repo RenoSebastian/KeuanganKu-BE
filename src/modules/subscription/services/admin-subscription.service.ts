@@ -12,6 +12,7 @@ import {
     NotificationType,
     NotificationCategory,
     QuotaTransactionType,
+    VoucherUsageStatus,
 } from '@prisma/client';
 import { NotificationService } from '../../notification/notification.service';
 import { UserQuotaService } from '../../users/services/user-quota.service';
@@ -63,6 +64,7 @@ export class AdminSubscriptionService {
                         },
                     },
                     plan: true,
+                    voucher: true,
                 },
                 orderBy: {
                     createdAt: 'desc', // FIFO Terbalik: Yang terbaru paling atas
@@ -137,16 +139,18 @@ export class AdminSubscriptionService {
                 const mrrAmount = snapshotPriceNum / duration;
 
                 // Bypass sementara (tx as any) sampai schema.prisma diperbarui dengan model CashflowLedger
-                await (tx as any).cashflowLedger.create({
-                    data: {
-                        referenceId: order.id,
-                        source: 'SUBSCRIPTION',
-                        grossAmount: snapshotPriceNum,
-                        mrrAmount: mrrAmount,
-                        transactionDate: new Date(),
-                        notes: `Aktivasi ${order.plan.name} (${duration} bulan)`,
-                    },
-                });
+                if ((tx as any).cashflowLedger?.create) {
+                    await (tx as any).cashflowLedger.create({
+                        data: {
+                            referenceId: order.id,
+                            source: 'SUBSCRIPTION',
+                            grossAmount: snapshotPriceNum,
+                            mrrAmount: mrrAmount,
+                            transactionDate: new Date(),
+                            notes: `Aktivasi ${order.plan.name} (${duration} bulan)`,
+                        },
+                    });
+                }
 
                 await tx.userSubscription.upsert({
                     where: { userId: order.userId },
@@ -176,6 +180,13 @@ export class AdminSubscriptionService {
                     data: { quota: newBalance },
                 });
 
+                // Sinkronisasi ke user_usages
+                await tx.userUsage.upsert({
+                    where: { userId: order.userId },
+                    update: { simulationQuota: newBalance },
+                    create: { userId: order.userId, simulationQuota: newBalance, totalUsed: 0 },
+                });
+
                 await tx.userQuotaLedger.create({
                     data: {
                         userId: order.userId,
@@ -186,16 +197,30 @@ export class AdminSubscriptionService {
                         description: `Aktivasi Paket ${order.plan.name}`,
                     },
                 });
+
+                // Finalisasi status pemakaian voucher menjadi CONFIRMED
+                await tx.voucherUsage.updateMany({
+                    where: { orderId: order.id },
+                    data: { status: VoucherUsageStatus.CONFIRMED },
+                });
             } else if (dto.status === VerificationStatus.INVALID) {
+                // [FIX POINT 5] Hanya batalkan langganan jika langganan aktif dipicu oleh order yang invalid ini
                 await tx.userSubscription.updateMany({
                     where: {
                         userId: order.userId,
-                        status: SubscriptionStatus.ACTIVE
+                        status: SubscriptionStatus.ACTIVE,
+                        lastOrderId: order.id,
                     },
                     data: {
                         status: SubscriptionStatus.REVOKED,
                         updatedAt: new Date(),
                     },
+                });
+
+                // Rollback pemakaian voucher menjadi REVERTED agar kuota user pulih kembali
+                await tx.voucherUsage.updateMany({
+                    where: { orderId: order.id },
+                    data: { status: VoucherUsageStatus.REVERTED },
                 });
             }
 
@@ -318,17 +343,19 @@ export class AdminSubscriptionService {
             const snapshotPriceNum = Number(order.snapshotPrice);
             const duration = order.plan.durationMonths && order.plan.durationMonths > 0 ? order.plan.durationMonths : 1;
 
-            // Bypass sementara (tx as any)
-            await (tx as any).cashflowLedger.create({
-                data: {
-                    referenceId: `REVOKE-${order.id}`,
-                    source: 'SUBSCRIPTION_REFUND',
-                    grossAmount: -Math.abs(snapshotPriceNum),
-                    mrrAmount: -(snapshotPriceNum / duration),
-                    transactionDate: new Date(),
-                    notes: `Reversal Revoke Order ${order.id}`,
-                },
-            });
+            // Safe guard agar tidak throw 500 jika tabel cashflowLedger belum aktif
+            if ((tx as any).cashflowLedger?.create) {
+                await (tx as any).cashflowLedger.create({
+                    data: {
+                        referenceId: `REVOKE-${order.id}`,
+                        source: 'SUBSCRIPTION_REFUND',
+                        grossAmount: -Math.abs(snapshotPriceNum),
+                        mrrAmount: -(snapshotPriceNum / duration),
+                        transactionDate: new Date(),
+                        notes: `Reversal Revoke Order ${order.id}`,
+                    },
+                });
+            }
 
             const bonusQuota = order.plan.bonusQuota || 0;
             const user = await tx.user.findUniqueOrThrow({ where: { id: order.userId } });
@@ -337,6 +364,12 @@ export class AdminSubscriptionService {
             await tx.user.update({
                 where: { id: order.userId },
                 data: { quota: newBalance },
+            });
+
+            await tx.userUsage.upsert({
+                where: { userId: order.userId },
+                update: { simulationQuota: newBalance },
+                create: { userId: order.userId, simulationQuota: newBalance, totalUsed: 0 },
             });
 
             await tx.userQuotaLedger.create({
@@ -392,9 +425,22 @@ export class AdminSubscriptionService {
 
         if (!plan) throw new NotFoundException('Plan tidak ditemukan');
 
-        const startDate = new Date();
-        const endDate = new Date();
-        endDate.setMonth(endDate.getMonth() + (durationMonths || plan.durationMonths));
+        const currentSub = await this.prisma.userSubscription.findUnique({
+            where: { userId },
+        });
+
+        const now = new Date();
+        const isCurrentActive = currentSub &&
+            currentSub.status === SubscriptionStatus.ACTIVE &&
+            currentSub.endDate &&
+            new Date(currentSub.endDate) > now;
+
+        const baseDate = isCurrentActive ? new Date(currentSub.endDate) : now;
+        const monthsToAdd = durationMonths || plan.durationMonths || 1;
+        const endDate = new Date(baseDate);
+        endDate.setMonth(endDate.getMonth() + monthsToAdd);
+
+        const startDate = isCurrentActive ? currentSub.startDate : now;
 
         const bonusQuota = plan.bonusQuota || 50;
 

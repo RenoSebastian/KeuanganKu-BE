@@ -95,7 +95,14 @@ export class AuthService {
     }
 
     if (otpData.otpCode !== dto.otpCode) {
-      throw new BadRequestException('Kode OTP yang Anda masukkan salah.');
+      const attempts = ((otpData as any).failedAttempts || 0) + 1;
+      if (attempts >= 5) {
+        await this.redisService.deleteOtp(dto.email);
+        throw new BadRequestException('Terlalu banyak percobaan kode salah. Sesi registrasi dibatalkan demi keamanan. Silakan lakukan registrasi ulang.');
+      }
+      (otpData as any).failedAttempts = attempts;
+      await this.redisService.setOtp(dto.email, otpData, 300);
+      throw new BadRequestException(`Kode OTP yang Anda masukkan salah. Sisa kesempatan: ${5 - attempts} kali.`);
     }
 
     try {
@@ -217,7 +224,15 @@ export class AuthService {
     }
 
     if (loginData.otpCode !== dto.otpCode) {
-      throw new BadRequestException('Kode keamanan salah.');
+      const attempts = ((loginData as any).failedAttempts || 0) + 1;
+      if (attempts >= 5) {
+        await this.redisService.deleteOtp(loginIdentifier);
+        await this.redisService.deleteSession(`pending_device:${dto.email}`);
+        throw new BadRequestException('Terlalu banyak percobaan kode salah. Sesi login dibatalkan demi keamanan akun. Silakan login kembali.');
+      }
+      (loginData as any).failedAttempts = attempts;
+      await this.redisService.setOtp(loginIdentifier, loginData, 300);
+      throw new BadRequestException(`Kode keamanan salah. Sisa kesempatan: ${5 - attempts} kali.`);
     }
 
     const user = await this.prisma.user.findUnique({

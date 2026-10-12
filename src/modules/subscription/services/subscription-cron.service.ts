@@ -154,6 +154,12 @@ export class SubscriptionCronService {
                         data: { quota: FREE_TIER_QUOTA_RESET },
                     });
 
+                    await tx.userUsage.upsert({
+                        where: { userId: sub.userId },
+                        update: { simulationQuota: FREE_TIER_QUOTA_RESET },
+                        create: { userId: sub.userId, simulationQuota: FREE_TIER_QUOTA_RESET, totalUsed: 0 },
+                    });
+
                     await tx.userQuotaLedger.create({
                         data: {
                             userId: sub.userId,

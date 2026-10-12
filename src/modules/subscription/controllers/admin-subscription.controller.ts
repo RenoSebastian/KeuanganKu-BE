@@ -1,6 +1,7 @@
 import {
     Body,
     Controller,
+    Delete,
     Get,
     Patch,
     Post,
@@ -21,6 +22,8 @@ import { Roles } from '../../../common/decorators/roles.decorator';
 import { GetUser } from '../../../common/decorators/get-user.decorator';
 import { AdminSubscriptionService } from '../services/admin-subscription.service';
 import { VerifyOrderDto } from '../dto/verify-order.dto';
+import { VoucherService } from '../services/voucher.service';
+import { CreateVoucherDto, UpdateVoucherDto } from '../dto/create-voucher.dto';
 
 // --- DTO Internal untuk Keamanan Validasi ---
 
@@ -98,6 +101,7 @@ export class RevokeOrderDto {
 export class AdminSubscriptionController {
     constructor(
         private readonly adminSubscriptionService: AdminSubscriptionService,
+        private readonly voucherService: VoucherService,
     ) { }
 
     /**
@@ -178,5 +182,42 @@ export class AdminSubscriptionController {
             dto.amount,
             dto.reason,
         );
+    }
+
+    // ==========================================
+    // VOUCHER MANAGEMENT ENDPOINTS
+    // ==========================================
+
+    @Get('vouchers')
+    @ApiOperation({ summary: 'Daftar semua voucher diskon beserta statistik pemakaian' })
+    async getAllVouchers() {
+        return this.voucherService.getAllVouchers();
+    }
+
+    @Post('vouchers')
+    @ApiOperation({ summary: 'Membuat voucher baru' })
+    async createVoucher(@Body() dto: CreateVoucherDto) {
+        return this.voucherService.createVoucher(dto);
+    }
+
+    @Patch('vouchers/:id')
+    @ApiOperation({ summary: 'Memperbarui data voucher' })
+    async updateVoucher(
+        @Param('id') id: string,
+        @Body() dto: UpdateVoucherDto,
+    ) {
+        return this.voucherService.updateVoucher(id, dto);
+    }
+
+    @Patch('vouchers/:id/toggle')
+    @ApiOperation({ summary: 'Toggle status aktif/nonaktif voucher (Kill Switch)' })
+    async toggleVoucher(@Param('id') id: string) {
+        return this.voucherService.toggleVoucher(id);
+    }
+
+    @Delete('vouchers/:id')
+    @ApiOperation({ summary: 'Menghapus atau menonaktifkan voucher' })
+    async deleteVoucher(@Param('id') id: string) {
+        return this.voucherService.deleteVoucher(id);
     }
 }

@@ -27,5 +27,13 @@ export class CreateSubscriptionOrderDto {
         description: 'Bukti transfer (Gambar/PDF)',
     })
     @IsOptional() // <-- 2. TAMBAHKAN INI AGAR TIDAK DITOLAK VALIDATION PIPE
-    proofFile: any;
+    proofFile?: any;
+
+    @ApiProperty({
+        description: 'Kode voucher diskon (opsional)',
+        example: 'ENGINE50',
+        required: false,
+    })
+    @IsOptional()
+    voucherCode?: string;
 }
