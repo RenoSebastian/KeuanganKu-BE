@@ -320,11 +320,11 @@ export const riskProfileReportTemplate = `
       </div>
 
       <div class="info-container">
-        <div class="section-title">01. Informasi Klien</div>
+        <div class="section-title">01. Informasi Profil</div>
         <div class="info-card">
           <div class="grid-2">
             <div>
-              <div class="info-row"><span class="label">Nama Klien</span><span class="value">{{clientName}}</span></div>
+              <div class="info-row"><span class="label">Nama Lengkap</span><span class="value">{{clientName}}</span></div>
               <div class="info-row"><span class="label">Tanggal Simulasi</span><span class="value">{{generatedAt}}</span></div>
             </div>
             <div>

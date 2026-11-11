@@ -20,19 +20,19 @@ export const generateOtpEmailTemplate = (
 
     const contextTitle = isLogin
         ? (isResend ? 'Pengingat Kode Keamanan Login' : 'Kode Keamanan Akses Portal')
-        : (isResend ? 'Langkah Terakhir Aktivitas Registrasi' : 'Selamat Bergabung, Rekan Agen!');
+        : (isResend ? 'Langkah Terakhir Aktivitas Registrasi' : 'Selamat Bergabung di KeuanganKu!');
 
     const greeting = isLogin
-        ? `Halo Rekan <strong>${fullName}</strong>, kami mendeteksi permintaan masuk ke akun Anda.`
-        : `Halo Rekan <strong>${fullName}</strong>, selamat datang di ekosistem digital KeuanganKu!`;
+        ? `Halo <strong>${fullName}</strong>, kami mendeteksi permintaan masuk ke akun Anda.`
+        : `Halo <strong>${fullName}</strong>, selamat datang di platform perencanaan keuangan KeuanganKu!`;
 
     const instructions = isLogin
-        ? `Gunakan kode rahasia di bawah ini untuk memverifikasi identitas Anda dan melanjutkan ke Dashboard Pro-Agent.`
-        : `Langkah kecil lagi untuk mengaktifkan portal perencanaan keuangan Anda. Silakan masukkan kode OTP berikut:`;
+        ? `Gunakan kode rahasia di bawah ini untuk memverifikasi identitas Anda dan melanjutkan ke Dashboard KeuanganKu.`
+        : `Satu langkah lagi untuk memulai perjalanan finansial Anda. Silakan masukkan kode OTP berikut:`;
 
     const securityWarning = isLogin
-        ? `Jika ini bukan Anda, segera hubungi tim IT kami. Seseorang mungkin mencoba mengakses akun Anda.`
-        : `Jangan bagikan kode ini kepada siapa pun, termasuk tim kami. Keamanan data klien Anda dimulai dari keamanan akun Anda.`;
+        ? `Jika ini bukan Anda, segera hubungi tim bantuan kami. Seseorang mungkin mencoba mengakses akun Anda.`
+        : `Jangan bagikan kode ini kepada siapa pun. Keamanan data finansial Anda dimulai dari keamanan akun Anda.`;
 
     // 2. Desain Konten (Visual Logic)
     const emailContent = `

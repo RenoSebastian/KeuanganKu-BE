@@ -309,7 +309,7 @@ export const checkupReportTemplate = `
       </div>
     </div>
 
-    <div class="section-title">01. Profil Keluarga Nasabah</div>
+    <div class="section-title">01. Profil Finansial & Keluarga</div>
     <div class="profile-card">
       <div class="profile-header">
         <div class="profile-label">Kepala Keluarga</div>

@@ -258,7 +258,7 @@ export const historyCheckupReportTemplate = `
       </div>
     </div>
 
-    <div class="section-title">01. Profil Klien</div>
+    <div class="section-title">01. Profil Finansial</div>
     <div class="profile-box">
       <div>
         <div class="profile-row"><label>Nama Lengkap</label> <span>{{user.name}}</span></div>

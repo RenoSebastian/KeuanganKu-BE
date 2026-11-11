@@ -1,4 +1,4 @@
-  /**
+﻿  /**
    * Utility HTML Template Generator - Master Shell
    * Design: Modern SaaS / Enterprise Professional
    */
@@ -66,7 +66,7 @@
                                       />
                                       <div style="margin-top: 12px; height: 1px; width: 40px; background-color: #e2e8f0; display: inline-block;"></div>
                                       <p style="margin: 10px 0 0 0; color: #94a3b8; font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase;">
-                                          Portal Agen Profesional
+                                          Personal Financial Planning Platform
                                       </p>
                                   </div>
                               </td>
@@ -83,8 +83,8 @@
                                   <table border="0" cellpadding="0" cellspacing="0" width="100%">
                                       <tr>
                                           <td align="center" style="color: #64748b; font-size: 13px; line-height: 1.6;">
-                                              <p style="margin: 0; font-weight: 800; color: #1e293b; font-size: 14px;">Tim Analis KeuanganKu</p>
-                                              <p style="margin: 4px 0 20px 0;">Membantu Anda mengelola masa depan finansial klien dengan data.</p>
+                                              <p style="margin: 0; font-weight: 800; color: #1e293b; font-size: 14px;">Tim KeuanganKu</p>
+                                              <p style="margin: 4px 0 20px 0;">Membantu Anda merencanakan masa depan finansial keluarga dengan data.</p>
                                               
                                               <div style="margin-bottom: 20px;">
                                                   <a href="#" style="display: inline-block; margin: 0 8px; color: ${brandColor}; text-decoration: none; font-weight: 600;">Dashboard</a>

@@ -256,15 +256,15 @@ export const educationReportTemplate = `
 
   <div class="info-grid">
     <div class="info-card">
-      <div class="info-title">Profil Klien</div>
+      <div class="info-title">Profil Finansial</div>
       <div class="info-row"><span class="info-label">Nama Lengkap</span><span class="info-val">{{client.name}}</span></div>
       <div class="info-row"><span class="info-label">Tgl Lahir / Usia</span><span class="info-val">{{client.dob}} ({{client.age}} Thn)</span></div>
       <div class="info-row"><span class="info-label">Domisili</span><span class="info-val">{{client.city}}</span></div>
       <div class="info-row"><span class="info-label">Pekerjaan</span><span class="info-val">{{client.job}}</span></div>
     </div>
     <div class="info-card">
-      <div class="info-title">Disiapkan Oleh (Agen)</div>
-      <div class="info-row"><span class="info-label">Nama Agen</span><span class="info-val">{{agent.name}}</span></div>
+      <div class="info-title">Disiapkan Oleh</div>
+      <div class="info-row"><span class="info-label">Nama</span><span class="info-val">{{agent.name}}</span></div>
       <div class="info-row"><span class="info-label">Agency</span><span class="info-val">{{agent.agency}}</span></div>
       <div class="info-row"><span class="info-label">Tanggal Simulasi</span><span class="info-val">{{generatedAt}}</span></div>
       <div class="info-row"><span class="info-label">Asumsi Inflasi</span><span class="info-val">{{financial.inflationRate}}% / Tahun</span></div>

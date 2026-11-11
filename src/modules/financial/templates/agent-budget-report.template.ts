@@ -178,7 +178,7 @@ export const agentBudgetReportTemplate = `
 </head>
 <body>
   <div class="page-footer-container">
-    <div>KeuanganKu Agent Platform • {{documentId}}</div>
+    <div>KeuanganKu • Personal Financial Planning Platform • {{documentId}}</div>
     <div>CONFIDENTIAL • Generated on {{generatedAt}}</div>
   </div>
 
@@ -198,7 +198,7 @@ export const agentBudgetReportTemplate = `
     <div class="section-group">
       <div class="info-container">
         <div>
-          <div class="section-title">01. Profil Klien</div>
+          <div class="section-title">01. Profil Finansial</div>
           <div class="info-card">
             <div class="info-row"><span class="label">Nama Lengkap</span><span class="value">{{client.name}}</span></div>
             <div class="info-row"><span class="label">Pekerjaan</span><span class="value">{{client.job}}</span></div>

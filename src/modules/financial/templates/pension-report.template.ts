@@ -295,7 +295,7 @@ export const pensionReportTemplate = `
     </div>
 
     <div class="section-title">
-      <span>01. Profil Klien</span>
+      <span>01. Profil Finansial</span>
       <span>Dibuat: {{createdAt}}</span>
     </div>
 

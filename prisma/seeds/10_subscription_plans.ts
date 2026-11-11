@@ -8,26 +8,26 @@ export const seedSubscriptionPlans = async (prisma: PrismaClient) => {
     const plans = [
         {
             code: 'MONTHLY_1',
-            name: 'Montly Plan',
+            name: 'Monthly Plan',
             description: 'Akses penuh fitur kalkulator finansial selama 1 bulan.',
             durationMonths: 1,
-            price: 150000,
+            price: 25000,
             isActive: true,
         },
         {
             code: 'MONTHLY_6',
             name: '6-Month Plan',
-            description: 'Bayar 5 bulan dapat 6 bulan. Solusi tepat untuk perencanaan jangka menengah.',
+            description: 'Bayar 4 bulan dapat 6 bulan. Solusi tepat perencanaan menengah.',
             durationMonths: 6,
-            price: 750000, // Frontend akan otomatis menghitung: (150.000 * 6) - 750.000 = Hemat 150.000
+            price: 99000, // Hemat Rp 51.000 dari normal Rp 150.000
             isActive: true,
         },
         {
             code: 'YEARLY_1',
             name: 'Annual Plan',
-            description: 'Bayar 9 bulan dapat 12 bulan. Pilihan paling hemat untuk akses setahun penuh.',
+            description: 'Bayar 8 bulan dapat 12 bulan. Pilihan paling hemat akses setahun.',
             durationMonths: 12,
-            price: 1350000, // Frontend akan otomatis menghitung: (150.000 * 12) - 1.350.000 = Hemat 450.000
+            price: 199000, // Hemat Rp 101.000 dari normal Rp 300.000
             isActive: true,
         },
     ];

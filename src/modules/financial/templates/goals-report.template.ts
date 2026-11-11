@@ -262,9 +262,9 @@ export const goalReportTemplate = `
       </div>
       <div class="grid-2">
         <div class="card">
-          <div style="font-size:10px; font-weight:800; color:var(--primary); margin-bottom:12px; text-transform:uppercase;">Informasi Klien</div>
+          <div style="font-size:10px; font-weight:800; color:var(--primary); margin-bottom:12px; text-transform:uppercase;">Informasi Profil</div>
           <ul class="meta-list">
-            <li><span class="meta-key">Nama Klien</span> <span class="meta-val">{{client.name}}</span></li>
+            <li><span class="meta-key">Nama Lengkap</span> <span class="meta-val">{{client.name}}</span></li>
             <li><span class="meta-key">Tujuan</span> <span class="meta-val" style="color:var(--primary);">{{goal.name}}</span></li>
             <li><span class="meta-key">Domisili</span> <span class="meta-val">{{client.city}}</span></li>
             <li><span class="meta-key">Target Pencapaian</span> <span class="meta-val">{{goal.targetDate}}</span></li>

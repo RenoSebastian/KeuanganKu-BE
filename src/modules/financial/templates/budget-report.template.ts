@@ -313,11 +313,11 @@ export const budgetReportTemplate = `
     <!-- Bagian 1 & 2 (Grid Data) -->
     <div class="section-group">
       <div class="grid-2">
-        <!-- Informasi Klien -->
+        <!-- Informasi Profil -->
         <section>
           <div class="section-header">
             <div class="section-number">1</div>
-            <div class="section-title">Informasi Klien</div>
+            <div class="section-title">Informasi Profil</div>
           </div>
           <div class="card">
             <div class="info-row"><span class="label">NAMA LENGKAP</span><span class="value">{{user.name}}</span></div>

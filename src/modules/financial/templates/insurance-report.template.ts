@@ -259,7 +259,7 @@ export const generateInsuranceReportHtml = (data: any) => {
   
   <div class="page">
     <div class="footer">
-      <div>KeuanganKu Agent Platform • ${meta.documentId}</div>
+      <div>KeuanganKu • Personal Financial Planning Platform • ${meta.documentId}</div>
       <div>CONFIDENTIAL • Generated on ${meta.generatedAt}</div>
     </div>
 
@@ -279,7 +279,7 @@ export const generateInsuranceReportHtml = (data: any) => {
     <div class="grid-2">
       <!-- Client Profile -->
       <div class="section-prevent-split">
-        <div class="section-title">01. Profil Klien</div>
+        <div class="section-title">01. Profil Finansial</div>
         <div class="info-card">
           <div class="row"><span class="label">Nama Lengkap</span><span class="val">${client.name}</span></div>
           <div class="row"><span class="label">Pekerjaan</span><span class="val">${client.job}</span></div>
@@ -296,7 +296,7 @@ export const generateInsuranceReportHtml = (data: any) => {
       <div class="section-prevent-split">
         <div class="section-title">02. Profil Konsultan</div>
         <div class="info-card">
-          <div class="row"><span class="label">Nama Agen</span><span class="val">${agent.name}</span></div>
+          <div class="row"><span class="label">Konsultan / Perencana</span><span class="val">${agent.name}</span></div>
           <div class="row"><span class="label">Perusahaan</span><span class="val">${agent.companyName}</span></div>
           <div class="row"><span class="label">Level</span><span class="val">${agent.level}</span></div>
           <div class="row" style="margin-top: 22px;"><span class="label">Metode Analisa</span><span class="val">Needs Approach</span></div>
