@@ -114,12 +114,6 @@ export const checkupReportTemplate = `
       display: flex; flex-direction: column; justify-content: center;
       position: relative;
     }
-    /* Agent Badge in Header */
-    .agent-badge {
-      position: absolute; top: 10px; right: 10px;
-      font-size: 8px; background: rgba(255,255,255,0.2); 
-      padding: 2px 8px; border-radius: 4px; text-transform: uppercase;
-    }
 
     .h-image-right-top {
       background-image: url('${assets.checkupImg1}');
@@ -155,12 +149,12 @@ export const checkupReportTemplate = `
       font-size: 28px; font-weight: 800; line-height: 1.1; margin: 0; 
     }
     .sub-heading { text-transform: uppercase; font-size: 10px; letter-spacing: 2px; opacity: 0.9; margin-bottom: 4px; }
-    .agent-name { font-size: 11px; font-weight: 600; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 8px; display: inline-block;}
+    .client-name { font-size: 12px; font-weight: 700; margin-top: 8px; border-top: 1px solid rgba(255,255,255,0.3); padding-top: 6px; display: inline-block; color: white;}
 
     /* --- SECTION TITLE --- */
     .section-title {
       font-size: 11px; font-weight: 800; color: var(--secondary);
-      text-transform: uppercase; letter-spacing: 1.5px;
+      letter-spacing: 1.2px;
       border-bottom: 2px solid var(--border); padding-bottom: 5px; margin-bottom: 15px; margin-top: 25px;
     }
     .section-title:first-of-type { margin-top: 0; }
@@ -173,7 +167,7 @@ export const checkupReportTemplate = `
       background: var(--bg-soft); padding: 10px 15px; border-bottom: 1px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
     }
-    .profile-label { font-size: 10px; font-weight: 700; text-transform: uppercase; color: var(--primary); }
+    .profile-label { font-size: 10px; font-weight: 700; color: var(--primary); }
     
     .profile-content { padding: 15px; display: grid; grid-template-columns: 1fr 1fr; gap: 30px; font-size: 10px; }
     
@@ -191,7 +185,7 @@ export const checkupReportTemplate = `
     }
     
     .review-header {
-      padding: 8px 15px; color: white; font-weight: 700; font-size: 10px; text-transform: uppercase;
+      padding: 8px 15px; color: white; font-weight: 700; font-size: 11px;
       display: flex; justify-content: space-between; align-items: center;
     }
     .bg-neraca { background: #059669; }
@@ -202,9 +196,8 @@ export const checkupReportTemplate = `
     .r-col-title { 
       font-weight: 800; color: var(--secondary); 
       margin-bottom: 8px; 
-      text-transform: uppercase; 
       display: flex; align-items: center; gap: 6px;
-      font-size: 9px;
+      font-size: 10px;
     }
     .dot { width: 6px; height: 6px; border-radius: 50%; }
     .dot-green { background: var(--success); }
@@ -218,7 +211,7 @@ export const checkupReportTemplate = `
     .r-val { font-family: monospace; font-weight: 700; color: var(--dark); }
 
     .r-subtotal {
-      margin-top: 8px; padding-top: 6px; border-top: 2px solid var(--border);
+      padding-top: 6px; border-top: 2px solid var(--border);
       display: flex; justify-content: space-between; align-items: center;
       font-weight: 800; color: var(--dark);
     }
@@ -227,7 +220,7 @@ export const checkupReportTemplate = `
       background: #f8fafc; border-top: 1px solid var(--border);
       padding: 8px 15px; display: flex; justify-content: space-between; align-items: center;
     }
-    .footer-label { font-size: 9px; font-weight: 700; text-transform: uppercase; color: var(--dark); letter-spacing: 1px; }
+    .footer-label { font-size: 10px; font-weight: 700; color: var(--dark); letter-spacing: 0.5px; }
     .footer-val { font-size: 14px; font-weight: 800; font-family: monospace; color: var(--dark); }
     .val-green { color: var(--success); }
     .val-red { color: var(--danger); }
@@ -271,8 +264,8 @@ export const checkupReportTemplate = `
     }
     
     .ratio-head { display: flex; justify-content: space-between; margin-bottom: 4px; }
-    .ratio-title { font-size: 8px; font-weight: 700; text-transform: uppercase; color: var(--secondary); }
-    .ratio-badge { font-size: 7px; padding: 2px 5px; border-radius: 4px; font-weight: 700; text-transform: uppercase; }
+    .ratio-title { font-size: 9px; font-weight: 700; color: #1e293b; }
+    .ratio-badge { font-size: 7.5px; padding: 2px 6px; border-radius: 4px; font-weight: 700; }
     .bg-green { background: #dcfce7; color: #166534; }
     .bg-yellow { background: #fef9c3; color: #854d0e; }
     .bg-red { background: #fee2e2; color: #991b1b; }
@@ -297,10 +290,9 @@ export const checkupReportTemplate = `
     
     <div class="header-grid">
       <div class="h-title-box">
-        <div class="agent-badge">{{agent.level}}</div>
-        <div class="sub-heading">{{agent.company}} - {{agent.agency}}</div>
-        <h1 class="main-heading">Financial<br>Checkup</h1>
-        <div class="agent-name">Prepared by: {{agent.name}}</div>
+        <div class="sub-heading">PERSONAL FINANCIAL REPORT</div>
+        <h1 class="main-heading">Financial<br>Health Checkup</h1>
+        <div class="client-name">{{client.name}}</div>
       </div>
       <div class="h-image-right-top"></div>
       <div class="h-image-left-bottom"></div>
@@ -309,11 +301,11 @@ export const checkupReportTemplate = `
       </div>
     </div>
 
-    <div class="section-title">01. Profil Finansial & Keluarga</div>
+    <div class="section-title">01. Profil Pribadi & Keluarga</div>
     <div class="profile-card">
       <div class="profile-header">
-        <div class="profile-label">Kepala Keluarga</div>
-        <div class="profile-label" style="color:var(--dark);">{{checkDate}}</div>
+        <div class="profile-label">Pengguna</div>
+        <div class="profile-label" style="color:var(--dark);">Tanggal Analisa: {{checkDate}}</div>
       </div>
       <div class="profile-content">
         <div>
@@ -355,21 +347,24 @@ export const checkupReportTemplate = `
 
     <div class="review-card">
       <div class="review-header bg-neraca">
-        <span>Balance Sheet (Posisi Harta)</span>
-        <span>IDR</span>
+        <span>Neraca Keuangan</span>
       </div>
-      <div class="grid-2 review-body">
-        <div>
-          <div class="r-col-title"><span class="dot dot-green"></span> Aset</div>
-          <div class="r-item"><span>Likuid (Cash)</span> <span class="r-val">{{fin.assetCash}}</span></div>
-          <div class="r-item"><span>Personal (Pakai)</span> <span class="r-val">{{fin.assetPersonal}}</span></div>
-          <div class="r-item"><span>Investasi (Tumbuh)</span> <span class="r-val">{{fin.assetInvest}}</span></div>
-          <div class="r-subtotal"><span>TOTAL ASET</span> <span style="color:var(--success)">{{fin.totalAsset}}</span></div>
+      <div class="review-body">
+        <div class="grid-2">
+          <div>
+            <div class="r-col-title"><span class="dot dot-green"></span> Aset</div>
+            <div class="r-item"><span>Likuid (Cash)</span> <span class="r-val">{{fin.assetCash}}</span></div>
+            <div class="r-item"><span>Personal (Pakai)</span> <span class="r-val">{{fin.assetPersonal}}</span></div>
+            <div class="r-item"><span>Investasi (Tumbuh)</span> <span class="r-val">{{fin.assetInvest}}</span></div>
+          </div>
+          <div>
+            <div class="r-col-title"><span class="dot dot-red"></span> Utang</div>
+            <div class="r-item"><span>Jangka Pendek</span> <span class="r-val">{{fin.debtShort}}</span></div>
+            <div class="r-item"><span>Jangka Panjang</span> <span class="r-val">{{fin.debtLong}}</span></div>
+          </div>
         </div>
-        <div>
-          <div class="r-col-title"><span class="dot dot-red"></span> Utang</div>
-          <div class="r-item"><span>Jangka Pendek</span> <span class="r-val">{{fin.debtShort}}</span></div>
-          <div class="r-item"><span>Jangka Panjang</span> <span class="r-val">{{fin.debtLong}}</span></div>
+        <div class="grid-2" style="margin-top: 10px;">
+          <div class="r-subtotal"><span>TOTAL ASET</span> <span style="color:var(--success)">{{fin.totalAsset}}</span></div>
           <div class="r-subtotal"><span>TOTAL UTANG</span> <span style="color:var(--danger)">{{fin.totalDebt}}</span></div>
         </div>
       </div>
@@ -381,33 +376,36 @@ export const checkupReportTemplate = `
 
     <div class="review-card">
       <div class="review-header bg-arus">
-        <span>Cashflow (Aliran Uang Bulanan)</span>
-        <span>Estimasi</span>
+        <span>Catatan Arus Kas</span>
       </div>
-      <div class="grid-2 review-body">
-        <div>
-          <div class="r-col-title"><span class="dot dot-green"></span> Pemasukan</div>
-          <div class="r-item"><span>Gaji Tetap</span> <span class="r-val">{{fin.incomeFixed}}</span></div>
-          <div class="r-item"><span>Non-Tetap</span> <span class="r-val">{{fin.incomeVariable}}</span></div>
-          <div class="r-subtotal"><span>TOTAL MASUK</span> <span style="color:var(--primary)">{{fin.totalIncome}}</span></div>
+      <div class="review-body">
+        <div class="grid-2">
+          <div>
+            <div class="r-col-title"><span class="dot dot-green"></span> Pemasukan</div>
+            <div class="r-item"><span>Pendapatan Tetap</span> <span class="r-val">{{fin.incomeFixed}}</span></div>
+            <div class="r-item"><span>Pendapatan Tidak Tetap / Variabel</span> <span class="r-val">{{fin.incomeVariable}}</span></div>
+          </div>
+          <div>
+            <div class="r-col-title"><span class="dot dot-red"></span> Pengeluaran</div>
+            <div class="r-item"><span>Cicilan Utang</span> <span class="r-val">{{fin.expenseDebt}}</span></div>
+            <div class="r-item"><span>Premi Asuransi</span> <span class="r-val">{{fin.expenseInsurance}}</span></div>
+            <div class="r-item"><span>Biaya Hidup</span> <span class="r-val">{{fin.expenseLiving}}</span></div>
+          </div>
         </div>
-        <div>
-          <div class="r-col-title"><span class="dot dot-red"></span> Pengeluaran</div>
-          <div class="r-item"><span>Cicilan Utang</span> <span class="r-val">{{fin.expenseDebt}}</span></div>
-          <div class="r-item"><span>Premi Asuransi</span> <span class="r-val">{{fin.expenseInsurance}}</span></div>
-          <div class="r-item"><span>Biaya Hidup</span> <span class="r-val">{{fin.expenseLiving}}</span></div>
-          <div class="r-subtotal"><span>TOTAL KELUAR</span> <span style="color:var(--danger)">{{fin.totalExpense}}</span></div>
+        <div class="grid-2" style="margin-top: 10px;">
+          <div class="r-subtotal"><span>TOTAL PENDAPATAN</span> <span style="color:var(--primary)">{{fin.totalIncome}}</span></div>
+          <div class="r-subtotal"><span>TOTAL PENGELUARAN</span> <span style="color:var(--danger)">{{fin.totalExpense}}</span></div>
         </div>
       </div>
       <div class="card-footer">
-        <div class="footer-label">Sisa Uang (Surplus / Defisit)</div>
+        <div class="footer-label">Surplus / Defisit</div>
         <div class="footer-val {{fin.surplusColor}}">{{fin.surplusDeficit}}</div>
       </div>
     </div>
 
     <div class="page-footer">
-      <div>Financial Checkup Report</div>
-      <div>{{agent.company}} • Confidential</div>
+      <div>Financial Health Checkup Report</div>
+      <div>KeuanganKu • Perencanaan Finansial Pribadi</div>
     </div>
   </div>
 
@@ -428,13 +426,12 @@ export const checkupReportTemplate = `
       03. Ringkasan Eksekutif
     </div>
     <div class="summary-box">
-      Kondisi keuangan saat ini berstatus <strong>{{globalStatus}}</strong>. 
-      Terdapat <strong>{{healthyCount}} indikator Sehat</strong> dan <strong>{{warningCount}} indikator Perlu Perhatian</strong>. 
-      Segera konsultasikan dengan agen Anda untuk memperbaiki rasio yang berwarna merah/kuning di bawah ini.
+      Kondisi keuangan Anda saat ini berada dalam kategori <strong>{{globalStatus}}</strong>. Sebagian indikator telah menunjukkan kondisi yang sehat, namun masih terdapat beberapa aspek yang perlu mendapat perhatian dan perbaikan.<br><br>
+      Kenali indikator yang belum optimal, pahami penyebabnya, dan tentukan langkah perbaikan agar kondisi keuangan Anda semakin sehat.
     </div>
 
     <div class="section-title">
-      04. Analisa 8 Indikator Vital
+      04. Analisa 8 Indikator Rasio Keuangan
     </div>
 
     <div class="ratio-container">
@@ -456,8 +453,8 @@ export const checkupReportTemplate = `
     </div>
 
     <div class="page-footer">
-      <div>Financial Checkup Report</div>
-      <div>{{agent.company}} • Confidential</div>
+      <div>Financial Health Checkup Report</div>
+      <div>KeuanganKu • Perencanaan Finansial Pribadi</div>
     </div>
 
   </div>
