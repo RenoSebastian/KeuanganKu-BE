@@ -255,7 +255,7 @@ export class AdminSubscriptionService {
             await this.notificationService.createAndSend({
                 userId: order.userId,
                 title: 'Pembayaran Ditolak',
-                message: `Verifikasi gagal: ${dto.adminNotes || 'Bukti tidak valid'}. Akses Pro Anda telah dicabut.`,
+                message: `Verifikasi gagal: ${dto.adminNotes || 'Bukti tidak valid'}. Akses Paket ${order.plan.name} dicabut dan akun Anda kembali ke Paket Bronze (Gratis).`,
                 type: NotificationType.ERROR,
                 category: NotificationCategory.PAYMENT,
                 metadata: { orderId: order.id },

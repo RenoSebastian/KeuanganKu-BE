@@ -4,49 +4,50 @@ import {
     ForbiddenException,
 } from '@nestjs/common';
 import { PrismaService } from '../../../../../prisma/prisma.service';
-import { NotificationService } from '../../../notification/notification.service';
-import { NotificationType, NotificationCategory, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
+import {
+    getUpgradeMessageForFeature,
+    isFeatureAllowedForTier,
+    normalizeModuleToFeature,
+    resolveEffectiveTier,
+} from '../../../../common/constants/tier-features.constant';
 
 @Injectable()
 export class FinancialQuotaService {
     private readonly logger = new Logger(FinancialQuotaService.name);
 
-    constructor(
-        private readonly prisma: PrismaService,
-        private readonly notificationService: NotificationService,
-    ) { }
+    constructor(private readonly prisma: PrismaService) { }
 
     /**
-     * Core Logic: Validasi Akses & Potong Kuota
-     * [UPDATED - Step 3 & 4] Mendukung Transaction Propagation (txContext) dan Module Type Idempotency.
+     * Defense-in-Depth Feature Gate & Usage Telemetry (Unlimited Usage per Tier).
+     * Memastikan user hanya dapat mengeksekusi modul yang termasuk dalam tier aktifnya
+     * (BRONZE / SILVER / GOLD) tanpa lagi membatasi atau memotong kuota token.
      */
     async validateAndDeductQuota(
         userId: string,
         sessionId: string,
-        moduleType: string, // Step 4: Pencegahan eksploitasi token antar modul
-        txContext?: Prisma.TransactionClient // Step 3: Menerima konteks transaksi dari luar
+        moduleType: string,
+        txContext?: Prisma.TransactionClient,
     ): Promise<boolean> {
-
-        // Gunakan transaksi bawaan jika dikirim, atau gunakan instance prisma utama
         const db = txContext || this.prisma;
 
-        // 1. Cek Status PRO (Unlimited Pass) & Grace Period
+        // 1. Cek Tier Efektif User dari Subscription + Plan
         const subscription = await db.userSubscription.findUnique({
             where: { userId },
+            include: { plan: true },
         });
 
-        const now = new Date();
-        const isPro = subscription && (
-            (subscription.status === 'ACTIVE' && subscription.endDate && new Date(subscription.endDate) > now) ||
-            (subscription.status === 'GRACE_PERIOD' && subscription.gracePeriodEndDate && new Date(subscription.gracePeriodEndDate) > now)
-        );
+        const effectiveTier = resolveEffectiveTier(subscription);
+        const feature = normalizeModuleToFeature(moduleType);
 
-        if (isPro) {
-            return true; // Bypass untuk User PRO & Grace Period Aktif
+        if (feature && !isFeatureAllowedForTier(effectiveTier, feature)) {
+            this.logger.warn(
+                `[SERVICE TIER GATE] User ${userId} (${effectiveTier}) ditolak mengakses modul ${feature}.`,
+            );
+            throw new ForbiddenException(getUpgradeMessageForFeature(feature));
         }
 
-        // 2. Cek Riwayat Session (Idempotency Check - Revisi Gratis)
-        // [FIXED] Menambahkan moduleType agar session Checkup tidak bisa dipakai untuk Budgeting
+        // 2. Idempotency Check untuk pencatatan statistik totalUsed (FUP & Analytics)
         const existingSession = await db.simulationLog.findFirst({
             where: {
                 agentId: userId,
@@ -56,84 +57,40 @@ export class FinancialQuotaService {
         });
 
         if (existingSession) {
-            return true; // Revisi Gratis (Sudah pernah bayar untuk sesi modul ini)
+            return true;
         }
 
-        // 3. Logic Token untuk User FREE
-        // Fungsi helper untuk mengeksekusi logika kuota (agar bisa dipakai dengan/tanpa txContext luar)
-        const executeTokenDeduction = async (tx: Prisma.TransactionClient) => {
-            let usage = await tx.userUsage.findUnique({
-                where: { userId },
-            });
+        // 3. Catat statistik penggunaan (totalUsed) tanpa pemotongan kuota (Unlimited)
+        await db.userUsage.upsert({
+            where: { userId },
+            update: {
+                totalUsed: { increment: 1 },
+            },
+            create: {
+                userId,
+                simulationQuota: 0,
+                totalUsed: 1,
+            },
+        });
 
-            // Handle jika user belum punya record usage (Edge Case/New User)
-            if (!usage) {
-                usage = await tx.userUsage.create({
-                    data: { userId, simulationQuota: 10, totalUsed: 0 },
-                });
-            }
+        return true;
+    }
 
-            if (usage.simulationQuota <= 0) {
-                throw new ForbiddenException(
-                    'Kuota simulasi gratis Anda telah habis. Silakan Upgrade ke PRO untuk akses tanpa batas.',
-                );
-            }
+    /**
+     * Validasi akses fitur murni (misal untuk decode file .mgc atau export PDF).
+     */
+    async assertFeatureAccess(userId: string, moduleType: string): Promise<void> {
+        const feature = normalizeModuleToFeature(moduleType);
+        if (!feature) return;
 
-            // Potong 1 Token
-            const updatedUsage = await tx.userUsage.update({
-                where: { userId },
-                data: {
-                    simulationQuota: { decrement: 1 },
-                    totalUsed: { increment: 1 },
-                },
-            });
+        const subscription = await this.prisma.userSubscription.findUnique({
+            where: { userId },
+            include: { plan: true },
+        });
 
-            // Sinkronisasi ke users.quota (Single Source of Truth)
-            await tx.user.update({
-                where: { id: userId },
-                data: { quota: updatedUsage.simulationQuota },
-            });
-
-            // [STEP 4: FIXED] Catat transaksi ini ke Buku Besar (Ledger) untuk Akuntansi & Audit
-            await tx.userQuotaLedger.create({
-                data: {
-                    userId,
-                    amount: -1,
-                    type: 'USAGE_SIMULATION',
-                    referenceId: sessionId,
-                    balanceAfter: updatedUsage.simulationQuota,
-                    description: `Pemotongan kuota untuk simulasi modul ${moduleType}`,
-                }
-            });
-
-            // 4. Trigger Notifikasi jika kuota menipis (Sisa 1)
-            if (updatedUsage.simulationQuota === 1) {
-                // Fire-and-forget notification agar tidak memblokir response
-                setImmediate(() => {
-                    this.notificationService
-                        .createAndSend({
-                            userId,
-                            title: 'Kuota Hampir Habis ⚠️',
-                            message: 'Perhatian! Kuota simulasi gratis Anda tinggal 1 token lagi. Segera upgrade ke PRO untuk layanan tanpa batas.',
-                            type: NotificationType.WARNING,
-                            category: NotificationCategory.QUOTA,
-                        })
-                        .catch((e) =>
-                            this.logger.error('Failed sending quota warning', e),
-                        );
-                });
-            }
-
-            return true;
-        };
-
-        // Delegasi Eksekusi
-        if (txContext) {
-            // Jika sudah berada dalam transaksi gabungan (dari CalculatorService), jalankan langsung
-            return executeTokenDeduction(txContext);
-        } else {
-            // Jika dipanggil secara terisolasi, buat transaksi baru (Fallback)
-            return this.prisma.$transaction(executeTokenDeduction);
+        const effectiveTier = resolveEffectiveTier(subscription);
+        if (!isFeatureAllowedForTier(effectiveTier, feature)) {
+            throw new ForbiddenException(getUpgradeMessageForFeature(feature));
         }
     }
 }

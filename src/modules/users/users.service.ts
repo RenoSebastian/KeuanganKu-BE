@@ -13,6 +13,11 @@ import { EditUserDto } from './dto/edit-user.dto';
 import { UpdateProfileDto } from './dto/update-user.dto'; // Disesuaikan ke file DTO baru
 import { AuditService } from '../audit/audit.service';
 import { formatToWhatsAppNumber } from '../../common/utils/phone-formatter.util';
+import {
+  getAllowedFeaturesForTier,
+  resolveEffectiveTier,
+  TIER_DISPLAY_NAME,
+} from '../../common/constants/tier-features.constant';
 
 // [FASE 2] Import gateway untuk implementasi Observer Pattern (Event-Driven)
 import { NotificationGateway } from '../notification/notification.gateway';
@@ -62,48 +67,59 @@ export class UsersService {
     // ===============================================================
 
     let remainingDays = 0;
-    let isPro = false;
+    let isPaidActive = false;
     let subStatus = 'INACTIVE';
 
-    // 1. Subscription Countdown Logic
+    // 1. Subscription Countdown & Tier Resolution Logic
+    const nowDate = new Date();
+    const effectiveTier = resolveEffectiveTier(sanitized.subscription, nowDate);
+    const allowedFeatures = getAllowedFeaturesForTier(effectiveTier);
+
     if (sanitized.subscription && sanitized.subscription.endDate) {
-      const now = new Date().getTime();
+      const now = nowDate.getTime();
       const end = new Date(sanitized.subscription.endDate).getTime();
 
       if (end > now) {
         remainingDays = Math.ceil((end - now) / (1000 * 60 * 60 * 24));
         subStatus = sanitized.subscription.status;
-        isPro = subStatus === 'ACTIVE';
+        isPaidActive = subStatus === 'ACTIVE' || subStatus === 'GRACE_PERIOD';
+      } else if (
+        sanitized.subscription.status === 'GRACE_PERIOD' &&
+        sanitized.subscription.gracePeriodEndDate &&
+        new Date(sanitized.subscription.gracePeriodEndDate).getTime() > now
+      ) {
+        remainingDays = Math.ceil(
+          (new Date(sanitized.subscription.gracePeriodEndDate).getTime() - now) / (1000 * 60 * 60 * 24),
+        );
+        subStatus = 'GRACE_PERIOD';
+        isPaidActive = true;
       } else {
         subStatus = 'EXPIRED';
       }
     }
 
-    // 2. Fair Usage Policy (FUP) & Usage Analytics Logic
+    // 2. Fair Usage Policy (FUP) & Usage Analytics Logic (Semua Tier Unlimited Usage)
     let healthStatus = 'NORMAL';
     if (sanitized.usage) {
       const used = sanitized.usage.totalUsed || 0;
-      const limit = sanitized.usage.simulationQuota || 0;
-
-      if (isPro) {
-        if (used > 5000) healthStatus = 'CRITICAL';
-        else if (used > 2000) healthStatus = 'WARNING';
-      } else {
-        if (limit <= 0) healthStatus = 'DEPLETED';
-        else if (limit <= 2) healthStatus = 'WARNING';
-      }
+      if (used > 5000) healthStatus = 'CRITICAL';
+      else if (used > 2000) healthStatus = 'WARNING';
     }
 
     return {
       ...sanitized,
       computed: {
         subscription: {
+          tier: effectiveTier,
+          planCode: isPaidActive ? (sanitized.subscription?.plan?.code ?? null) : 'BRONZE_FREE',
+          planName: TIER_DISPLAY_NAME[effectiveTier],
+          allowedFeatures,
           remainingDays,
-          isActive: isPro,
+          isActive: isPaidActive,
           derivedStatus: subStatus,
         },
         usageAnalytics: {
-          isUnlimited: isPro,
+          isUnlimited: true,
           healthStatus,
           totalUsage: sanitized.usage?.totalUsed || 0,
         },

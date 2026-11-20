@@ -6,32 +6,44 @@ import {
     UnauthorizedException,
     Logger,
 } from '@nestjs/common';
-import { PrismaService } from '../../../prisma/prisma.service'; // Pastikan path import sesuai
-import { SubscriptionStatus } from '@prisma/client';
+import { Reflector } from '@nestjs/core';
+import { PrismaService } from '../../../prisma/prisma.service';
+import { REQUIRED_FEATURE_KEY } from '../decorators/require-feature.decorator';
+import {
+    FinancialFeature,
+    getUpgradeMessageForFeature,
+    isFeatureAllowedForTier,
+    resolveEffectiveTier,
+} from '../constants/tier-features.constant';
 
 @Injectable()
 export class SubscriptionGuard implements CanActivate {
     private readonly logger = new Logger(SubscriptionGuard.name);
 
-    // [FASE 4] Ambang batas ekstrem untuk melindungi server dari scraping/abuse oleh akun PRO
+    // Ambang batas ekstrem (Fair Usage Policy) untuk melindungi server dari scraping/abuse
     private readonly FUP_HARD_LIMIT = 10000;
 
-    constructor(private readonly prisma: PrismaService) { }
+    constructor(
+        private readonly prisma: PrismaService,
+        private readonly reflector: Reflector,
+    ) { }
 
     async canActivate(context: ExecutionContext): Promise<boolean> {
         const request = context.switchToHttp().getRequest();
         const user = request.user;
 
-        // 1. Pastikan User sudah Login (Validasi Identitas)
+        // 1. Validasi Identitas User
         if (!user || !user.id) {
             throw new UnauthorizedException('User tidak terautentikasi.');
         }
 
-        // 2. Ambil Data Context Lengkap (Subscription + Usage)
+        // 2. Ambil Data Context Lengkap (Subscription + Plan Tier + Usage)
         const userData = await this.prisma.user.findUnique({
             where: { id: user.id },
             include: {
-                subscription: true,
+                subscription: {
+                    include: { plan: true },
+                },
                 usage: true,
             },
         });
@@ -40,49 +52,34 @@ export class SubscriptionGuard implements CanActivate {
             throw new UnauthorizedException('Data profil tidak ditemukan di database.');
         }
 
-        const now = new Date();
-        const isPro = userData.subscription && (
-            (userData.subscription.status === SubscriptionStatus.ACTIVE &&
-             userData.subscription.endDate &&
-             userData.subscription.endDate > now) ||
-            (userData.subscription.status === SubscriptionStatus.GRACE_PERIOD &&
-             userData.subscription.gracePeriodEndDate &&
-             userData.subscription.gracePeriodEndDate > now)
-        );
-
+        // 3. Evaluasi FUP (Anti-Abuse untuk semua tier)
         const totalUsed = userData.usage?.totalUsed || 0;
-        const remainingQuota = Math.max(userData.usage?.simulationQuota || 0, userData.quota || 0);
-
-        // ====================================================
-        // LEVEL 1: CEK STATUS PREMIUM & FAIR USAGE POLICY (FUP)
-        // ====================================================
-        if (isPro) {
-            // Evaluasi FUP: Mencegah akun PRO melakukan eksploitasi sistem
-            if (totalUsed >= this.FUP_HARD_LIMIT) {
-                this.logger.warn(`[SECURITY ALERT] FUP Breach: User ${user.id} exceeded ${this.FUP_HARD_LIMIT} requests.`);
-                throw new ForbiddenException(
-                    'Akses diblokir sementara karena melanggar Fair Usage Policy (Terdeteksi lalu lintas data tidak wajar). Hubungi Admin.'
-                );
-            }
-            // Lolos sebagai pengguna berbayar (PRO)
-            return true;
+        if (totalUsed >= this.FUP_HARD_LIMIT) {
+            this.logger.warn(
+                `[SECURITY ALERT] FUP Breach: User ${user.id} exceeded ${this.FUP_HARD_LIMIT} requests.`,
+            );
+            throw new ForbiddenException(
+                'Akses diblokir sementara karena melanggar Fair Usage Policy (Terdeteksi lalu lintas data tidak wajar). Hubungi Admin.',
+            );
         }
 
-        // ====================================================
-        // LEVEL 2: CEK KUOTA FREE (HARD LIMIT)
-        // ====================================================
-        // Jika sampai sini, berarti User adalah FREE atau Langganan Expired
-        if (remainingQuota > 0) {
-            // Lolos menggunakan Token Gratis
-            // NOTE: Pengurangan kuota (-1) murni dilakukan di Service Layer, bukan di Guard.
-            return true;
-        }
+        // 4. Resolve Tier Efektif User (BRONZE | SILVER | GOLD)
+        const effectiveTier = resolveEffectiveTier(userData.subscription);
 
-        // ====================================================
-        // LEVEL 3: BLOCKING (GAME OVER)
-        // ====================================================
-        throw new ForbiddenException(
-            'Kuota simulasi gratis Anda telah habis (0). Silakan perpanjang langganan PRO untuk melanjutkan akses.'
+        // 5. Cek Feature Gate jika route memiliki metadata @RequireFeature(...)
+        const requiredFeature = this.reflector.getAllAndOverride<FinancialFeature | undefined>(
+            REQUIRED_FEATURE_KEY,
+            [context.getHandler(), context.getClass()],
         );
+
+        if (requiredFeature && !isFeatureAllowedForTier(effectiveTier, requiredFeature)) {
+            this.logger.warn(
+                `[TIER GATE] User ${user.id} (${effectiveTier}) blocked from accessing ${requiredFeature}.`,
+            );
+            throw new ForbiddenException(getUpgradeMessageForFeature(requiredFeature));
+        }
+
+        // Lolos: Semua tier memiliki penggunaan UNLIMITED untuk fitur yang masuk paketnya
+        return true;
     }
 }

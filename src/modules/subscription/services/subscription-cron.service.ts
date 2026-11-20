@@ -132,7 +132,7 @@ export class SubscriptionCronService {
 
         for (const sub of toExpire) {
             await this.prisma.$transaction(async (tx) => {
-                // 1. Update Status ke EXPIRED
+                // 1. Update Status ke EXPIRED (otomatis jatuh ke Tier BRONZE gratis tanpa batas kuota)
                 await tx.userSubscription.update({
                     where: { id: sub.id },
                     data: {
@@ -140,43 +140,13 @@ export class SubscriptionCronService {
                         updatedAt: new Date(),
                     },
                 });
-
-                // 2. [CORE LOGIC] Parachute / Soft-Landing Strategy
-                // Jangan merusak kuota yang sudah dikumpulkan user.
-                // Hanya berikan subsidi ke angka 3 JIKA sisa kuota mereka di bawah 3.
-                const currentQuota = sub.user.quota;
-
-                if (currentQuota < FREE_TIER_QUOTA_RESET) {
-                    const topUpAmount = FREE_TIER_QUOTA_RESET - currentQuota;
-
-                    await tx.user.update({
-                        where: { id: sub.userId },
-                        data: { quota: FREE_TIER_QUOTA_RESET },
-                    });
-
-                    await tx.userUsage.upsert({
-                        where: { userId: sub.userId },
-                        update: { simulationQuota: FREE_TIER_QUOTA_RESET },
-                        create: { userId: sub.userId, simulationQuota: FREE_TIER_QUOTA_RESET, totalUsed: 0 },
-                    });
-
-                    await tx.userQuotaLedger.create({
-                        data: {
-                            userId: sub.userId,
-                            amount: topUpAmount,
-                            type: QuotaTransactionType.SYSTEM_DOWNGRADE,
-                            balanceAfter: FREE_TIER_QUOTA_RESET,
-                            description: `Masa aktif habis. Subsidi kuota diberikan sebesar ${topUpAmount} token untuk kembali ke Free Tier.`,
-                        },
-                    });
-                }
             });
 
-            // 3. Notifikasi
+            // 2. Notifikasi
             await this.notificationService.createAndSend({
                 userId: sub.userId,
                 title: 'Paket Berakhir 🔒',
-                message: `Masa aktif paket ${sub.plan.name} telah habis. Akun Anda kembali ke status Free User.`,
+                message: `Masa aktif Paket ${sub.plan.name} telah habis. Akun Anda beralih ke Paket Bronze (Gratis) dengan akses tak terbatas pada fitur Rancang Anggaran & Risk Profile.`,
                 type: NotificationType.INFO,
                 category: NotificationCategory.SUBSCRIPTION,
             });

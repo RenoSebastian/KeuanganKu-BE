@@ -48,6 +48,9 @@ import { CreateEducationSimulationDto } from './dto/create-education-simulation.
 // Guards
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../../common/decorators/get-user.decorator';
+import { RequireFeature } from '../../common/decorators/require-feature.decorator';
+import { FinancialFeature } from '../../common/constants/tier-features.constant';
+import { FinancialQuotaService } from './services/core/financial-quota.service';
 import * as client from '@prisma/client';
 
 @ApiTags('Financial Engine')
@@ -60,6 +63,7 @@ export class FinancialController {
     private readonly pdfGeneratorService: PdfGeneratorService,
     private readonly prisma: PrismaService,
     private readonly auditService: AuditService,
+    private readonly financialQuotaService: FinancialQuotaService,
   ) { }
 
   // ===========================================================================
@@ -67,6 +71,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('checkup')
+  @RequireFeature(FinancialFeature.CHECKUP)
   @ApiOperation({ summary: 'Simpan Data Checkup & Jalankan Analisa' })
   async createCheckup(@GetUser('id') userId: string, @Body() dto: CreateFinancialRecordDto) {
     return this.financialService.createCheckup(userId, dto);
@@ -91,6 +96,7 @@ export class FinancialController {
   }
 
   @Get('checkup/pdf/:id')
+  @RequireFeature(FinancialFeature.CHECKUP)
   @ApiOperation({ summary: 'Download PDF Report (Server-Side Generated)' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadCheckupPdf(
@@ -115,6 +121,7 @@ export class FinancialController {
   }
 
   @Get('budget/pdf/:id')
+  @RequireFeature(FinancialFeature.BUDGETING)
   @ApiOperation({ summary: 'Download Budget PDF Report' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadBudgetPdf(@Param('id') id: string, @Res() res: express.Response) {
@@ -137,6 +144,7 @@ export class FinancialController {
   }
 
   @Get('pension/pdf/:id')
+  @RequireFeature(FinancialFeature.PENSION)
   @ApiOperation({ summary: 'Download Pension Plan PDF Report' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadPensionPdf(@Param('id') id: string, @Res() res: express.Response) {
@@ -159,6 +167,7 @@ export class FinancialController {
   }
 
   @Get('insurance/pdf/:id')
+  @RequireFeature(FinancialFeature.INSURANCE)
   @ApiOperation({ summary: 'Download Insurance Plan PDF Report' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadInsurancePdf(@Param('id') id: string, @Res() res: express.Response) {
@@ -185,6 +194,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('budget')
+  @RequireFeature(FinancialFeature.BUDGETING)
   @ApiOperation({ summary: 'Simpan rencana anggaran bulanan' })
   async createBudget(@GetUser('id') userId: string, @Body() dto: CreateBudgetDto) {
     return this.financialService.createBudget(userId, dto);
@@ -201,6 +211,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('calculator/pension')
+  @RequireFeature(FinancialFeature.PENSION)
   @ApiOperation({ summary: 'Hitung & Simpan Rencana Pensiun' })
   async calculatePension(@GetUser('id') userId: string, @Body() dto: CreatePensionDto) {
     return this.financialService.calculateAndSavePension(userId, dto);
@@ -211,6 +222,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('calculator/insurance')
+  @RequireFeature(FinancialFeature.INSURANCE)
   @ApiOperation({ summary: 'Hitung & Simpan Kebutuhan Asuransi' })
   async calculateInsurance(@GetUser('id') userId: string, @Body() dto: CreateInsuranceDto) {
     return this.financialService.calculateAndSaveInsurance(userId, dto);
@@ -221,6 +233,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('goals/simulate')
+  @RequireFeature(FinancialFeature.GOALS)
   @ApiOperation({ summary: 'Simulasi Cepat Tujuan Keuangan (Stateless)' })
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   simulateGoal(@GetUser('id') userId: string, @Body() dto: SimulateGoalDto) {
@@ -228,12 +241,14 @@ export class FinancialController {
   }
 
   @Post('calculator/goals')
+  @RequireFeature(FinancialFeature.GOALS)
   @ApiOperation({ summary: 'Hitung & Simpan Tujuan Keuangan' })
   async calculateGoal(@GetUser('id') userId: string, @Body() dto: CreateGoalDto) {
     return this.financialService.calculateAndSaveGoal(userId, dto);
   }
 
   @Get('goals/pdf/:id')
+  @RequireFeature(FinancialFeature.GOALS)
   @ApiOperation({ summary: 'Download Financial Goal PDF Report' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadGoalPdf(@Param('id') id: string, @Res() res: express.Response) {
@@ -260,6 +275,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('calculator/education')
+  @RequireFeature(FinancialFeature.EDUCATION)
   @ApiOperation({ summary: 'Hitung & Simpan Rencana Pendidikan Anak' })
   async calculateEducation(@GetUser('id') userId: string, @Body() dto: CreateEducationPlanDto) {
     return this.financialService.calculateAndSaveEducation(userId, dto);
@@ -278,6 +294,7 @@ export class FinancialController {
   }
 
   @Get('education/pdf')
+  @RequireFeature(FinancialFeature.EDUCATION)
   @ApiOperation({ summary: 'Download Education Plan PDF (All Children)' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadEducationPdf(@GetUser('id') userId: string, @Res() res: express.Response) {
@@ -319,6 +336,7 @@ export class FinancialController {
   }
 
   @Get('checkup/history/pdf/:id')
+  @RequireFeature(FinancialFeature.CHECKUP)
   @ApiOperation({ summary: 'Download History PDF Report' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async downloadHistoryPdf(@Param('id') id: string, @GetUser('id') userId: string, @Res() res: express.Response) {
@@ -342,6 +360,7 @@ export class FinancialController {
   // ===========================================================================
 
   @Post('simulation/risk-profile')
+  @RequireFeature(FinancialFeature.RISK_PROFILE)
   @ApiOperation({ summary: 'Kalkulasi Profil Risiko (Stateless)' })
   @Throttle({ default: { limit: 20, ttl: 60000 } })
   @ApiResponse({ status: 200, type: RiskProfileResponseDto })
@@ -350,6 +369,7 @@ export class FinancialController {
   }
 
   @Post('simulation/risk-profile-pdf')
+  @RequireFeature(FinancialFeature.RISK_PROFILE)
   @ApiOperation({ summary: 'Simulasi Risk Profile & Download PDF Langsung' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createRiskProfileSimulation(
@@ -364,9 +384,9 @@ export class FinancialController {
       action: 'SIMULATE_RISK_PROFILE',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated risk profile simulation for client ${dto.clientName}`,
+      details: `User ${user.fullName} generated risk profile simulation for ${dto.clientName}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem',
+      userAgent: 'KeuanganKuPWA',
     });
 
     res.set({
@@ -381,6 +401,7 @@ export class FinancialController {
   }
 
   @Post('export/risk-profile-pdf')
+  @RequireFeature(FinancialFeature.RISK_PROFILE)
   @ApiOperation({ summary: 'Generate PDF Laporan Profil Risiko (Legacy)' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async exportRiskProfilePdf(
@@ -405,17 +426,18 @@ export class FinancialController {
       action: 'EXPORT_PDF',
       entity: 'RiskProfileSimulation',
       entityId: 'STATELESS',
-      details: `Agent generated Risk Profile PDF for client: ${data.clientName}`,
+      details: `User generated Risk Profile PDF for: ${data.clientName}`,
     });
 
     res.end(pdfBuffer);
   }
 
   // ===========================================================================
-  // MODULE 8: AGENT BUDGET SIMULATION (STATELESS STREAMING)
+  // MODULE 8: BUDGET SIMULATION (STATELESS STREAMING)
   // ===========================================================================
 
   @Post('simulation/budget')
+  @RequireFeature(FinancialFeature.BUDGETING)
   @ApiOperation({ summary: 'Simulasi Budget & Download PDF Langsung' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createBudgetSimulation(
@@ -430,9 +452,9 @@ export class FinancialController {
       action: 'SIMULATE_BUDGET',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated stateless simulation for client ${dto.clientName}`,
+      details: `User ${user.fullName} generated stateless budget simulation for ${dto.clientName}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
+      userAgent: 'KeuanganKuPWA'
     });
 
     res.set({
@@ -450,22 +472,31 @@ export class FinancialController {
   @ApiOperation({ summary: 'Decode Token Simulasi (.mgc)' })
   @Throttle({ default: { limit: 50, ttl: 60000 } })
   async decodeSimulation(@GetUser('id') userId: string, @Body() dto: ImportSimulationDto) {
+    const decoded: any = await this.financialService.verifyAndDecodeSimulationToken(dto);
+
+    // Validasi Feature Gate terhadap modul di dalam file .mgc agar tidak ada celah bypass via import
+    const decodedModule = decoded?.type || decoded?.moduleType || decoded?.module;
+    if (decodedModule) {
+      await this.financialQuotaService.assertFeatureAccess(userId, decodedModule);
+    }
+
     await this.auditService.logActivity({
       userId,
       action: 'IMPORT_SIMULATION',
       entity: 'SimulationToken',
       entityId: 'STATELESS',
-      details: 'Agent imported a .mgc simulation file'
+      details: 'User imported a .mgc simulation file'
     });
 
-    return this.financialService.verifyAndDecodeSimulationToken(dto);
+    return decoded;
   }
 
   // ===========================================================================
-  // MODULE 9: AGENT INSURANCE SIMULATION (STATELESS STREAMING)
+  // MODULE 9: INSURANCE SIMULATION (STATELESS STREAMING)
   // ===========================================================================
 
   @Post('simulation/insurance')
+  @RequireFeature(FinancialFeature.INSURANCE)
   @ApiOperation({ summary: 'Simulasi Asuransi & Download PDF Langsung' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createInsuranceSimulation(
@@ -480,9 +511,9 @@ export class FinancialController {
       action: 'SIMULATE_INSURANCE',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated insurance simulation for client ${dto.clientName}`,
+      details: `User ${user.fullName} generated insurance simulation for ${dto.clientName}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
+      userAgent: 'KeuanganKuPWA'
     });
 
     res.set({
@@ -497,10 +528,11 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 10: AGENT PENSION SIMULATION (STATELESS STREAMING)
+  // MODULE 10: PENSION SIMULATION (STATELESS STREAMING)
   // ===========================================================================
 
   @Post('simulation/pension')
+  @RequireFeature(FinancialFeature.PENSION)
   @ApiOperation({ summary: 'Simulasi Pensiun & Download PDF Langsung' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createPensionSimulation(
@@ -515,9 +547,9 @@ export class FinancialController {
       action: 'SIMULATE_PENSION',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated pension simulation for client ${dto.clientName}`,
+      details: `User ${user.fullName} generated pension simulation for ${dto.clientName}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
+      userAgent: 'KeuanganKuPWA'
     });
 
     res.set({
@@ -532,10 +564,11 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 11: AGENT GOAL SIMULATION (STATELESS STREAMING)
+  // MODULE 11: GOAL SIMULATION (STATELESS STREAMING)
   // ===========================================================================
 
   @Post('simulation/goals')
+  @RequireFeature(FinancialFeature.GOALS)
   @ApiOperation({ summary: 'Simulasi Tujuan Keuangan & Download PDF Langsung' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createGoalSimulation(
@@ -550,9 +583,9 @@ export class FinancialController {
       action: 'SIMULATE_GOAL',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated goal simulation for client ${dto.clientName}`,
+      details: `User ${user.fullName} generated goal simulation for ${dto.clientName}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
+      userAgent: 'KeuanganKuPWA'
     });
 
     res.set({
@@ -567,10 +600,11 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 12: AGENT FINANCIAL CHECKUP SIMULATION (BASE64 JSON PIPELINE)
+  // MODULE 12: FINANCIAL CHECKUP SIMULATION (BASE64 JSON PIPELINE)
   // ===========================================================================
 
   @Post('simulation/checkup')
+  @RequireFeature(FinancialFeature.CHECKUP)
   @ApiOperation({ summary: 'Simulasi Financial Checkup (JSON + Base64 PDF)' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createCheckupSimulation(
@@ -584,9 +618,9 @@ export class FinancialController {
       action: 'SIMULATE_CHECKUP',
       entity: 'SimulationLog',
       entityId: 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated checkup simulation for client ${dto.client?.name || 'Unknown'}`,
+      details: `User ${user.fullName} generated checkup simulation for ${dto.client?.name || 'Unknown'}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
+      userAgent: 'KeuanganKuPWA'
     });
 
     return {
@@ -598,10 +632,11 @@ export class FinancialController {
   }
 
   // ===========================================================================
-  // MODULE 13: AGENT EDUCATION SIMULATION (SINGLE ENDPOINT - BASE64 PIPELINE)
+  // MODULE 13: EDUCATION SIMULATION (SINGLE ENDPOINT - BASE64 PIPELINE)
   // ===========================================================================
 
   @Post('simulation/education')
+  @RequireFeature(FinancialFeature.EDUCATION)
   @ApiOperation({ summary: 'Simulasi Pendidikan (JSON + Base64 PDF)' })
   @Throttle({ default: { limit: 5, ttl: 60000 } })
   async createEducationSimulation(
@@ -615,9 +650,9 @@ export class FinancialController {
       action: 'SIMULATE_EDUCATION',
       entity: 'SimulationLog',
       entityId: result.simulationId || 'ANONYMOUS',
-      details: `Agent ${user.fullName} generated education simulation for client ${dto.clientName}`,
+      details: `User ${user.fullName} generated education simulation for ${dto.clientName}`,
       ip: '0.0.0.0',
-      userAgent: 'AgentSystem'
+      userAgent: 'KeuanganKuPWA'
     });
 
     return {
@@ -631,13 +666,13 @@ export class FinancialController {
   }
 
   @Post('simulation/education/export-pdf')
+  @RequireFeature(FinancialFeature.EDUCATION)
   @ApiOperation({ summary: 'Export PDF Pendidikan (Stateless untuk Sesi Import MGC)' })
   @Throttle({ default: { limit: 10, ttl: 60000 } })
   async exportEducationPdf(
     @GetUser() user: client.User,
     @Body() dto: CreateEducationSimulationDto,
   ) {
-    // Kita by-pass database & kuota, langsung suruh Service menggambar PDF Buffer-nya
     const pdfBuffer = await this.pdfGeneratorService.generateEducationSimulationPdf(dto as any, user);
 
     return {

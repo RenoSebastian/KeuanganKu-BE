@@ -5,6 +5,11 @@ import { CreateSubscriptionOrderDto } from '../dto/create-subscription-order.dto
 import { SubscriptionStatus, VerificationStatus, VoucherUsageStatus } from '@prisma/client';
 import { NotificationGateway } from '../../notification/notification.gateway';
 import { VoucherService } from './voucher.service';
+import {
+    resolveEffectiveTier,
+    TIER_DISPLAY_NAME,
+    TIER_RANK,
+} from '../../../common/constants/tier-features.constant';
 
 @Injectable()
 export class SubscriptionService {
@@ -100,6 +105,18 @@ export class SubscriptionService {
             throw new NotFoundException('Paket langganan tidak ditemukan atau tidak aktif');
         }
 
+        // 2.1 Validasi Anti-Downgrade (Mencegah user Gold aktif menimpa paketnya ke Silver secara tidak sengaja)
+        const existingSubPrecheck = await this.prisma.userSubscription.findUnique({
+            where: { userId },
+            include: { plan: true },
+        });
+        const currentEffectiveTier = resolveEffectiveTier(existingSubPrecheck);
+        if (TIER_RANK[plan.tier] < TIER_RANK[currentEffectiveTier]) {
+            throw new BadRequestException(
+                `Anda sedang berlangganan Paket ${TIER_DISPLAY_NAME[currentEffectiveTier]} yang masih aktif. Tidak dapat berpindah ke Paket ${TIER_DISPLAY_NAME[plan.tier]} sebelum masa aktif berakhir.`,
+            );
+        }
+
         // 2.3 Validasi & Alokasi Kode Unik Aman (Zero Collision)
         let assignedUniqueCode = Number(dto.uniqueCode) || 0;
         if (!assignedUniqueCode || assignedUniqueCode <= 0) {
@@ -161,9 +178,11 @@ export class SubscriptionService {
                 });
             }
 
-            // C. Hitung Tanggal Berakhir (EndDate) - [POINT 2: AKUMULATIF JIKA MASIH AKTIF]
+            // C. Hitung Tanggal Berakhir (EndDate)
+            // Akumulatif hanya untuk perpanjangan tier yang SAMA. Upgrade tier memulai periode baru dari hari ini.
             const currentSub = await tx.userSubscription.findUnique({
                 where: { userId },
+                include: { plan: true },
             });
 
             const now = new Date();
@@ -172,12 +191,14 @@ export class SubscriptionService {
                 currentSub.endDate &&
                 new Date(currentSub.endDate) > now;
 
-            const baseDate = isCurrentActive ? new Date(currentSub.endDate) : now;
+            const isSameTierRenewal = isCurrentActive && currentSub.plan?.tier === plan.tier;
+
+            const baseDate = isSameTierRenewal ? new Date(currentSub.endDate) : now;
             const monthsToAdd = plan.durationMonths && plan.durationMonths > 0 ? plan.durationMonths : 1;
             const endDate = new Date(baseDate);
             endDate.setMonth(endDate.getMonth() + monthsToAdd);
 
-            const startDate = isCurrentActive ? currentSub.startDate : now;
+            const startDate = isSameTierRenewal ? currentSub.startDate : now;
 
             // D. UPSERT UserSubscription (Optimistic Activation)
             const subscription = await tx.userSubscription.upsert({
